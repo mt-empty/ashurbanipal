@@ -344,20 +344,27 @@ implementation parses filter text. Decoded example:
 [
   {"column": "status", "op": "=", "value": "completed"},
   {"logic": "AND", "not": true, "column": "created_at", "op": ">", "value": "2016-01-01"},
-  {"column": "deleted_at", "op": "IS NULL"}
+  {"column": "deleted_at", "op": "IS NULL"},
+  {"logic": "AND", "column": "id", "op": "IN", "value": ["7", "9", "12"]},
+  {"logic": "AND", "column": "total_cents", "op": "BETWEEN", "value": ["100", "5000"]}
 ]
 ```
 
 Structural rules (violations → 400):
 
 - `op` MUST be one of `=`, `!=`, `>`, `<`, `>=`, `<=`, `LIKE`, `ILIKE`,
-  `IS NULL`, `IS NOT NULL` — exactly this set, exactly these spellings.
+  `IN`, `BETWEEN`, `IS NULL`, `IS NOT NULL` — exactly this set, exactly
+  these spellings. There is no `NOT IN` or `NOT BETWEEN` op; `not: true`
+  expresses them.
 - `logic` (`"AND"` or `"OR"`) MUST be absent on the first element and
   present on every subsequent element.
 - `not` is optional and defaults to `false`.
-- `value` MUST be present (a JSON string) for every op except
-  `IS NULL`/`IS NOT NULL`, for which it MUST be absent.
-- At most **10** conditions; more → 400.
+- `value` MUST be absent for `IS NULL`/`IS NOT NULL`. For `IN` it MUST be
+  an array of 1 to 1000 JSON strings; for `BETWEEN`, an array of exactly
+  two JSON strings, the inclusive lower and upper bound. For every other
+  op it MUST be a JSON string.
+- At most **10** conditions; more → 400. An `IN` or `BETWEEN` condition
+  counts as one.
 - Input these rules do not name, such as a key repeated within one object or
   a lone UTF-16 surrogate escape, MAY be accepted or rejected with 400, but
   MUST NOT produce a 5xx. The same holds for `join` (§5.11.1).
@@ -387,12 +394,63 @@ Evaluation rules:
   each operator promises still holds — see `docs/adapter-decisions.md`.
 - Each `value` MUST be bound as a query parameter, never concatenated
   into SQL text.
-- Comparison is applied to the column cast to text in the query itself
-  (Postgres: `column::text OP $n`; see `docs/adapter-decisions.md` for
-  other engines' cast syntax), so one filter works uniformly across
-  `uuid`, `timestamptz`, `jsonb`, etc. Known consequence: `>`/`<`/`>=`/`<=`
-  are lexicographic, wrong for numerics (`"10" < "9"`) — deliberate v1
-  behavior.
+- How a value is compared depends on the column's §5.11.2 class:
+  - **Typed** — a `number`, `float`, `temporal` or `time` column, for
+    every op except `LIKE`/`ILIKE`. The column is compared in its own
+    type against the bound value converted to that type in the query
+    (Postgres: `column OP $n::numeric`), so `10 > 9` and `1.00 = 1`.
+    The per-engine conversions are in `docs/adapter-decisions.md`.
+  - **Text** — every other class, and `LIKE`/`ILIKE` on any class. The
+    column is cast to text in the query itself (Postgres:
+    `column::text OP $n`), so one filter works uniformly across `uuid`,
+    `jsonb`, enums, etc., and compares as strings.
+  - `IS NULL`/`IS NOT NULL` test the column the same way: a typed
+    column itself, any other column through its text cast. (A Postgres
+    composite whose fields are all NULL is itself NULL, yet has text.)
+- Before binding, every value compared typed MUST match its class's form
+  below; otherwise → 400 `invalid_filter`, whose `title` names the column
+  and the expected form. The check makes engines agree: some would
+  otherwise coerce a bad value silently (`'abc'` as `0`). On SQLite,
+  which does not enforce column types, the check MUST be skipped: a
+  stored value need not match its column's declared type, so a cell's own
+  text must still filter back to its row.
+  - `number`: an optional sign, at most 35 digits, then optionally `.`
+    and at most 30 digits (`-12`, `0.5`, `+3.25`). No exponent, `NaN` or
+    infinity.
+  - `float`: the `number` form, optionally followed by an exponent
+    (`1.5e-3`, `2E10`).
+  - `temporal` on a date-only column: `YYYY-MM-DD`. On a timestamp
+    column, that date optionally followed by a space or `T` and a
+    `time` value (`2016-01-01`, `2016-01-01 10:30`,
+    `2016-01-01T10:30:00.5`). The year is 0001–9999 and the date MUST
+    exist (`2016-02-30` → 400).
+  - `time`: `HH:MM`, optionally `:SS`, optionally `.` and 1–6 fraction
+    digits; hours 00–23, minutes and seconds 00–59.
+  - A time-zone offset (`Z`, `±HH`, `±HHMM`, `±HH:MM` or `±HH:MM:SS`)
+    MAY end a value with a time part only on a column whose type carries
+    a time zone (Postgres `timestamptz`, `timetz`), and is honored there;
+    such a column renders its values with one, so a cell's own text
+    always filters back to its row. Anywhere else an offset → 400.
+    Without one, the value is read in the connection's session time
+    zone.
+  - Each form also accepts every other value its engine stores and
+    renders for that type, so a cell's own text always filters back to
+    its row. Postgres: any number of digits, `NaN` and `±Infinity` for
+    `number` and `float`; years above 9999, ` BC` dates and `±infinity`
+    for `temporal`; `24:00` for `time`. MySQL/MariaDB: `TIME` hours up
+    to ±838, and the zero date `0000-00-00`. The per-engine forms are in
+    `docs/adapter-decisions.md`.
+  - A Postgres port MUST render and read dates in ISO form for the
+    operation (`DateStyle` ISO), whatever the server's default, so a
+    cell's text has one of these forms.
+- An engine error that reports a bad value in a filtered query (SQLSTATE
+  `22P02`, `22003`, `22007`, `22008`, `22021` or `22P05`, such as a
+  MySQL cast out of range) MUST be reported as 400 `invalid_filter`, not
+  a 5xx. Any other error is not the filter's: a division by zero in a
+  view stays a 5xx.
+- `IN` matches when the column equals any listed value, compared as
+  above. `BETWEEN` matches `lo <= column AND column <= hi`; a lower bound
+  above the upper one is legal and matches nothing.
 - `not: true` wraps the condition's mapped fragment in `NOT (...)`; it
   MUST NOT have its own operator table.
 - Conditions are joined by their `logic` tokens with SQL's native
@@ -877,7 +935,7 @@ engine would refuse the comparison.
 
 The per-engine mapping from native types to classes, and any engine that
 cannot meet this check exactly, is in `docs/adapter-decisions.md`. The `ON`
-comparison uses the columns' native types, not the text cast of §5.4.2.
+comparison uses the columns' native types.
 
 #### 5.11.3 Filter and sort
 
@@ -886,7 +944,7 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
   addition: each condition MAY carry `join`, an integer position,
   default `0`. Out of range → 400 `invalid_filter`. A condition's `column`
   MUST match a real column of the table at that position.
-- The comparison is applied to that column cast to text, exactly as §5.4.2.
+- The comparison follows that column's class and the value checks of §5.4.2.
   Conditions are combined as §5.4.2 specifies.
 - On §5.4, a condition that carries `join` → 400 `invalid_filter`.
 - `sort` orders by the native type of the column at `sort_join`, as §5.4,

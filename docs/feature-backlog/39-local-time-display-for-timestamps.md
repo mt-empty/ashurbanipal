@@ -124,11 +124,13 @@ UTC: 2026-10-14 01:33:58.296095 Z
 ### 5.3 What does not change
 
 - Cell text, column widths (`features/column-widths.ts`), sorting.
-- **Copy** and **filter by this value** keep the stored text. The server
-  compares the text cast, so a localized string would match nothing.
-- Typed filters keep comparing against the stored text, in the session
+- **Copy** and **filter by this value** keep the stored text. A localized
+  string would not pass the server's value check (`spec/protocol.md`
+  §5.4.2), and the stored text always filters back to its row.
+- Typed filters compare timestamps in their own type, in the session
   zone. A user who types `created_at > 2026-10-14 00:00` gets the host's
-  session-zone meaning, not their browser's.
+  session-zone meaning, not their browser's; an offset is honored only on
+  a `timestamptz` column.
 - Common values. JSON text, copy, and the JSON/SQL copy buttons keep the
   stored string.
 
@@ -220,7 +222,7 @@ stored and get a hover note, `No time zone in the stored value`. The
 switch re-renders fetched rows with no new request, and grow-only widths
 in `column-widths.ts` must reset on change. Copy and filter keep the
 stored text; a timestamp column shows a one-line hint that typed filters
-use the stored text.
+use the session zone.
 
 **Tier 3 — per column.** A clock toggle on each timestamp column header.
 Needs per-table state, so it follows Tier 2.

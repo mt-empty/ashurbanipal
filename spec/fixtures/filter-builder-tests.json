@@ -1,5 +1,39 @@
 {
   "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/protocol.md §5.4.2.",
+  "tables": {
+    "users": {
+      "id": {"type": "uuid", "class": "uuid"},
+      "email": {"type": "text", "class": "text"},
+      "full_name": {"type": "text", "class": "text"},
+      "age": {"type": "smallint", "class": "number"},
+      "is_active": {"type": "boolean", "class": "boolean"},
+      "login_count": {"type": "integer", "class": "number"},
+      "metadata": {"type": "jsonb", "class": "json"},
+      "last_login_at": {"type": "timestamp with time zone", "class": "temporal"},
+      "created_at": {"type": "timestamp with time zone", "class": "temporal"}
+    },
+    "orders": {
+      "id": {"type": "uuid", "class": "uuid"},
+      "user_id": {"type": "uuid", "class": "uuid"},
+      "status": {"type": "USER-DEFINED", "class": "enum"},
+      "total_cents": {"type": "integer", "class": "number"},
+      "discount_pct": {"type": "numeric", "class": "number"},
+      "tags": {"type": "ARRAY", "class": "array"},
+      "line_items": {"type": "jsonb", "class": "json"},
+      "created_at": {"type": "timestamp with time zone", "class": "temporal"}
+    },
+    "products": {
+      "id": {"type": "bigint", "class": "number"},
+      "sku": {"type": "character varying", "class": "text"},
+      "name": {"type": "text", "class": "text"},
+      "category": {"type": "USER-DEFINED", "class": "enum"},
+      "price": {"type": "numeric", "class": "number"},
+      "weight_kg": {"type": "real", "class": "float"},
+      "in_stock": {"type": "boolean", "class": "boolean"},
+      "description": {"type": "text", "class": "text"},
+      "created_on": {"type": "date", "class": "temporal"}
+    }
+  },
   "cases": [
     {
       "name": "eq-single",
@@ -35,7 +69,7 @@
         }
       ],
       "expect": {
-        "where": "(\"total_cents\"::text >= $1) AND (\"discount_pct\"::text <= $2)",
+        "where": "(\"total_cents\" >= $1::int8) AND (\"discount_pct\" <= $2::numeric)",
         "values": [
           "1",
           "100"
@@ -83,17 +117,17 @@
         },
         {
           "logic": "OR",
-          "column": "in_stock",
+          "column": "sku",
           "op": "=",
-          "value": "true"
+          "value": "TOYS-1001"
         }
       ],
       "expect": {
-        "where": "(\"category\"::text = $1) AND (\"created_on\"::text > $2) OR (\"in_stock\"::text = $3)",
+        "where": "(\"category\"::text = $1) AND (\"created_on\" > $2::date) OR (\"sku\"::text = $3)",
         "values": [
           "electronics",
           "2016-01-01",
-          "true"
+          "TOYS-1001"
         ]
       }
     },
@@ -125,7 +159,7 @@
         }
       ],
       "expect": {
-        "where": "(\"last_login_at\"::text IS NULL)",
+        "where": "(\"last_login_at\" IS NULL)",
         "values": []
       }
     },
@@ -139,7 +173,7 @@
         }
       ],
       "expect": {
-        "where": "(\"last_login_at\"::text IS NOT NULL)",
+        "where": "(\"last_login_at\" IS NOT NULL)",
         "values": []
       }
     },
@@ -154,8 +188,85 @@
         }
       ],
       "expect": {
-        "where": "(NOT (\"last_login_at\"::text IS NULL))",
+        "where": "(NOT (\"last_login_at\" IS NULL))",
         "values": []
+      }
+    },
+    {
+      "name": "is-null-on-a-text-compared-column-tests-its-text",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "metadata",
+          "op": "IS NULL"
+        }
+      ],
+      "expect": {
+        "where": "(\"metadata\"::text IS NULL)",
+        "values": []
+      }
+    },
+    {
+      "name": "pg-date-infinity",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "<",
+          "value": "infinity"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" < $1::date)",
+        "values": [
+          "infinity"
+        ]
+      }
+    },
+    {
+      "name": "pg-date-bc",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "=",
+          "value": "0044-03-15 BC"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" = $1::date)",
+        "values": [
+          "0044-03-15 BC"
+        ]
+      }
+    },
+    {
+      "name": "pg-date-year-above-9999",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "=",
+          "value": "12000-01-01"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" = $1::date)",
+        "values": [
+          "12000-01-01"
+        ]
       }
     },
     {
@@ -215,7 +326,7 @@
         }
       ],
       "expect": {
-        "where": "(\"total_cents\"::text != $1) AND (\"total_cents\"::text > $2) AND (\"total_cents\"::text < $3)",
+        "where": "(\"total_cents\" != $1::int8) AND (\"total_cents\" > $2::int8) AND (\"total_cents\" < $3::int8)",
         "values": [
           "0",
           "1",
@@ -331,7 +442,7 @@
         }
       ],
       "expect": {
-        "where": "(\"total_cents\"::text = $1) AND (\"total_cents\"::text = $2) AND (\"total_cents\"::text = $3) AND (\"total_cents\"::text = $4) AND (\"total_cents\"::text = $5) AND (\"total_cents\"::text = $6) AND (\"total_cents\"::text = $7) AND (\"total_cents\"::text = $8) AND (\"total_cents\"::text = $9) AND (\"total_cents\"::text = $10)",
+        "where": "(\"total_cents\" = $1::int8) AND (\"total_cents\" = $2::int8) AND (\"total_cents\" = $3::int8) AND (\"total_cents\" = $4::int8) AND (\"total_cents\" = $5::int8) AND (\"total_cents\" = $6::int8) AND (\"total_cents\" = $7::int8) AND (\"total_cents\" = $8::int8) AND (\"total_cents\" = $9::int8) AND (\"total_cents\" = $10::int8)",
         "values": [
           "1",
           "1",
@@ -343,6 +454,262 @@
           "1",
           "1",
           "1"
+        ]
+      }
+    },
+    {
+      "name": "typed-number-order",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": ">",
+          "value": "9"
+        }
+      ],
+      "expect": {
+        "where": "(\"total_cents\" > $1::int8)",
+        "values": [
+          "9"
+        ]
+      }
+    },
+    {
+      "name": "typed-numeric-equality",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "discount_pct",
+          "op": "=",
+          "value": "1"
+        }
+      ],
+      "expect": {
+        "where": "(\"discount_pct\" = $1::numeric)",
+        "values": [
+          "1"
+        ]
+      }
+    },
+    {
+      "name": "typed-float",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "weight_kg",
+          "op": "<=",
+          "value": "1.5e1"
+        }
+      ],
+      "expect": {
+        "where": "(\"weight_kg\" <= $1::real)",
+        "values": [
+          "1.5e1"
+        ]
+      }
+    },
+    {
+      "name": "typed-date",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": ">=",
+          "value": "2016-02-29"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" >= $1::date)",
+        "values": [
+          "2016-02-29"
+        ]
+      }
+    },
+    {
+      "name": "typed-timestamptz",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "created_at",
+          "op": "<",
+          "value": "2016-01-01T10:30:00.5"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_at\" < $1::timestamptz)",
+        "values": [
+          "2016-01-01T10:30:00.5"
+        ]
+      }
+    },
+    {
+      "name": "like-on-typed-column-stays-text",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": "LIKE",
+          "value": "1%"
+        }
+      ],
+      "expect": {
+        "where": "(\"total_cents\"::text LIKE $1)",
+        "values": [
+          "1%"
+        ]
+      }
+    },
+    {
+      "name": "in-typed",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "id",
+          "op": "IN",
+          "value": [
+            "1",
+            "2",
+            "3"
+          ]
+        }
+      ],
+      "expect": {
+        "where": "(\"id\" IN ($1::int8, $2::int8, $3::int8))",
+        "values": [
+          "1",
+          "2",
+          "3"
+        ]
+      }
+    },
+    {
+      "name": "in-text",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "sku",
+          "op": "IN",
+          "value": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "expect": {
+        "where": "(\"sku\"::text IN ($1, $2))",
+        "values": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "not-in-enum",
+      "table": "orders",
+      "conditions": [
+        {
+          "not": true,
+          "column": "status",
+          "op": "IN",
+          "value": [
+            "pending"
+          ]
+        }
+      ],
+      "expect": {
+        "where": "(NOT (\"status\"::text IN ($1)))",
+        "values": [
+          "pending"
+        ]
+      }
+    },
+    {
+      "name": "between-typed",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "price",
+          "op": "BETWEEN",
+          "value": [
+            "10",
+            "20.5"
+          ]
+        },
+        {
+          "logic": "AND",
+          "column": "sku",
+          "op": "=",
+          "value": "x"
+        }
+      ],
+      "expect": {
+        "where": "(\"price\" BETWEEN $1::numeric AND $2::numeric) AND (\"sku\"::text = $3)",
+        "values": [
+          "10",
+          "20.5",
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "between-reversed-is-legal",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "price",
+          "op": "BETWEEN",
+          "value": [
+            "20",
+            "10"
+          ]
+        }
+      ],
+      "expect": {
+        "where": "(\"price\" BETWEEN $1::numeric AND $2::numeric)",
+        "values": [
+          "20",
+          "10"
+        ]
+      }
+    },
+    {
+      "name": "not-between-timestamp",
+      "table": "orders",
+      "conditions": [
+        {
+          "not": true,
+          "column": "created_at",
+          "op": "BETWEEN",
+          "value": [
+            "2016-01-01",
+            "2016-12-31 23:59:59"
+          ]
+        }
+      ],
+      "expect": {
+        "where": "(NOT (\"created_at\" BETWEEN $1::timestamptz AND $2::timestamptz))",
+        "values": [
+          "2016-01-01",
+          "2016-12-31 23:59:59"
+        ]
+      }
+    },
+    {
+      "name": "in-single-item",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "IN",
+          "value": [
+            "30"
+          ]
+        }
+      ],
+      "expect": {
+        "where": "(\"age\" IN ($1::int8))",
+        "values": [
+          "30"
         ]
       }
     },
@@ -382,6 +749,139 @@
         }
       ],
       "expect_error": "unknown_column"
+    },
+    {
+      "name": "invalid-number",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": ">",
+          "value": "abc"
+        }
+      ],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "invalid-number-exponent",
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "total_cents",
+          "op": "=",
+          "value": "1e3"
+        }
+      ],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "pg-numeric-has-no-digit-cap",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "orders",
+      "conditions": [
+        {
+          "column": "discount_pct",
+          "op": "=",
+          "value": "111111111111111111111111111111111111"
+        }
+      ],
+      "expect": {
+        "where": "(\"discount_pct\" = $1::numeric)",
+        "values": [
+          "111111111111111111111111111111111111"
+        ]
+      }
+    },
+    {
+      "name": "pg-float-nan",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "weight_kg",
+          "op": "=",
+          "value": "NaN"
+        }
+      ],
+      "expect": {
+        "where": "(\"weight_kg\" = $1::real)",
+        "values": [
+          "NaN"
+        ]
+      }
+    },
+    {
+      "name": "invalid-date",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "=",
+          "value": "2016-02-30"
+        }
+      ],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "time-part-on-date-column",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": ">",
+          "value": "2016-01-01 10:00"
+        }
+      ],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "invalid-item-in-list",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "id",
+          "op": "IN",
+          "value": [
+            "1",
+            "x"
+          ]
+        }
+      ],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "invalid-between-bound",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "price",
+          "op": "BETWEEN",
+          "value": [
+            "1",
+            "ten"
+          ]
+        }
+      ],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "not-does-not-skip-value-check",
+      "table": "orders",
+      "conditions": [
+        {
+          "not": true,
+          "column": "total_cents",
+          "op": "=",
+          "value": "abc"
+        }
+      ],
+      "expect_error": "invalid_value"
     },
     {
       "name": "bad-op",
@@ -447,6 +947,1144 @@
         }
       ],
       "expect_error": "unexpected_value"
+    },
+    {
+      "name": "in-empty-list",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "IN",
+          "value": []
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "in-string-value",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "IN",
+          "value": "1"
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "in-non-string-item",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "IN",
+          "value": [
+            "1",
+            2
+          ]
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "in-null-item",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "IN",
+          "value": [
+            "1",
+            null
+          ]
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "in-over-1000-items",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "IN",
+          "value": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "0"
+          ]
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "between-one-bound",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "price",
+          "op": "BETWEEN",
+          "value": [
+            "1"
+          ]
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "between-three-bounds",
+      "table": "products",
+      "conditions": [
+        {
+          "column": "price",
+          "op": "BETWEEN",
+          "value": [
+            "1",
+            "2",
+            "3"
+          ]
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "array-value-for-eq",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "email",
+          "op": "=",
+          "value": [
+            "a"
+          ]
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "number-value-for-eq",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "=",
+          "value": 5
+        }
+      ],
+      "expect_error": "bad_value"
+    },
+    {
+      "name": "not-in-is-not-an-op",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "age",
+          "op": "NOT IN",
+          "value": [
+            "1"
+          ]
+        }
+      ],
+      "expect_error": "bad_op"
     },
     {
       "name": "missing-logic",

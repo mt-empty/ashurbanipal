@@ -34,7 +34,7 @@ pub use ashurbanipal::{
     Constraints, DbError, DbSource, IndexInfo, QueryOpts, ReferencedBy, Structure, TableData,
     TableInfo,
 };
-pub use ashurbanipal::{Condition, FilterError, FilterOp, Logic};
+pub use ashurbanipal::{Condition, FilterError, FilterOp, FilterValue, Logic};
 pub use ashurbanipal::{Config, ConfigError, Instance, Limits, Sibling};
 pub use ashurbanipal::{JoinColumnInfo, JoinData, JoinError, JoinOpts, JoinSpec};
 pub use routes::router;

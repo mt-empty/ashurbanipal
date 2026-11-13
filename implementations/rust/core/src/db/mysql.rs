@@ -6,15 +6,15 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 
 use super::{
-    group_referenced_by, no_default_schema, op_sql, ColumnInfo, ColumnPair, ColumnRef,
-    ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    Engine, Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing,
-    Structure, TableData, TableInfo,
+    group_referenced_by, no_default_schema, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck,
+    ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident,
+    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    TableData, TableInfo,
 };
-use crate::filter::{Condition, FilterOp, Logic};
+use crate::filter::ValueForm;
 use crate::join::{
     self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
-    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, UniqueKey,
+    IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, TypedCompare, UniqueKey,
 };
 
 /// Bounds catalog queries (`spec/protocol.md` §6).
@@ -46,64 +46,18 @@ fn quote_ident_mysql(ident: &Ident) -> String {
     format!("`{}`", ident.as_str().replace('`', "``"))
 }
 
-/// Builds MySQL filter SQL; map ILIKE through LOWER for collation independence
-/// (`spec/protocol.md` §5.4.2).
-fn build_where_clause(
-    conditions: &[Condition],
-    column_names: &[Ident],
-) -> Result<(String, Vec<String>), DbError> {
-    if conditions.is_empty() {
-        return Ok((String::new(), Vec::new()));
-    }
-
-    let mut values = Vec::new();
-    let mut clause = String::new();
-    for (i, condition) in conditions.iter().enumerate() {
-        let column = Ident::find_in(column_names, &condition.column, NotAllowedKind::Column)?;
-        let cast = format!("CAST({} AS CHAR)", quote_ident_mysql(column));
-
-        let inner = if condition.op == FilterOp::Ilike {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            values.push(value);
-            format!("LOWER({cast}) LIKE LOWER(?)")
-        } else if condition.op.takes_value() {
-            let value = condition.value.clone().ok_or_else(|| {
-                DbError::FilterParse(format!("op {:?} requires a value", condition.op.as_wire()))
-            })?;
-            values.push(value);
-            format!("{cast} {} ?", op_sql(condition.op))
-        } else {
-            format!("{cast} {}", op_sql(condition.op))
-        };
-        let wrapped = if condition.not {
-            format!("(NOT ({inner}))")
-        } else {
-            format!("({inner})")
-        };
-
-        if i > 0 {
-            let logic = condition
-                .logic
-                .ok_or_else(|| DbError::FilterParse(format!("condition {i} is missing logic")))?;
-            clause.push_str(match logic {
-                Logic::And => " AND ",
-                Logic::Or => " OR ",
-            });
-        }
-        clause.push_str(&wrapped);
-    }
-    Ok((format!(" where {clause}"), values))
-}
-
 fn cast_text(column: &str) -> String {
     format!("CAST({column} AS CHAR)")
 }
 
-const JOIN_DIALECT: Dialect = Dialect {
+fn cast_param(placeholder: &str, target: &str) -> String {
+    format!("CAST({placeholder} AS {target})")
+}
+
+const DIALECT: Dialect = Dialect {
     quote: quote_ident_mysql,
     cast_text,
+    cast_param,
     numbered: false,
     ilike: IlikeStyle::LoweredLike,
 };
@@ -114,20 +68,38 @@ const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.
      where constraint_schema = ? and table_name = ? \
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
+/// The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
+/// (`spec/protocol.md` §5.4.2); the casts are in `docs/adapter-decisions.md` §5.4.2.
+fn typed_compare(data_type: &str) -> Option<TypedCompare> {
+    let (form, cast) = match data_type.to_ascii_lowercase().as_str() {
+        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
+        | "numeric" => (ValueForm::MysqlDecimal, Some("DECIMAL(65,30)")),
+        "float" => (ValueForm::MysqlFloat, Some("FLOAT")),
+        "double" => (ValueForm::MysqlFloat, Some("DOUBLE")),
+        "date" => (ValueForm::MysqlDate, None),
+        "datetime" | "timestamp" => (ValueForm::MysqlDatetime, None),
+        "time" => (ValueForm::MysqlTime, None),
+        _ => return None,
+    };
+    Some(TypedCompare {
+        form: Some(form),
+        cast,
+        int_cast: None,
+    })
+}
+
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
 fn column_class(data_type: &str, column_type: &str) -> ColumnClass {
+    if let Some(form) = typed_compare(data_type).and_then(|c| c.form) {
+        return ColumnClass::of_form(form);
+    }
     match data_type.to_ascii_lowercase().as_str() {
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
-        | "numeric" => ColumnClass::Number,
         "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => ColumnClass::Text,
-        "date" | "datetime" | "timestamp" => ColumnClass::Temporal,
-        "time" => ColumnClass::Time,
         "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => {
             ColumnClass::Binary
         }
         "uuid" => ColumnClass::Uuid,
         "enum" => ColumnClass::Enum(column_type.to_string()),
-        "float" | "double" => ColumnClass::Float,
         "json" => ColumnClass::Json,
         _ => ColumnClass::Other,
     }
@@ -318,11 +290,11 @@ impl MySqlSource {
             .map(|(name, data_type, comment, collation, column_type)| {
                 // column_type keeps what data_type drops: `tinyint(1)`,
                 // `int unsigned`, an enum's members.
-                let (type_name, class) = if json_columns.contains(&name) {
-                    ("json".to_string(), ColumnClass::Json)
+                let (type_name, class, compare) = if json_columns.contains(&name) {
+                    ("json".to_string(), ColumnClass::Json, None)
                 } else {
                     let class = column_class(&data_type, &column_type);
-                    (column_type, class)
+                    (column_type, class, typed_compare(&data_type))
                 };
                 let (key, references) = if pk_columns.contains(&name) {
                     (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
@@ -333,6 +305,7 @@ impl MySqlSource {
                 };
                 ColMeta {
                     class,
+                    compare,
                     collation,
                     comment: (!comment.is_empty()).then_some(comment),
                     key,
@@ -464,8 +437,9 @@ impl MySqlSource {
 }
 
 /// MySQL has no SELECT privilege gate; map residual error 1142 to `NotAllowed`
-/// (`spec/protocol.md` §2).
-fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
+/// (`spec/protocol.md` §2), and a bad value in a filtered query (a cast out of
+/// range) to a filter error.
+fn map_select_denied(e: sqlx::Error, table: &str, filtered: bool) -> DbError {
     match &e {
         sqlx::Error::Database(db)
             if db
@@ -473,6 +447,11 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
                 .is_some_and(|m| m.number() == 1142) =>
         {
             DbError::not_allowed(NotAllowedKind::NotReadable, format!("table {table:?}"))
+        }
+        sqlx::Error::Database(db)
+            if filtered && db.code().is_some_and(|c| super::is_bad_value_sqlstate(&c)) =>
+        {
+            DbError::FilterParse(format!("value invalid for this backend: {}", db.message()))
         }
         _ => DbError::from(e),
     }
@@ -597,7 +576,7 @@ impl DbSource for MySqlSource {
             .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => build_where_clause(filter, &column_names)?,
+            Some(filter) => join::table_where_clause(filter, &meta, &DIALECT)?,
             None => (String::new(), Vec::new()),
         };
 
@@ -632,7 +611,7 @@ impl DbSource for MySqlSource {
         let mysql_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, table.as_str()))?;
+            .map_err(|e| map_select_denied(e, table.as_str(), !filter_values.is_empty()))?;
         let rows = mysql_rows
             .iter()
             .map(|r| row_to_json(r, columns.iter().map(|c| c.name.as_str())))
@@ -700,7 +679,7 @@ impl DbSource for MySqlSource {
             tables.push(meta.clone());
         }
         let plan = join::plan(spec, tables, &opts)?;
-        let (body, values) = join::build_select(&plan, &JOIN_DIALECT);
+        let (body, values) = join::build_select(&plan, &DIALECT);
 
         // AssertSqlSafe: the statement is built from catalog names and
         // generated aliases only; all values are bound.
@@ -712,7 +691,7 @@ impl DbSource for MySqlSource {
         let mut mysql_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &spec.table))?;
+            .map_err(|e| map_select_denied(e, &spec.table, !values.is_empty()))?;
         tx.commit().await?;
 
         let has_more = mysql_rows.len() > opts.limit as usize;
@@ -1530,7 +1509,14 @@ mod tests {
         use ColumnClass::*;
         assert_eq!(column_class("bigint", "bigint"), Number);
         assert_eq!(column_class("VARCHAR", "varchar(20)"), Text);
+        assert_eq!(column_class("TINYINT", "tinyint(1)"), Number);
+        assert_eq!(column_class("decimal", "decimal(10,2)"), Number);
+        assert_eq!(column_class("date", "date"), Temporal);
         assert_eq!(column_class("datetime", "datetime"), Temporal);
+        assert_eq!(column_class("timestamp", "timestamp(6)"), Temporal);
+        assert_eq!(column_class("time", "time"), Time);
+        assert_eq!(column_class("float", "float"), Float);
+        assert_eq!(column_class("year", "year"), Other);
         assert_eq!(
             column_class("enum", "enum('a','b')"),
             Enum("enum('a','b')".into())

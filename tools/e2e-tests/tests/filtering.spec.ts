@@ -126,3 +126,46 @@ test("column names are not offered mid-condition (past a column the next word is
   expect(suggestions).not.toContain("email");
   expect(suggestions).toContain("IS NULL");
 });
+
+const ageCells = (page: import("@playwright/test").Page) => page.locator('#tbody td[data-col="age"] .cell-text');
+
+test("a number column compares numerically, so age > 9 keeps two-digit ages", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "users");
+  await applyFilter(page, "age > 9");
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect
+    .poll(async () => {
+      const values = await ageCells(page).allTextContents();
+      return values.length > 0 && values.every((v) => Number(v) >= 10);
+    })
+    .toBe(true);
+});
+
+test("IN and BETWEEN cross the wire as arrays and narrow the rows", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "users");
+  const requestPromise = page.waitForRequest((r) => r.url().includes("/tables/data") && r.url().includes("filter="));
+  const filter = page.locator("#filter");
+  await filter.fill("age BETWEEN 20 AND 30 AND NOT age IN (25, 26)");
+  await filter.press("Enter");
+  const request = await requestPromise;
+  expect(JSON.parse(new URL(request.url()).searchParams.get("filter")!)).toEqual([
+    { column: "age", op: "BETWEEN", value: ["20", "30"] },
+    { logic: "AND", not: true, column: "age", op: "IN", value: ["25", "26"] },
+  ]);
+  await expect(page.locator("#error")).toBeEmpty();
+  await expect
+    .poll(async () => {
+      const values = (await ageCells(page).allTextContents()).map(Number);
+      return values.length > 0 && values.every((v) => v >= 20 && v <= 30 && v !== 25 && v !== 26);
+    })
+    .toBe(true);
+});
+
+test("a value that does not fit a number column shows the server's rejection", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "users");
+  await applyFilter(page, "age > abc");
+  await expect(page.locator("#error")).toHaveText(/abc.*age/);
+});

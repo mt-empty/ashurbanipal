@@ -101,7 +101,7 @@ class SchemaIsolationTest {
                     c1.close()
                     c2.close()
 
-                    val catalog = PostgresSource(poolDs, 5, FilterValidator())
+                    val catalog = PostgresSource(poolDs, 5)
                     val opts = QueryOpts(limit = 10, offset = 0, sort = null, descending = false, filter = null)
 
                     val executor = Executors.newFixedThreadPool(8)
@@ -153,7 +153,7 @@ class SchemaIsolationTest {
                 poolName = "no-default-schema-under-test"
             },
         ).use { ds ->
-            val source = PostgresSource(ds, 5, FilterValidator())
+            val source = PostgresSource(ds, 5)
             val listing = source.listSchemas()
             assertNull(listing.default)
             assertTrue(listing.schemas.isNotEmpty())

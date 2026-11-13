@@ -3,6 +3,7 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -214,7 +215,7 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 	plan, err := planJoin(spec, testOrdersUsers(), JoinOpts{
 		Sort: &sort, SortJoin: &sortJoin,
 		Filter: []Condition{
-			{Column: "email", Op: "=", Value: &email, Join: &sortJoin},
+			{Column: "email", Op: "=", Value: StringValue(email), Join: &sortJoin},
 			{Logic: &or, Not: true, Column: "status", Op: "IS NULL"},
 		},
 	})
@@ -234,6 +235,134 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 	}
 	if len(values) != 1 || values[0] != email {
 		t.Errorf("values = %v", values)
+	}
+}
+
+func TestTypedColumnsCompareInTheirOwnType(t *testing.T) {
+	spec, _ := ParseJoin(testJoinJSON)
+	tables := testOrdersUsers()
+	tables[0].columns = append(tables[0].columns, colMeta{
+		name: "total", typeName: "integer", class: classNumber, compare: pgTypedCompare("integer"),
+	})
+	and, or := "AND", "OR"
+	list := func(v ...string) *FilterValue { return &FilterValue{Items: v, List: true} }
+	plan, err := planJoin(spec, tables, JoinOpts{Filter: []Condition{
+		{Column: "total", Op: "BETWEEN", Value: list("1", "9.5")},
+		{Logic: &and, Not: true, Column: "status", Op: "IN", Value: list("a", "b")},
+		{Logic: &or, Column: "total", Op: "LIKE", Value: StringValue("1%")},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlText, values := buildJoinSelect(plan, pgJoinDialect)
+	want := ` where (t0."total" BETWEEN $3::int8 AND $4::numeric) AND (NOT (t0."status"::text IN ($5, $6))) OR (t0."total"::text LIKE $7)`
+	if !strings.Contains(sqlText, want) {
+		t.Errorf("sql missing %q:\n%s", want, sqlText)
+	}
+	if !slices.Equal(values, []string{"1", "9.5", "a", "b", "1%"}) {
+		t.Errorf("values = %v", values)
+	}
+	_, err = planJoin(spec, tables, JoinOpts{Filter: []Condition{{Column: "total", Op: "IN", Value: list("1", "x")}}})
+	var fe *FilterError
+	if !errors.As(err, &fe) || !strings.Contains(fe.Reason, `"x"`) || !strings.Contains(fe.Reason, `"total"`) {
+		t.Errorf("bad value err = %v", err)
+	}
+}
+
+func TestValueForms(t *testing.T) {
+	for _, c := range []struct {
+		form valueForm
+		v    string
+		ok   bool
+	}{
+		{formMysqlDecimal, "-12", true},
+		{formMysqlDecimal, "+3.25", true},
+		{formMysqlDecimal, "0.5", true},
+		{formMysqlDecimal, ".5", false},
+		{formMysqlDecimal, "5.", false},
+		{formMysqlDecimal, "1e3", false},
+		{formMysqlDecimal, "abc", false},
+		{formMysqlDecimal, "", false},
+		{formMysqlDecimal, "NaN", false},
+		{formMysqlDecimal, strings.Repeat("9", 35), true},
+		{formMysqlDecimal, strings.Repeat("9", 36), false},
+		{formMysqlFloat, "1.5e-3", true},
+		{formMysqlFloat, "2E10", true},
+		{formMysqlFloat, "1e", false},
+		{formMysqlFloat, "NaN", false},
+		{formMysqlDate, "2016-02-29", true},
+		{formMysqlDate, "2015-02-29", false},
+		{formMysqlDate, "2016-02-30", false},
+		{formMysqlDate, "0000-00-00", true},
+		{formMysqlDate, "0000-01-01", false},
+		{formMysqlDate, "12000-01-01", false},
+		{formMysqlDate, "2016-01-01 10:00", false},
+		{formMysqlDatetime, "2016-01-01", true},
+		{formMysqlDatetime, "2016-01-01 10:30", true},
+		{formMysqlDatetime, "2016-01-01T10:30:00.123456", true},
+		{formMysqlDatetime, "0000-00-00 00:00:00", true},
+		{formMysqlDatetime, "2016-01-01T10:30:00.1234567", false},
+		{formMysqlDatetime, "2016-01-01T10:30:00Z", false},
+		{formMysqlDatetime, "2016-01-01 ", false},
+		{formMysqlDatetime, "2016-01-01 24:00", false},
+		{formMysqlTime, "23:59:59", true},
+		{formMysqlTime, "-01:00:00", true},
+		{formMysqlTime, "100:00:00.5", true},
+		{formMysqlTime, "838:59:59", true},
+		{formMysqlTime, "839:00:00", false},
+		{formMysqlTime, "9:30", false},
+		{formMysqlTime, "10:60", false},
+		{formPgNumeric, "-12", true},
+		{formPgNumeric, strings.Repeat("9", 40), true},
+		{formPgNumeric, "NaN", true},
+		{formPgNumeric, "-Infinity", true},
+		{formPgNumeric, "1e3", false},
+		{formPgNumeric, "abc", false},
+		{formPgFloat, "1e+300", true},
+		{formPgFloat, "infinity", true},
+		{formPgFloat, "1e", false},
+		{formPgDate, "2016-02-29", true},
+		{formPgDate, "2016-02-30", false},
+		{formPgDate, "12000-01-01", true},
+		{formPgDate, "0044-03-15 BC", true},
+		{formPgDate, "0001-02-29 BC", true},
+		{formPgDate, "0002-02-29 BC", false},
+		{formPgDate, "infinity", true},
+		{formPgDate, "-infinity", true},
+		{formPgDate, "0000-01-01", false},
+		{formPgDate, "0000-00-00", false},
+		{formPgTimestamp, "2016-01-01 10:30", true},
+		{formPgTimestamp, "0044-03-15 10:00:00 BC", true},
+		{formPgTimestamp, "12000-01-01 10:00:00", true},
+		{formPgTimestamp, "2016-01-01 24:00:00", true},
+		{formPgTimestamp, "infinity", true},
+		{formPgTimestamp, "2016-01-01T10:30:00Z", false},
+		{formPgTime, "23:59:59", true},
+		{formPgTime, "24:00", true},
+		{formPgTime, "24:00:00.000", true},
+		{formPgTime, "24:00:01", false},
+		{formPgTime, "10:60", false},
+		{formPgTime, "9:30", false},
+		{formPgTime, "10:00+02", false},
+		{formPgTimestampTz, "2016-01-01 10:00:00+00", true},
+		{formPgTimestampTz, "2016-01-01T10:00:00.5+05:30", true},
+		{formPgTimestampTz, "1890-01-01 00:00:00+00:53:28", true},
+		{formPgTimestampTz, "0044-03-15 10:00:00+00:53:28 BC", true},
+		{formPgTimestampTz, "2016-01-01 10:00-0300", true},
+		{formPgTimestampTz, "2016-01-01 10:00Z", true},
+		{formPgTimestampTz, "2016-01-01", true},
+		{formPgTimestampTz, "-infinity", true},
+		{formPgTimestampTz, "2016-01-01Z", false},
+		{formPgTimestampTz, "2016-01-01 10:00+5", false},
+		{formPgTimestampTz, "2016-01-01 10:00+05:3", false},
+		{formPgTimeTz, "10:00:00+02", true},
+		{formPgTimeTz, "24:00:00+00", true},
+		{formPgTimeTz, "10:00", true},
+		{formPgTimeTz, "10:00+", false},
+	} {
+		if got := c.form.accepts(c.v); got != c.ok {
+			t.Errorf("%v accepts %q = %v, want %v", c.form, c.v, got, c.ok)
+		}
 	}
 }
 
@@ -296,7 +425,12 @@ func TestPgColumnClass(t *testing.T) {
 		{"numeric", "", "", false, classNumber},
 		{"character varying", "", "", false, classText},
 		{"uuid", "", "", false, classUUID},
+		{"smallint", "", "", false, classNumber},
+		{"date", "", "", false, classTemporal},
+		{"timestamp without time zone", "", "", false, classTemporal},
 		{"timestamp with time zone", "", "", false, classTemporal},
+		{"time without time zone", "", "", false, classTime},
+		{"time with time zone", "", "", false, classTime},
 		{"ARRAY", "", "", false, classArray},
 		{"json", "", "", false, classJSON},
 		{"jsonb", "", "", false, classJSON},

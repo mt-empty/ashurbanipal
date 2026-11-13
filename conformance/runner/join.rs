@@ -8,7 +8,7 @@
 //! `COVERAGE.md`); each port covers the `query_timeout` label in its own tests.
 
 use crate::assert::{assert_exact, assert_problem_code, assert_status, key_cmp};
-use crate::backend::{Backend, NotJoinableColumns, SchemaModel};
+use crate::backend::{Backend, NotJoinableColumns, SchemaModel, TypedValueCheck};
 use crate::common::TestServer;
 use serde_json::{json, Value};
 
@@ -338,7 +338,7 @@ async fn columns_selects_and_orders_the_output() {
 }
 
 /// P5.11-FILTER-JOINED: a condition's `join` selects the table its column
-/// belongs to; the text-cast comparison applies to that column.
+/// belongs to; the comparison follows that column's class.
 #[tokio::test]
 async fn filter_on_a_joined_table_column() {
     let srv = TestServer::spawn().await;
@@ -365,6 +365,37 @@ async fn filter_on_a_joined_table_column() {
         rows(&body).iter().all(|r| r[&email_label] == json!(email)),
         "{body:#?}"
     );
+}
+
+/// P5.11-FILTER-TYPED: a joined number column compares numerically, and a
+/// value that does not fit it is `invalid_filter` where the engine checks it.
+#[tokio::test]
+async fn joined_columns_compare_by_their_class() {
+    let srv = TestServer::spawn().await;
+    let mut join = orders_users("inner");
+    join["columns"] = json!([{"join": 0, "column": "id"}, {"join": 1, "column": "age"}]);
+    let filter = json!([{"join": 1, "column": "age", "op": "BETWEEN", "value": ["9", "30"]}]);
+    let body = ok_body(&srv, &join, &[("filter", filter.to_string())]).await;
+    let age = label(&body, 1, "age");
+    assert!(
+        !rows(&body).is_empty(),
+        "some orders belong to users aged 18-30"
+    );
+    assert!(
+        rows(&body).iter().all(|r| {
+            let n: i64 = r[&age].as_str().unwrap().parse().unwrap();
+            (9..=30).contains(&n)
+        }),
+        "{body:#?}"
+    );
+
+    let bad = json!([{"join": 1, "column": "age", "op": "IN", "value": ["x"]}]);
+    let resp = get_join(&srv, &join, &[("filter", bad.to_string())]).await;
+    if Backend::current().typed_value_check() == TypedValueCheck::Enforced {
+        assert_problem_code(resp, 400, "invalid_filter", "age IN (x)").await;
+    } else {
+        assert_status(&resp, 200, "age IN (x), check skipped");
+    }
 }
 
 /// P5.11-SORT: `sort` + `sort_join` order by the column at that position;

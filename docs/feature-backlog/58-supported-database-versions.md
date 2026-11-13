@@ -20,7 +20,7 @@ would have caught it.
 | Engine | Minimum | Newest tested | Why this minimum |
 |---|---|---|---|
 | Postgres | **14** (decided 2026-11-12) | 18 | Multiranges (`anymultirange`) arrived in 14. 13 lost vendor support in Nov 2025. |
-| MySQL | **8.0.13** | 8.4 LTS, then 9.x | `adapter-decisions.md` §5.10 already requires 8.0.13 (`statistics.expression`). 8.0 lost vendor support in Apr 2026, but many hosts still run it. |
+| MySQL | **8.0.17** (decided 2026-11-13) | 8.4 LTS, then 9.x | Typed filter comparison uses `CAST(… AS FLOAT/DOUBLE)`, which arrived in 8.0.17 (`adapter-decisions.md` §5.4.2); `statistics.expression` (§5.10) needs 8.0.13. 8.0 lost vendor support in Apr 2026, but many hosts still run it. |
 | MariaDB | **10.11** | 11.8 LTS | 10.6 lost vendor support in mid-2026. 10.11 and 11.4 are LTS releases. |
 | SQLite | **3.16**, to be confirmed | the version each driver bundles | The `pragma_*` table-valued functions need 3.16 (`adapter-decisions.md` §5.9). |
 

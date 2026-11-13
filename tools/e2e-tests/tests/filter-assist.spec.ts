@@ -18,11 +18,15 @@ test("an operator list follows a column and a space", async ({ page }) => {
     "<=",
     "LIKE",
     "ILIKE",
+    "IN",
+    "BETWEEN",
     "IS NULL",
     "IS NOT NULL",
+    "NOT IN",
+    "NOT BETWEEN",
   ]);
   await page.locator("#filter").fill("status I");
-  await expect(suggestions(page)).toHaveText(["ILIKE", "IS NULL", "IS NOT NULL"]);
+  await expect(suggestions(page)).toHaveText(["ILIKE", "IN", "IS NULL", "IS NOT NULL"]);
 });
 
 test("accepting a column moves on to its operators", async ({ page }) => {
@@ -125,18 +129,18 @@ test("ArrowUp wraps from the top of the suggestions to the bottom, and ArrowDown
   const filter = page.locator("#filter");
   const active = page.locator("#filter-suggest-list button.active");
   await filter.fill("status ");
-  await expect(suggestions(page)).toHaveCount(10);
+  await expect(suggestions(page)).toHaveCount(14);
 
   await filter.press("ArrowUp");
-  await expect(active).toHaveText("IS NOT NULL");
+  await expect(active).toHaveText("NOT BETWEEN");
   await expect(filter).toHaveAttribute("aria-activedescendant", (await active.getAttribute("id")) ?? "");
   await filter.press("ArrowDown");
   await expect(active).toHaveText("=");
   await filter.press("ArrowUp");
   await filter.press("ArrowUp");
-  await expect(active).toHaveText("IS NULL");
+  await expect(active).toHaveText("NOT IN");
   await filter.press("Enter");
-  await expect(filter).toHaveValue(/^status IS NULL/);
+  await expect(filter).toHaveValue(/^status NOT IN/);
 });
 
 test("AND and OR are offered once a letter is typed after a finished condition", async ({ page }) => {

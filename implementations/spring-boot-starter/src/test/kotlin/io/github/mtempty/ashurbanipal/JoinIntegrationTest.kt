@@ -56,7 +56,7 @@ class JoinIntegrationTest {
                 poolName = "join-it-${System.nanoTime()}"
             },
         )
-        return PostgresSource(ds, timeoutSecs, FilterValidator()) to ds
+        return PostgresSource(ds, timeoutSecs) to ds
     }
 
     private fun pair(left: String, leftCol: String, right: String, rightCol: String) = parseJoin(

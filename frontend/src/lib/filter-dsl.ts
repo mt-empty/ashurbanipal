@@ -37,7 +37,7 @@ class FilterDslError extends Error {
   }
 }
 
-type SimpleCondition = { column: string; join?: number; op: FilterOp; value?: string };
+type SimpleCondition = { column: string; join?: number; op: FilterOp; value?: string | string[]; not?: boolean };
 
 // `aliases` are a join view's table aliases in position order (spec/filter-dsl.md
 // §3): qualified columns resolve against them and every condition carries its
@@ -159,19 +159,49 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
   };
   // AND/OR/NOT are always keywords, never bare values — quote them to use
   // as a literal.
-  const parseBareValue = (): string => {
+  const parseBareValue = (stop = ""): string => {
     const start = pos;
-    let value = "";
     let c = peek();
-    while (c !== null && !isWs(c) && c !== "'") {
-      value += c;
+    while (c !== null && !isWs(c) && c !== "'" && !stop.includes(c)) {
       pos += c.length;
       c = peek();
     }
+    const value = input.slice(start, pos);
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
     return value;
+  };
+  const parseValue = (): string => (peek() === "'" ? parseQuotedValue() : parseBareValue());
+  // A bare NULL is rejected where SQL could never match it: x NOT IN (1, NULL)
+  // is never true, and neither is x BETWEEN NULL AND 5.
+  const parseNonNullValue = (stop: string, nullMessage: string): string => {
+    if (peek() === "'") return parseQuotedValue();
+    const start = pos;
+    const value = parseBareValue(stop);
+    if (/^NULL$/i.test(value)) throw err(nullMessage, start);
+    return value;
+  };
+  // A bare list item also stops at , ( and ).
+  const parseListItem = (): string => parseNonNullValue(",()", "NULL cannot be in a list; use IS NULL");
+  const parseBound = (): string => parseNonNullValue("", "NULL cannot be a BETWEEN bound; use IS NULL");
+  const parseList = (): string[] => {
+    skipWsOptional();
+    if (peek() !== "(") throw err("expected ( to start the list", pos);
+    pos += 1;
+    skipWsOptional();
+    if (peek() === ")") throw err("empty list", pos);
+    const items: string[] = [];
+    for (;;) {
+      items.push(parseListItem());
+      skipWsOptional();
+      const c = peek();
+      if (c === null) throw err("unterminated list", pos);
+      pos += 1;
+      if (c === ")") return items;
+      if (c !== ",") throw err("expected , or )", pos - 1);
+      skipWsOptional();
+    }
   };
   // Symbolic operators longest-first so >=/<= aren't misread as >/< plus
   // a bare =... value.
@@ -185,10 +215,10 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
         return sym;
       }
     }
-    throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);
+    throw err("expected operator (one of = != >= <= > < LIKE ILIKE IN BETWEEN, or IS [NOT] NULL)", start);
   };
-  // Speculatively tries the IS [NOT] NULL branch and rewinds to right
-  // after the column if it doesn't apply.
+  // Speculatively tries the word-operator branches (IS [NOT] NULL, [NOT] IN,
+  // [NOT] BETWEEN) and rewinds to right after the column if none applies.
   const parseSimpleCondition = (): SimpleCondition => {
     const { column, join } = parseColumn();
     const afterColumn = pos;
@@ -202,25 +232,43 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
         if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
         return { column, join, op: isNot ? "IS NOT NULL" : "IS NULL" };
       }
+      const notStart = pos;
+      const negated = consumeKeyword("NOT");
+      if (negated) skipWsRequired();
+      const wordOp = (): SimpleCondition | null => {
+        if (consumeKeyword("IN")) return { column, join, op: "IN", value: parseList() };
+        if (!consumeKeyword("BETWEEN")) return null;
+        skipWsRequired();
+        const lo = parseBound();
+        skipWsRequired();
+        if (!consumeKeyword("AND")) throw err("expected AND between the BETWEEN bounds", pos);
+        skipWsRequired();
+        return { column, join, op: "BETWEEN", value: [lo, parseBound()] };
+      };
+      const simple = wordOp();
+      if (simple) return negated ? { ...simple, not: true } : simple;
+      if (negated) throw err("NOT here must be followed by IN or BETWEEN", notStart);
       pos = afterColumn;
     }
     skipWsOptional();
     const op = parseOperator();
     skipWsOptional();
-    const value = peek() === "'" ? parseQuotedValue() : parseBareValue();
-    return { column, join, op, value };
+    return { column, join, op, value: parseValue() };
   };
 
   const conditions: FilterCondition[] = [];
   let pendingLogic: "AND" | "OR" | null = null;
   for (;;) {
     let not = false;
+    const notStart = pos;
     if (matchKeyword("NOT")) {
       pos += 3;
       skipWsRequired();
       not = true;
     }
     const simple = parseSimpleCondition();
+    if (not && simple.not) throw err("double negation", notStart);
+    not = not || simple.not === true;
     // Optional wire fields are omitted, never null/false-filled (§5.4.2).
     const condition: FilterCondition = {
       ...(pendingLogic ? { logic: pendingLogic } : {}),
@@ -256,12 +304,19 @@ export function tryParseFilterDsl(input: string, aliases?: readonly string[]): F
 }
 
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
-// Every cell value is fetched already cast to text in-query, which is
-// exactly what the filter DSL compares against, so it can be spliced
-// straight into a clause without reshaping.
+// Every cell value is fetched as text, and a typed column's text compares
+// equal to its own value, so it can be spliced straight into a clause
+// without reshaping.
+const quoted = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+
 export function quoteFilterValue(value: string): string {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return `'${value.replace(/'/g, "''")}'`;
+  return quoted(value);
+}
+
+// An IN list item also stops at , ( and ), and a bare NULL is rejected there.
+export function quoteListItem(value: string): string {
+  return /[,()]/.test(value) || /^NULL$/i.test(value) ? quoted(value) : quoteFilterValue(value);
 }
 
 // value is omitted for a valueless predicate (IS NULL). quoteFilterValue

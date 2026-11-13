@@ -36,65 +36,6 @@ func quoteIdentMySQL(s string) string {
 	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
 }
 
-// mysqlBuildWhereClause maps ILIKE through LOWER for collation independence
-// (`spec/protocol.md` §5.4.2).
-func mysqlBuildWhereClause(conditions []Condition, columnNames []string) (string, []string, error) {
-	if len(conditions) == 0 {
-		return "", nil, nil
-	}
-	allowed := make(map[string]bool, len(columnNames))
-	for _, c := range columnNames {
-		allowed[c] = true
-	}
-
-	var values []string
-	var clause []byte
-	for i, cond := range conditions {
-		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
-		}
-		if !validOps[cond.Op] {
-			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
-		}
-		cast := fmt.Sprintf("CAST(%s AS CHAR)", quoteIdentMySQL(cond.Column))
-
-		var inner string
-		switch {
-		case cond.Op == "ILIKE":
-			if cond.Value == nil {
-				return "", nil, filterErr("op %q requires a value", cond.Op)
-			}
-			values = append(values, *cond.Value)
-			inner = fmt.Sprintf("LOWER(%s) LIKE LOWER(?)", cast)
-		case opTakesValue(cond.Op):
-			if cond.Value == nil {
-				return "", nil, filterErr("op %q requires a value", cond.Op)
-			}
-			values = append(values, *cond.Value)
-			inner = fmt.Sprintf("%s %s ?", cast, cond.Op)
-		default:
-			inner = fmt.Sprintf("%s %s", cast, cond.Op)
-		}
-
-		wrapped := "(" + inner + ")"
-		if cond.Not {
-			wrapped = "(NOT (" + inner + "))"
-		}
-		if i > 0 {
-			if cond.Logic == nil {
-				return "", nil, filterErr("condition %d is missing logic", i)
-			}
-			if *cond.Logic == "OR" {
-				clause = append(clause, " OR "...)
-			} else {
-				clause = append(clause, " AND "...)
-			}
-		}
-		clause = append(clause, wrapped...)
-	}
-	return " where " + string(clause), values, nil
-}
-
 // MySQLSource implements the MySQL backend (`spec/protocol.md` §5).
 type MySQLSource struct {
 	db         *sql.DB
@@ -125,32 +66,49 @@ func init() {
 }
 
 var mysqlJoinDialect = joinDialect{
-	quote:    quoteIdentMySQL,
-	castText: func(c string) string { return "CAST(" + c + " AS CHAR)" },
-	numbered: false,
-	ilike:    ilikeLoweredLike,
+	quote:     quoteIdentMySQL,
+	castText:  func(c string) string { return "CAST(" + c + " AS CHAR)" },
+	castParam: func(p, target string) string { return "CAST(" + p + " AS " + target + ")" },
+	numbered:  false,
+	ilike:     ilikeLoweredLike,
+}
+
+// mysqlTypedCompare is the typed filter comparison for an
+// information_schema.COLUMNS.DATA_TYPE (spec/protocol.md §5.4.2); the casts
+// are in docs/adapter-decisions.md §5.4.2.
+func mysqlTypedCompare(dataType string) *typedCompare {
+	switch strings.ToLower(dataType) {
+	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
+		return &typedCompare{form: formMysqlDecimal, cast: "DECIMAL(65,30)"}
+	case "float":
+		return &typedCompare{form: formMysqlFloat, cast: "FLOAT"}
+	case "double":
+		return &typedCompare{form: formMysqlFloat, cast: "DOUBLE"}
+	case "date":
+		return &typedCompare{form: formMysqlDate, cast: ""}
+	case "datetime", "timestamp":
+		return &typedCompare{form: formMysqlDatetime, cast: ""}
+	case "time":
+		return &typedCompare{form: formMysqlTime, cast: ""}
+	}
+	return nil
 }
 
 // mysqlColumnClass maps information_schema types to spec/protocol.md
 // §5.11.2 classes (docs/adapter-decisions.md §5.11).
 func mysqlColumnClass(dataType, columnType string) columnClass {
+	if c, ok := typedClass(mysqlTypedCompare(dataType)); ok {
+		return c
+	}
 	switch strings.ToLower(dataType) {
-	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
-		return classNumber
 	case "char", "varchar", "tinytext", "text", "mediumtext", "longtext":
 		return classText
-	case "date", "datetime", "timestamp":
-		return classTemporal
-	case "time":
-		return classTime
 	case "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob":
 		return classBinary
 	case "uuid":
 		return classUUID
 	case "enum":
 		return classEnum(columnType)
-	case "float", "double":
-		return classFloat
 	case "json":
 		return classJSON
 	}
@@ -418,9 +376,12 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 			return tableMeta{}, err
 		}
 		// column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-		col := colMeta{name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType), comment: comment}
+		col := colMeta{
+			name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType),
+			compare: mysqlTypedCompare(dataType), comment: comment,
+		}
 		if jsonColumns[name] {
-			col.typeName, col.class = "json", classJSON
+			col.typeName, col.class, col.compare = "json", classJSON, nil
 		}
 		if collation.Valid {
 			cl := collation.String
@@ -545,12 +506,12 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, timedSelect(variant, c.timeoutSec, body), args...)
 	if err != nil {
-		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table)
+		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table, len(values) > 0)
 	}
 	defer rows.Close()
 	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
 	if err != nil {
-		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table)
+		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table, len(values) > 0)
 	}
 	rows.Close()
 	if err := tx.Commit(); err != nil {
@@ -685,11 +646,17 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 }
 
 // mapSelectDeniedMySQL maps residual error 1142 to NotAllowed: MySQL has no
-// SELECT privilege gate (`spec/protocol.md` §2).
-func mapSelectDeniedMySQL(err error, table string) error {
+// SELECT privilege gate (`spec/protocol.md` §2). A bad value in a filtered
+// query (a cast out of range) is a FilterError.
+func mapSelectDeniedMySQL(err error, table string, filtered bool) error {
 	var myErr *mysql.MySQLError
-	if errors.As(err, &myErr) && myErr.Number == 1142 {
-		return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
+	if errors.As(err, &myErr) {
+		if myErr.Number == 1142 {
+			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
+		}
+		if filtered && isBadValueSQLState(string(myErr.SQLState[:])) {
+			return filterErr("value invalid for this backend: %s", myErr.Message)
+		}
 	}
 	return err
 }
@@ -738,7 +705,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = mysqlBuildWhereClause(opts.Filter, columnNames)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta, mysqlJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}
@@ -759,7 +726,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	// Identifiers spliced here are schema-validated (realSchema via
 	// resolveSchemaInTx, realTable/columns via allowedTablesInTx/
 	// allowedColumnsInTx, sort via the findExact check above, filter
-	// columns via mysqlBuildWhereClause's own allow-list check); every
+	// columns via tableWhereClause's own allow-list check); every
 	// value is a bound ? parameter.
 	sqlBody := fmt.Sprintf("%s from %s.%s%s%s limit ? offset ?",
 		selectList, quoteIdentMySQL(realSchema), quoteIdentMySQL(realTable), whereClause, orderClause)
@@ -775,7 +742,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, mapSelectDeniedMySQL(err, realTable)
+		return TableData{}, mapSelectDeniedMySQL(err, realTable, len(filterValues) > 0)
 	}
 	defer rows.Close()
 
@@ -796,7 +763,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return TableData{}, err
+		return TableData{}, mapSelectDeniedMySQL(err, realTable, len(filterValues) > 0)
 	}
 	if out == nil {
 		out = []map[string]*string{}

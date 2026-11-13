@@ -1,7 +1,8 @@
 # Filter DSL — grammar and test plan
 
 Status: normative, for the **frontend's** parser
-Scope: this document specs the grammar the `dbviewer.html` JS parser must
+Scope: this document specs the grammar the frontend parser
+(`frontend/src/lib/filter-dsl.ts`, bundled into `dbviewer.html`) must
 satisfy when converting the `#filter` box's text into the JSON filter AST
 (`spec/protocol.md` §5.4.2). Parsing is client-side only: no backend —
 reference or port — parses DSL text; the backend contract is the AST, and
@@ -16,7 +17,7 @@ Prior art considered: RSQL/FIQL (the established REST filter syntax) and the
 `postgrest-parser` crate. Neither is used directly — the existing Rust RSQL
 crate is undocumented, and `postgrest-parser` is a weeks-old 0.x — but the
 shape below deliberately stays close to RSQL's `field op value` conjunction
-style so nothing here is novel. The parser is hand-written (~8 operators, no
+style so nothing here is novel. The parser is hand-written (a dozen operators, no
 nesting; small enough that owning the security-critical path outweighs a
 dependency).
 
@@ -26,6 +27,8 @@ dependency).
 condition (AND|OR condition)*
 condition := [NOT] simple_condition
 simple_condition := column OP value
+           | column [NOT] IN ( value, value, ... )
+           | column [NOT] BETWEEN value AND value
            | column IS NULL
            | column IS NOT NULL
 ```
@@ -50,7 +53,12 @@ logic       = "AND" | "OR" ;                        (* case-insensitive *)
 condition   = [ "NOT" , ws ] , simple_condition ;
 simple_condition
             = column , ows , operator , ows , value
+            | column , ws , [ "NOT" , ws ] , "IN" , ows , list
+            | column , ws , [ "NOT" , ws ] , "BETWEEN" , ws , value , ws , "AND" , ws , value
             | column , ws , "IS" , ws , [ "NOT" , ws ] , "NULL" ;
+list        = "(" , ows , item , { ows , "," , ows , item } , ows , ")" ;
+item        = quoted | list_bare ;
+list_bare   = { any-char-except-ws-quote-comma-parens }- ;
 column      = [ qualifier , "." ] , name ;         (* qualifier only in a join view, §3 *)
 qualifier   = name | '"' , { any-char-except-quote | '""' } , '"' ;   (* quoted: at least one char *)
 name        = ( letter | "_" ) , { letter | digit | "_" } ;
@@ -64,23 +72,35 @@ ows         = { whitespace } ;                      (* optional *)
 
 Notes:
 
-- **Keywords** (`AND`, `OR`, `IS`, `NOT`, `NULL`, `LIKE`, `ILIKE`) are
-  case-insensitive. Column names are matched case-sensitively against the
+- **Keywords** (`AND`, `OR`, `IS`, `NOT`, `NULL`, `LIKE`, `ILIKE`, `IN`,
+  `BETWEEN`) are case-insensitive. Column names are matched case-sensitively against the
   schema allow-list.
 - **Qualified columns** (`alias.column`) are accepted only in a join view
   (§3). No whitespace is allowed around the `.`, and only one qualifier is
   allowed (`a.b.c` is a parse error). Outside a join view a `.` in a column
   is a parse error, exactly as before.
 - **Whitespace** around symbolic operators is optional (`status=completed`
-  is valid); word operators (`LIKE`, `ILIKE`, `IS NULL`, `AND`, `OR`, `NOT`)
-  require surrounding whitespace.
+  is valid); word operators (`LIKE`, `ILIKE`, `IN`, `BETWEEN`, `IS NULL`,
+  `AND`, `OR`, `NOT`) require surrounding whitespace. Whitespace between
+  `IN` and `(`, and around list commas, is optional.
 - **`NOT` only appears where a `condition` can start** — the very
   beginning of the filter, or immediately after `AND`/`OR`. It's
   zero-or-one (`[ "NOT" , ws ]`), not recursive: `NOT NOT status = active`
   is a parse error, not a double negation that cancels out. There's no
   mid-predicate `NOT` (`status NOT = active`, `email NOT LIKE 'x'`) — the
-  prefix form covers every predicate kind uniformly, so a second
-  mid-predicate mechanism would just be redundant surface area.
+  prefix form covers every predicate kind uniformly. The exceptions are
+  `NOT IN` and `NOT BETWEEN`, written the SQL way; each means exactly the
+  prefix form (`NOT column IN (…)`), so `NOT column NOT IN (…)` is a parse
+  error like `NOT NOT`.
+- **Lists** (`IN`): at least one item, no trailing comma. An item is a
+  quoted value or a bare value that also stops at `,` and `)` and cannot
+  contain `(`. A bare `NULL` item is a parse error: `x NOT IN (1, NULL)`
+  is never true in SQL, so the parser points to `IS NULL` instead. A
+  quoted `'NULL'` is the four-letter string, as anywhere else.
+- **`BETWEEN lo AND hi`**: the `AND` is part of the condition, not a
+  logic token. Both bounds are values; since a bare `AND` is never a value,
+  the next `AND`/`OR` after `hi` starts the next condition. A bare `NULL`
+  bound is a parse error, as in a list.
 - **Values**: a bare value runs to the next whitespace. Values containing
   spaces, quotes, or the words `AND`/`OR`/`NOT` must be single-quoted; a
   literal `'` inside a quoted value is escaped by doubling (`''`), as in
@@ -105,7 +125,9 @@ Notes:
   never produces SQL text, and never validates a column against the
   schema. `logic` is absent on the first condition and carries the
   joining `AND`/`OR` on every subsequent one; `not` reflects the prefix
-  `NOT`; `value` is absent exactly for `IS NULL`/`IS NOT NULL`.
+  `NOT`, `NOT IN` or `NOT BETWEEN`; `value` is absent exactly for `IS NULL`/`IS NOT NULL`,
+  and is an array of strings for `IN` (the list items) and `BETWEEN`
+  (`[lo, hi]`).
 - **Join view.** The join overlay (`spec/join-dsl.md`) runs the same parser
   with the ordered list of table aliases (effective names, position 0
   first). Every emitted condition then carries `join`, the position of its
@@ -116,26 +138,26 @@ Notes:
   qualified column is a parse error.
 - What the server then does with the AST — validating each `column`
   against the live schema allow-list, mapping each `op` through a
-  hardcoded SQL-fragment table, binding every `value` as a parameter
-  against the text-cast column — is the server's contract, specified in
-  `spec/protocol.md` §5.4.2 (evaluation rules) and §6, not here.
+  hardcoded SQL-fragment table, checking and binding every `value` as a
+  parameter, comparing in the column's own type or as text by its class —
+  is the server's contract, specified in `spec/protocol.md` §5.4.2
+  (evaluation rules) and §6, not here. The parser does not know column
+  types, so `amount > abc` parses and the server rejects it.
 - `LIKE`/`ILIKE` pass `%`/`_` through to Postgres untranslated — the user
   writes Postgres patterns directly. `ILIKE` is Postgres's own
   case-insensitive `LIKE`; same passthrough, case-insensitive at the
   database level.
 - `NOT` doesn't invert the operator: the parser emits the same `op` with
-  `not: true`, and the server negates at the SQL-fragment level
-  (`NOT (column::text = $n)` — `spec/protocol.md` §5.4.2), so `NOT` never
-  needs its own operator mapping to keep in sync.
-- Known v1 limitation (deliberate): the uniform `::text` cast makes
-  `>`/`<`/`>=`/`<=` **lexicographic**. Correct for ISO-8601 timestamps and
-  equal-length strings; wrong for numerics (`"10" < "9"`). Documented in the
-  UI later; typed casting is a post-v1 improvement, not a v1 requirement.
+  `not: true`, and the server wraps the condition's mapped fragment in
+  `NOT (…)` (`spec/protocol.md` §5.4.2), so `NOT` never needs its own
+  operator mapping to keep in sync.
 - Duplicate/contradictory conditions (`status = 'a' AND status = 'b'`) are
   legal and simply return zero rows — the parser doesn't do satisfiability
   analysis.
 - Limits: ≤ 10 conditions — the parser rejects an 11th rather than emit
-  an AST the server would refuse. The server independently enforces the
+  an AST the server would refuse. An `IN` or `BETWEEN` condition counts as
+  one; the 1 KiB input limit keeps a list far below the server's
+  1000-item cap. The server independently enforces the
   same condition cap plus a byte bound on the JSON-encoded `filter`
   param (`spec/protocol.md` §5.4.2); cheap guardrails against
   pathological input, always a rejection, never a truncated query.
@@ -191,6 +213,17 @@ fixtures, not this table.)
 | V24 | `status = completed` with aliases `[o, u]` | unqualified means position 0: `(join 0, status, =, "completed")` |
 | V25 | `"order items".id = 1` with aliases `[order items, x]` | quoted qualifier, `(join 0, id, =, "1")` |
 | V26 | `o.a = 1 AND u.b = 2 OR NOT u.c IS NULL` with aliases `[o, u]` | `join` on each condition: 0, 1, 1 |
+| V27 | `id IN (1, 2, 3)` | `(id, IN, ["1", "2", "3"])` |
+| V28 | `id in(1,2)` | lowercase keyword, no optional spaces |
+| V29 | `status NOT IN (a, 'b c')` | `not: true`, `(status, IN, ["a", "b c"])` |
+| V30 | `NOT status IN (a)` | same AST as `status NOT IN (a)` |
+| V31 | `name IN ('NULL', 'it''s')` | quoted `NULL` is a string; `''` escape inside a list |
+| V32 | `total BETWEEN 10 AND 20` | `(total, BETWEEN, ["10", "20"])` |
+| V33 | `total BETWEEN 10 AND 20 AND status = a` | the BETWEEN's `AND` is consumed; then a logic `AND` |
+| V34 | `NOT created_at BETWEEN 2016-01-01 AND '2016-12-31 23:59'` | negated BETWEEN with a quoted bound |
+| V35 | `total BETWEEN 20 AND 10` | reversed bounds parse (the server returns zero rows) |
+| V36 | `u.id IN (1) OR o.total BETWEEN 1 AND 2` with aliases `[o, u]` | `join` 1 then 0 |
+| V37 | `total NOT BETWEEN 1 AND 2` | same AST as `NOT total BETWEEN 1 AND 2` |
 
 ### Rejected (parse errors)
 
@@ -207,7 +240,7 @@ fixtures, not this table.)
 | R9 | `1abc = x` | column can't start with a digit |
 | R10 | `status LIKE` | word operator missing value |
 | R11 | `a = 1 OR OR b = 2` | doubled logic token |
-| R12 | `status NOT = completed` | mid-predicate `NOT` unsupported — only the prefix form (`NOT status = completed`) is |
+| R12 | `status NOT = completed` | mid-predicate `NOT` unsupported except before `IN`/`BETWEEN` — only the prefix form (`NOT status = completed`) is |
 | R13 | 1 KiB+ filter string | length limit |
 | R14 | 11+ ANDed conditions | condition-count limit |
 | R15 | `NOT NOT status = completed` | double negation — `[NOT]` is zero-or-one, not recursive |
@@ -218,6 +251,21 @@ fixtures, not this table.)
 | R20 | `o.u.status = x` with aliases `[o, u]` | one qualifier only |
 | R21 | `.status = x` with aliases `[o, u]` | missing qualifier |
 | R22 | `"".status = x` with aliases `[o, u]` | empty quoted qualifier |
+| R23 | `id IN ()` | empty list |
+| R24 | `id IN (1, 2,)` | trailing comma |
+| R25 | `id IN (1, 2` | unclosed list |
+| R26 | `id IN 1, 2` | list needs parentheses |
+| R27 | `id IN (1, NULL)` | bare `NULL` in a list — use `IS NULL` |
+| R28 | `id NOT IN (1, null)` | same, any case |
+| R29 | `NOT id NOT IN (1)` | double negation |
+| R30 | `id IN (a AND b)` | bare `AND` is always the keyword |
+| R31 | `total BETWEEN 10` | missing `AND hi` |
+| R32 | `total BETWEEN 10 OR 20` | `BETWEEN` needs `AND` |
+| R33 | `total BETWEEN 10 AND` | missing upper bound |
+| R34 | `NOT total NOT BETWEEN 1 AND 2` | double negation |
+| R35 | `id IN ((1))` | `(` cannot start a bare list item |
+| R36 | `idIN (1)` | `IN` needs whitespace before it |
+| R37 | `total BETWEEN NULL AND 5` | a bare `NULL` bound, as in a list; use `IS NULL` |
 
 ### Adversarial (must parse *or* reject safely — never reach SQL text)
 
@@ -234,6 +282,7 @@ fixtures, not this table.)
 | A9 | deeply repeated `a = 1 AND a = 1 AND …` at the count limit | parses at 10, rejects at 11 — no stack recursion (parser must be iterative) |
 | A10 | `NOT pg_sleep = 1` | parses (lexically legal) but fails the schema allow-list check on column `pg_sleep`, same as A8 — `NOT` doesn't bypass allow-listing |
 | A11 | `u.pg_sleep = 1` with aliases `[o, u]` | parses with `join 1`; the column fails the allow-list of table 1, same as A8 |
+| A12 | `id IN ('1); DROP TABLE users; --')` | parses; one list item, a bind param — harmless |
 
 Test A8 is the reminder that the grammar is only half the defense: the
 server-side column allow-list check (`spec/protocol.md` §5.4.2/§6) must
@@ -243,18 +292,14 @@ parser can neither perform nor bypass.
 
 ## 6. Frontend consumers (composition, not parsing)
 
-Three `dbviewer.html` features generate clauses against this exact
-grammar that the client-side parser then reads back: click-to-filter (a
-per-cell button), FK cell navigation, and the common-values header
-dropdown. All three funnel through one
-function, `quoteFilterValue()`/`applyFilterClause()`, which implements §2's
-quoting notes — bare when safe, single-quoted with `''`-escaping otherwise,
-exact-match `AND`/`OR`/`NOT` forced to quote. All three only ever compose
-plain `column = value` equality clauses today — none of them emit `NOT`,
-`LIKE`/`ILIKE`, or `IS [NOT] NULL` — so widening `quoteFilterValue()`'s
-forced-quote regex from `/^(AND|OR)$/i` to `/^(AND|OR|NOT)$/i` to match
-`NOT` joining the keyword set (§2) was a one-line change, not a behavior
-change to any shipped feature.
+Several features write clauses against this grammar that the parser then
+reads back: click-to-filter on a grid cell or record-view field, FK cell
+navigation, the referenced-by drill-in, and the common-values dropdown.
+They build text through `quoteFilterValue()`, `filterClause()`,
+`eqClause()` and `filterClauses()` in `frontend/src/lib/filter-dsl.ts`,
+which implement §2's quoting notes — bare when safe, single-quoted with
+`''`-escaping otherwise, exact-match `AND`/`OR`/`NOT` forced to quote.
+They emit only `column = value` and, for a null cell, `column IS NULL`.
 
 This is clause *composition*, not the parser `frontend-style-guide.md` §7
 keeps client-side: it never parses or judges arbitrary user-typed text, only

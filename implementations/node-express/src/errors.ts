@@ -74,23 +74,31 @@ export class UnsortableError extends Error {
  * `permission denied` (SQLSTATE 42501) reaching the row fetch is a
  * residual edge; report it as NotAllowedError (→ 400) rather than letting
  * the raw driver error surface as a 500. Also maps a filter value
- * Postgres's text encoding rejects (SQLSTATE 22021/22P05) to FilterError,
- * also 400, never a raw 500 (docs/adapter-decisions.md §5.4.2 has the
+ * Postgres rejects (a bad-value SQLSTATE, only when values were bound: a NUL
+ * byte, or a value a typed comparison's cast refuses) to FilterError, also
+ * 400, never a raw 500 (docs/adapter-decisions.md §5.4.2 has the
  * cross-backend rationale). When the request sorts, an "undefined function"
  * error (SQLSTATE 42883) is the sort column's type having no ordering operator
  * (json, xml, geometric types).
  */
-export function mapSelectDenied(err: unknown, table: string, sort?: string): unknown {
+export function mapSelectDenied(err: unknown, table: string, sort: string | undefined, filtered: boolean): unknown {
   const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
   if (code === "42883" && sort !== undefined) return new UnsortableError(sort);
   if (code === "42501") {
     return new NotAllowedError(`table "${table}"`, "not_readable");
   }
-  if (code === "22021" || code === "22P05") {
+  if (filtered && typeof code === "string" && isBadValueSqlState(code)) {
     const message = err instanceof Error ? err.message : String(err);
     return new FilterError(`value invalid for this backend: ${message}`);
   }
   return err;
+}
+
+const BAD_VALUE_SQLSTATES = new Set(["22P02", "22003", "22007", "22008", "22021", "22P05"]);
+
+/** Whether an engine's SQLSTATE names a bad value, which in a filtered query is the filter's (spec/protocol.md §5.4.2). */
+function isBadValueSqlState(code: string): boolean {
+  return BAD_VALUE_SQLSTATES.has(code);
 }
 
 /**
@@ -99,11 +107,18 @@ export function mapSelectDenied(err: unknown, table: string, sort?: string): unk
  * there is no has_table_privilege function to gate the listing on (see
  * docs/adapter-decisions.md §5.2/§5.3). A residual
  * ER_TABLEACCESS_DENIED_ERROR (errno 1142, both engines) at the row fetch
- * becomes NotAllowedError (→ 400) instead of a raw 500.
+ * becomes NotAllowedError (→ 400) instead of a raw 500. A bad value in a
+ * filtered query (a cast out of range) becomes a FilterError.
  */
-export function mapSelectDeniedMysql(err: unknown, table: string): unknown {
-  if (typeof err === "object" && err !== null && "errno" in err && (err as { errno?: unknown }).errno === 1142) {
+export function mapSelectDeniedMysql(err: unknown, table: string, filtered: boolean): unknown {
+  if (typeof err !== "object" || err === null) return err;
+  const { errno, sqlState } = err as { errno?: unknown; sqlState?: unknown };
+  if (errno === 1142) {
     return new NotAllowedError(`table "${table}"`, "not_readable");
+  }
+  if (filtered && typeof sqlState === "string" && isBadValueSqlState(sqlState)) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new FilterError(`value invalid for this backend: ${message}`);
   }
   return err;
 }

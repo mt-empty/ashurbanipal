@@ -211,6 +211,36 @@ data class ColumnClass(val kind: String, val enumType: String = "") {
 /** Classes whose columns cannot be joined (§5.11.2). */
 private val NOT_JOINABLE = setOf(ColumnClass.FLOAT, ColumnClass.JSON, ColumnClass.ARRAY, ColumnClass.OTHER)
 
+/**
+ * How a filter compares a column in its own type (`spec/protocol.md` §5.4.2):
+ * the form a value must have, and the engine's cast target for the bound
+ * value, from a hardcoded per-engine table (null binds it bare).
+ */
+data class TypedCompare(
+    /** Null skips the value check: SQLite does not enforce column types. */
+    val form: ValueForm?,
+    val cast: String? = null,
+    /**
+     * The target for a whole number that fits 64 bits, so an integer column
+     * keeps its index (Postgres compares int = numeric by converting the column).
+     */
+    val intCast: String? = null,
+) {
+    /** The cast target for one bound value. */
+    fun castFor(value: String): String? =
+        if (intCast != null && value.toLongOrNull() != null) intCast else cast
+}
+
+/** The class of a typed column, read from its value form so a backend's class and typed comparison can't disagree. */
+internal fun typedClass(t: TypedCompare?): ColumnClass? = when (t?.form) {
+    null -> null
+    ValueForm.MYSQL_DECIMAL, ValueForm.PG_NUMERIC -> ColumnClass.NUMBER
+    ValueForm.MYSQL_FLOAT, ValueForm.PG_FLOAT -> ColumnClass.FLOAT
+    ValueForm.MYSQL_DATE, ValueForm.MYSQL_DATETIME, ValueForm.PG_DATE, ValueForm.PG_TIMESTAMP, ValueForm.PG_TIMESTAMP_TZ ->
+        ColumnClass.TEMPORAL
+    ValueForm.MYSQL_TIME, ValueForm.PG_TIME, ValueForm.PG_TIME_TZ -> ColumnClass.TIME
+}
+
 /** One column as the live catalog reports it. [collation] is set where two text collations can clash (§5.4.1). */
 data class ColMeta(
     val name: String,
@@ -220,6 +250,8 @@ data class ColMeta(
     val key: String? = null,
     val references: ColumnRef? = null,
     val comment: String? = null,
+    /** Null: filters compare the column's text cast. */
+    val compare: TypedCompare? = null,
 ) {
     /** The §5.4.1 shape of this column. */
     fun columnInfo() = ColumnInfo(
@@ -399,10 +431,10 @@ fun planJoin(spec: JoinSpec, tables: List<TableMeta>, opts: JoinOpts): JoinPlan 
     val filter = (opts.filter ?: emptyList()).mapIndexed { i, cond ->
         val pos = cond.join ?: 0
         if (pos < 0 || pos >= tables.size) throw FilterException("condition $i: join position $pos is not in the join")
-        if ((cond.op !in OPS_WITHOUT_VALUE) != (cond.value != null)) {
-            throw FilterException("condition $i: op ${cond.op} has the wrong value arity")
-        }
-        ResolvedCondition(cond, pos, tables[pos].index(cond.column))
+        checkValueShape(cond, i)
+        val col = tables[pos].index(cond.column)
+        checkTypedValues(tables[pos].columns[col], cond)
+        ResolvedCondition(cond, pos, col)
     }
 
     if (opts.sort == null && opts.sortJoin != null) throw BadParameterException("sort_join needs sort")
@@ -418,9 +450,70 @@ fun planJoin(spec: JoinSpec, tables: List<TableMeta>, opts: JoinOpts): JoinPlan 
 internal class JoinDialect(
     val quote: (String) -> String,
     val castText: (String) -> String,
+    /** Converts the `?` placeholder to a [TypedCompare.cast] target. */
+    val castParam: (String, String) -> String,
     /** `native`, `like` or `lowered-like`. */
     val ilike: String,
 )
+
+/** The column-typed half of the `spec/protocol.md` §5.4.2 value check. */
+private fun checkTypedValues(col: ColMeta, cond: Condition) {
+    val form = col.compare?.form ?: return
+    if (cond.op in PATTERN_OPS) return
+    cond.items().firstOrNull { !form.accepts(it) }?.let { bad ->
+        throw FilterException("value \"$bad\" for column \"${col.name}\" must be ${form.description}")
+    }
+}
+
+/** One condition with its column resolved; [expr] is the column as SQL. */
+private class FilterTerm(val cond: Condition, val expr: String, val col: ColMeta)
+
+/** The conditions joined by their logic, without `where`, and the values in placeholder order. */
+private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, List<String>> {
+    val values = mutableListOf<String>()
+    val clause = StringBuilder()
+    terms.forEachIndexed { i, t ->
+        val cond = t.cond
+        val typed = t.col.compare.takeIf { cond.op !in PATTERN_OPS }
+        fun ph(value: String) = typed?.castFor(value)?.let { d.castParam("?", it) } ?: "?"
+        val lhs = if (typed != null) t.expr else d.castText(t.expr)
+        val items = cond.items()
+        val inner = when (cond.op) {
+            in OPS_WITHOUT_VALUE -> "$lhs ${opSqlKeyword(cond.op)}"
+            "IN" -> "$lhs IN (${items.joinToString(", ") { ph(it) }})"
+            "BETWEEN" -> "$lhs BETWEEN ${ph(items[0])} AND ${ph(items[1])}"
+            "ILIKE" -> when (d.ilike) {
+                "native" -> "$lhs ILIKE ${ph(items[0])}"
+                "like" -> "$lhs LIKE ${ph(items[0])}"
+                else -> "LOWER($lhs) LIKE LOWER(${ph(items[0])})"
+            }
+            else -> "$lhs ${opSqlKeyword(cond.op)} ${ph(items[0])}"
+        }
+        values.addAll(items)
+        if (i > 0) clause.append(if (cond.logic == "OR") " OR " else " AND ")
+        clause.append(if (cond.not) "(NOT ($inner))" else "($inner)")
+    }
+    return clause.toString() to values
+}
+
+/**
+ * The data route's ` where …` ("" without conditions) and its values, with
+ * each condition's column checked against the live catalog's columns
+ * (`spec/protocol.md` §5.4.2).
+ */
+internal fun tableWhereClause(conditions: List<Condition>, table: TableMeta, d: JoinDialect): WhereClause {
+    val terms = conditions.mapIndexed { i, cond ->
+        val col = table.columns[table.index(cond.column)]
+        // Defends the SQL boundary when a caller bypasses FilterValidator.parse.
+        if (cond.op !in VALID_OPS) throw FilterException("condition $i has invalid op ${cond.op}")
+        checkValueShape(cond, i)
+        if (i > 0 && cond.logic == null) throw FilterException("condition $i is missing logic")
+        checkTypedValues(col, cond)
+        FilterTerm(cond, d.quote(col.name), col)
+    }
+    val (clause, values) = filterSql(terms, d)
+    return WhereClause(if (clause.isEmpty()) "" else " where $clause", values)
+}
 
 /**
  * Each table's tie-break key as `position to column`, in position order. A key
@@ -467,29 +560,10 @@ internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<
         sql.append(" ${if (isLeft) "left join" else "inner join"} ${fromItem(position)} on $on")
     }
 
-    val values = mutableListOf<String>()
-    val clause = StringBuilder()
-    plan.filter.forEachIndexed { i, rc ->
-        val cond = rc.cond
-        val cast = d.castText(alias(rc.pos, rc.col))
-        val inner = when {
-            cond.op in OPS_WITHOUT_VALUE -> "$cast ${opSqlKeyword(cond.op)}"
-            cond.op == "ILIKE" -> {
-                values.add(cond.value!!)
-                when (d.ilike) {
-                    "native" -> "$cast ILIKE ?"
-                    "like" -> "$cast LIKE ?"
-                    else -> "LOWER($cast) LIKE LOWER(?)"
-                }
-            }
-            else -> {
-                values.add(cond.value!!)
-                "$cast ${opSqlKeyword(cond.op)} ?"
-            }
-        }
-        if (i > 0) clause.append(if (cond.logic == "OR") " OR " else " AND ")
-        clause.append(if (cond.not) "(NOT ($inner))" else "($inner)")
-    }
+    val (clause, values) = filterSql(
+        plan.filter.map { rc -> FilterTerm(rc.cond, alias(rc.pos, rc.col), plan.tables[rc.pos].columns[rc.col]) },
+        d,
+    )
     if (clause.isNotEmpty()) sql.append(" where $clause")
     sql.append(orderByClause(plan.sort, joinOrderKeys(plan.tables, plan.ons), plan.descending) { (p, c) -> alias(p, c) })
     sql.append(" limit ? offset ?")

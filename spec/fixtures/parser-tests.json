@@ -358,6 +358,184 @@
       ]
     },
     {
+      "name": "V27",
+      "input": "id IN (1, 2, 3)",
+      "expect": [
+        {
+          "column": "id",
+          "op": "IN",
+          "value": [
+            "1",
+            "2",
+            "3"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V28",
+      "input": "id in(1,2)",
+      "expect": [
+        {
+          "column": "id",
+          "op": "IN",
+          "value": [
+            "1",
+            "2"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V29",
+      "input": "status NOT IN (a, 'b c')",
+      "expect": [
+        {
+          "not": true,
+          "column": "status",
+          "op": "IN",
+          "value": [
+            "a",
+            "b c"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V30",
+      "input": "NOT status IN (a)",
+      "expect": [
+        {
+          "not": true,
+          "column": "status",
+          "op": "IN",
+          "value": [
+            "a"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V31",
+      "input": "name IN ('NULL', 'it''s')",
+      "expect": [
+        {
+          "column": "name",
+          "op": "IN",
+          "value": [
+            "NULL",
+            "it's"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V32",
+      "input": "total BETWEEN 10 AND 20",
+      "expect": [
+        {
+          "column": "total",
+          "op": "BETWEEN",
+          "value": [
+            "10",
+            "20"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V33",
+      "input": "total BETWEEN 10 AND 20 AND status = a",
+      "expect": [
+        {
+          "column": "total",
+          "op": "BETWEEN",
+          "value": [
+            "10",
+            "20"
+          ]
+        },
+        {
+          "logic": "AND",
+          "column": "status",
+          "op": "=",
+          "value": "a"
+        }
+      ]
+    },
+    {
+      "name": "V34",
+      "input": "NOT created_at BETWEEN 2016-01-01 AND '2016-12-31 23:59'",
+      "expect": [
+        {
+          "not": true,
+          "column": "created_at",
+          "op": "BETWEEN",
+          "value": [
+            "2016-01-01",
+            "2016-12-31 23:59"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V35",
+      "input": "total BETWEEN 20 AND 10",
+      "expect": [
+        {
+          "column": "total",
+          "op": "BETWEEN",
+          "value": [
+            "20",
+            "10"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "V36",
+      "input": "u.id IN (1) OR o.total BETWEEN 1 AND 2",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "id",
+          "op": "IN",
+          "value": [
+            "1"
+          ],
+          "join": 1
+        },
+        {
+          "logic": "OR",
+          "column": "total",
+          "op": "BETWEEN",
+          "value": [
+            "1",
+            "2"
+          ],
+          "join": 0
+        }
+      ]
+    },
+    {
+      "name": "V37",
+      "input": "total NOT BETWEEN 1 AND 2",
+      "expect": [
+        {
+          "not": true,
+          "column": "total",
+          "op": "BETWEEN",
+          "value": [
+            "1",
+            "2"
+          ]
+        }
+      ]
+    },
+    {
       "name": "R1",
       "input": "",
       "expect_error": {
@@ -500,6 +678,97 @@
         "u"
       ],
       "expect_error": {}
+    },
+    {
+      "name": "R23",
+      "input": "id IN ()",
+      "expect_error": {
+        "position": 7
+      }
+    },
+    {
+      "name": "R24",
+      "input": "id IN (1, 2,)",
+      "expect_error": {
+        "position": 12
+      }
+    },
+    {
+      "name": "R25",
+      "input": "id IN (1, 2",
+      "expect_error": {
+        "position": 11
+      }
+    },
+    {
+      "name": "R26",
+      "input": "id IN 1, 2",
+      "expect_error": {
+        "position": 6
+      }
+    },
+    {
+      "name": "R27",
+      "input": "id IN (1, NULL)",
+      "expect_error": {
+        "position": 10
+      }
+    },
+    {
+      "name": "R28",
+      "input": "id NOT IN (1, null)",
+      "expect_error": {
+        "position": 14
+      }
+    },
+    {
+      "name": "R29",
+      "input": "NOT id NOT IN (1)",
+      "expect_error": {}
+    },
+    {
+      "name": "R30",
+      "input": "id IN (a AND b)",
+      "expect_error": {}
+    },
+    {
+      "name": "R31",
+      "input": "total BETWEEN 10",
+      "expect_error": {}
+    },
+    {
+      "name": "R32",
+      "input": "total BETWEEN 10 OR 20",
+      "expect_error": {}
+    },
+    {
+      "name": "R33",
+      "input": "total BETWEEN 10 AND",
+      "expect_error": {}
+    },
+    {
+      "name": "R34",
+      "input": "NOT total NOT BETWEEN 1 AND 2",
+      "expect_error": {}
+    },
+    {
+      "name": "R35",
+      "input": "id IN ((1))",
+      "expect_error": {
+        "position": 7
+      }
+    },
+    {
+      "name": "R36",
+      "input": "idIN (1)",
+      "expect_error": {}
+    },
+    {
+      "name": "R37",
+      "input": "total BETWEEN NULL AND 5",
+      "expect_error": {
+        "position": 14
+      }
     },
     {
       "name": "A1",
@@ -662,6 +931,19 @@
           "op": "=",
           "value": "1",
           "join": 1
+        }
+      ]
+    },
+    {
+      "name": "A12",
+      "input": "id IN ('1); DROP TABLE users; --')",
+      "expect": [
+        {
+          "column": "id",
+          "op": "IN",
+          "value": [
+            "1); DROP TABLE users; --"
+          ]
         }
       ]
     }

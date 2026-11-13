@@ -14,7 +14,12 @@ import (
 // Consumes the shared filter fixtures (spec/fixtures/README.md).
 
 type fixtureFile struct {
-	Cases []fixtureCase `json:"cases"`
+	Tables map[string]map[string]fixtureColumn `json:"tables"`
+	Cases  []fixtureCase                       `json:"cases"`
+}
+
+type fixtureColumn struct {
+	Type string `json:"type"`
 }
 
 type fixtureCase struct {
@@ -43,35 +48,28 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
-// seedColumns substitutes the live catalog for fixture tables (spec/fixtures/README.md).
-func seedColumns(t *testing.T, table string) []string {
+// seedTable substitutes the fixture's tables map for the live catalog
+// (spec/fixtures/README.md).
+func seedTable(t *testing.T, file fixtureFile, table string) tableMeta {
 	t.Helper()
-	switch table {
-	case "users":
-		return []string{
-			"id", "email", "full_name", "age", "is_active", "login_count",
-			"metadata", "last_login_at", "created_at",
-		}
-	case "orders":
-		return []string{
-			"id", "user_id", "status", "total_cents", "discount_pct", "tags",
-			"line_items", "created_at",
-		}
-	case "products":
-		return []string{
-			"id", "sku", "name", "category", "price", "weight_kg", "in_stock",
-			"description", "created_on",
-		}
-	default:
+	columns, ok := file.Tables[table]
+	if !ok {
 		t.Fatalf("fixture references unmapped table %q", table)
-		return nil
 	}
+	out := make([]colMeta, 0, len(columns))
+	for name, c := range columns {
+		out = append(out, colMeta{
+			name: name, typeName: c.Type, class: pgColumnClass(c.Type, "", "", false),
+			compare: pgTypedCompare(c.Type),
+		})
+	}
+	return tableMeta{name: table, columns: out}
 }
 
 var placeholderRe = regexp.MustCompile(`\$(\d+)`)
 
 // shiftPlaceholders re-numbers the fixture's $1-based placeholders to
-// match BuildWhereClause's real numbering, which starts at $3 in
+// match tableWhereClause's real numbering, which starts at $3 in
 // production (QueryTable binds limit/offset as $1/$2 first) —
 // spec/fixtures/README.md: "Runners with a different placeholder scheme
 // ... normalize before comparing", mirroring db.rs's own
@@ -118,7 +116,7 @@ func TestFilterBuilderFixtures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("case %s: parse failed: %v", tc.Name, err)
 				}
-				where, values, err := BuildWhereClause(conditions, seedColumns(t, tc.Table))
+				where, values, err := tableWhereClause(conditions, seedTable(t, file, tc.Table), pgJoinDialect)
 				if err != nil {
 					t.Fatalf("case %s: build failed: %v", tc.Name, err)
 				}
@@ -133,18 +131,19 @@ func TestFilterBuilderFixtures(t *testing.T) {
 					t.Errorf("case %s: bind values mismatch: got %v want %v", tc.Name, values, tc.Expect.Values)
 				}
 
-			case tc.ExpectError != nil && *tc.ExpectError == "unknown_column":
+			case tc.ExpectError != nil && (*tc.ExpectError == "unknown_column" || *tc.ExpectError == "invalid_value"):
 				conditions, err := ParseFilter(raw)
 				if err != nil {
 					t.Fatalf("case %s: should parse (rejection is builder-stage): %v", tc.Name, err)
 				}
-				_, _, err = BuildWhereClause(conditions, seedColumns(t, tc.Table))
-				if err == nil {
-					t.Fatalf("case %s: expected a NotAllowedError from the builder, got none", tc.Name)
-				}
+				_, _, err = tableWhereClause(conditions, seedTable(t, file, tc.Table), pgJoinDialect)
 				var notAllowed *NotAllowedError
-				if !errors.As(err, &notAllowed) {
+				var filterError *FilterError
+				switch {
+				case *tc.ExpectError == "unknown_column" && !errors.As(err, &notAllowed):
 					t.Fatalf("case %s: expected NotAllowedError, got %T: %v", tc.Name, err, err)
+				case *tc.ExpectError == "invalid_value" && !errors.As(err, &filterError):
+					t.Fatalf("case %s: expected FilterError, got %T: %v", tc.Name, err, err)
 				}
 
 			case tc.ExpectError != nil:

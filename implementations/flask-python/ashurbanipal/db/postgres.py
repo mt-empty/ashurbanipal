@@ -4,20 +4,16 @@ from __future__ import annotations
 
 import psycopg
 from psycopg.abc import Buffer
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.types.string import TextLoader
 
-from ..filter import Condition, NullCheck
 from ..join import (
     ARRAY,
     BINARY,
     BOOLEAN,
-    FLOAT,
     JSON,
-    NUMBER,
     OTHER,
-    TEMPORAL,
     TEXT,
-    TIME,
     UUID,
     ColMeta,
     ColumnClass,
@@ -26,6 +22,7 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     build_select,
     enum_class,
@@ -33,10 +30,13 @@ from ..join import (
     plan_join,
     table_order_clause,
     table_schemas,
+    table_where_clause,
     tie_break_keys,
+    typed_class,
     unknown_join_table,
 )
 from . import (
+    BAD_VALUE_SQLSTATES,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -78,45 +78,41 @@ class _LenientTextLoader(TextLoader):
             return "<undecodable>"
 
 
-def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
-    """Validate filter columns before SQL interpolation (`spec/protocol.md` §5.4.2)."""
-    if not conditions:
-        return "", []
-
-    values: list[str] = []
-    clause_parts: list[str] = []
-    for i, cond in enumerate(conditions):
-        if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
-        quoted = quote_ident(cond.column)
-        if isinstance(cond, NullCheck):
-            inner = f"{quoted}::text {cond.op}"
-        else:
-            inner = f"{quoted}::text {cond.op} %s"
-            values.append(cond.value)
-        wrapped = f"(NOT ({inner}))" if cond.not_ else f"({inner})"
-
-        if i > 0:
-            if cond.logic not in ("AND", "OR"):
-                raise FilterParseError(f"condition {i} is missing logic")
-            clause_parts.append(" AND " if cond.logic == "AND" else " OR ")
-        clause_parts.append(wrapped)
-
-    return " where " + "".join(clause_parts), values
-
-
 _JOIN_DIALECT = Dialect(
     quote=quote_ident,
     cast_text=lambda expr: f"{expr}::text",
+    cast_param=lambda ph, target: f"{ph}::{target}",
     placeholder="%s",
     ilike="native",
 )
 
 
+def typed_compare(data_type: str) -> TypedCompare | None:
+    """The typed filter comparison for an `information_schema.columns.data_type`
+    (`spec/protocol.md` §5.4.2); the cast target matches the column's own type
+    so `real` compares as `real`."""
+    return _PG_TYPED.get(data_type)
+
+
+_PG_TYPED: dict[str, TypedCompare] = {
+    "smallint": TypedCompare("pg-numeric", "numeric", "int8"),
+    "integer": TypedCompare("pg-numeric", "numeric", "int8"),
+    "bigint": TypedCompare("pg-numeric", "numeric", "int8"),
+    "numeric": TypedCompare("pg-numeric", "numeric"),
+    "real": TypedCompare("pg-float", "real"),
+    "double precision": TypedCompare("pg-float", "float8"),
+    "date": TypedCompare("pg-date", "date"),
+    "timestamp without time zone": TypedCompare("pg-timestamp", "timestamp"),
+    "timestamp with time zone": TypedCompare("pg-timestamptz", "timestamptz"),
+    "time without time zone": TypedCompare("pg-time", "time"),
+    "time with time zone": TypedCompare("pg-timetz", "timetz"),
+}
+
+
 def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
-    if data_type in ("smallint", "integer", "bigint", "numeric"):
-        return NUMBER
+    if (typed := typed_class(typed_compare(data_type))) is not None:
+        return typed
     if data_type in ("character varying", "character", "text"):
         return TEXT
     if data_type == "uuid":
@@ -125,12 +121,6 @@ def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) 
         return BOOLEAN
     if data_type == "bytea":
         return BINARY
-    if data_type in ("date", "timestamp without time zone", "timestamp with time zone"):
-        return TEMPORAL
-    if data_type in ("time without time zone", "time with time zone"):
-        return TIME
-    if data_type in ("real", "double precision"):
-        return FLOAT
     if data_type in ("json", "jsonb"):
         return JSON
     if data_type == "ARRAY":
@@ -147,7 +137,11 @@ class PgSource(DbSource):
     engine: Engine = "postgres"
 
     def __init__(self, dsn: str):
-        self._dsn = dsn
+        # Typed filters read values in ISO form, and a cell's text must be
+        # one; appended so a DSN's own `options` (a search_path) still apply.
+        params = conninfo_to_dict(dsn)
+        params["options"] = f"{params.get('options', '')} -c datestyle=ISO".strip()
+        self._dsn = make_conninfo("", **params)
 
     def _connect(self) -> psycopg.Connection:
         return psycopg.connect(self._dsn)
@@ -312,7 +306,7 @@ class PgSource(DbSource):
                         raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
-                where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
+                where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
                 order_clause = table_order_clause(meta, sort, opts.descending, quote_ident)
@@ -339,6 +333,8 @@ class PgSource(DbSource):
                     # SQLSTATE, unlike other drivers' server-side rejection);
                     # mapped to FilterParseError, also 400, never a raw 500
                     # (docs/adapter-decisions.md §5.4.2).
+                    if not filter_values or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
+                        raise
                     raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 pg_rows = cur.fetchall()
                 rows = [
@@ -392,6 +388,7 @@ class PgSource(DbSource):
                 name=name,
                 type_name=full_type,
                 column_class=column_class(data_type, udt_schema, udt_name, is_enum),
+                compare=typed_compare(data_type),
                 key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                 references=fk_columns.get(name),
                 collation=collation,
@@ -462,6 +459,8 @@ class PgSource(DbSource):
                         raise
                     raise Unsortable(opts.sort) from exc
                 except psycopg.DataError as exc:
+                    if not values or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
+                        raise
                     raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 rows, has_more = plan.rows_from(
                     cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)

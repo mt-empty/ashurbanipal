@@ -1,6 +1,5 @@
 import type { Pool, PoolClient } from "pg";
 import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } from "../errors.js";
-import { buildWhereClause } from "../filter.js";
 import {
   buildJoinSelect,
   type ColMeta,
@@ -16,9 +15,12 @@ import {
   joinTableRefs,
   planJoin,
   type TableMeta,
+  type TypedCompare,
   tableOrderClause,
   tableSchemas,
+  tableWhereClause,
   tieBreakKeys,
+  typedClass,
   type UniqueKey,
   unknownJoinTable,
 } from "../join.js";
@@ -41,21 +43,51 @@ import {
   type TableInfo,
 } from "./types.js";
 
-const JOIN_DIALECT: JoinDialect = {
+export const JOIN_DIALECT: JoinDialect = {
   quote: quoteIdent,
   castText: (expr) => `${expr}::text`,
+  castParam: (p, target) => `${p}::${target}`,
   numbered: true,
   ilike: "native",
 };
 
-/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-export function pgColumnClass(dataType: string, udtSchema: string, udtName: string, isEnum: boolean): ColumnClass {
+/**
+ * The typed filter comparison for an information_schema.columns.data_type
+ * (spec/protocol.md §5.4.2); the cast target matches the column's own type
+ * so real compares as real.
+ */
+export function pgTypedCompare(dataType: string): TypedCompare | undefined {
   switch (dataType) {
     case "smallint":
     case "integer":
     case "bigint":
+      return { form: "pg-numeric", cast: "numeric", intCast: "int8" };
     case "numeric":
-      return { kind: "number" };
+      return { form: "pg-numeric", cast: "numeric" };
+    case "real":
+      return { form: "pg-float", cast: "real" };
+    case "double precision":
+      return { form: "pg-float", cast: "float8" };
+    case "date":
+      return { form: "pg-date", cast: "date" };
+    case "timestamp without time zone":
+      return { form: "pg-timestamp", cast: "timestamp" };
+    case "timestamp with time zone":
+      return { form: "pg-timestamptz", cast: "timestamptz" };
+    case "time without time zone":
+      return { form: "pg-time", cast: "time" };
+    case "time with time zone":
+      return { form: "pg-timetz", cast: "timetz" };
+    default:
+      return undefined;
+  }
+}
+
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+export function pgColumnClass(dataType: string, udtSchema: string, udtName: string, isEnum: boolean): ColumnClass {
+  const typed = typedClass(pgTypedCompare(dataType));
+  if (typed) return typed;
+  switch (dataType) {
     case "character varying":
     case "character":
     case "text":
@@ -66,16 +98,6 @@ export function pgColumnClass(dataType: string, udtSchema: string, udtName: stri
       return { kind: "boolean" };
     case "bytea":
       return { kind: "binary" };
-    case "date":
-    case "timestamp without time zone":
-    case "timestamp with time zone":
-      return { kind: "temporal" };
-    case "time without time zone":
-    case "time with time zone":
-      return { kind: "time" };
-    case "real":
-    case "double precision":
-      return { kind: "float" };
     case "json":
     case "jsonb":
       return { kind: "json" };
@@ -102,6 +124,8 @@ export class PostgresSource implements DbSource {
     try {
       await client.query("BEGIN");
       await client.query(`SET LOCAL statement_timeout = ${timeoutMs}`);
+      // Typed filters read values in ISO form, and a cell's text must be one.
+      await client.query("SET LOCAL datestyle = 'ISO'");
       const result = await fn(client);
       await client.query("COMMIT");
       return result;
@@ -329,6 +353,8 @@ export class PostgresSource implements DbSource {
         type: r.full_type,
         class: pgColumnClass(r.data_type, r.udt_schema, r.udt_name, r.is_enum),
       };
+      const compare = pgTypedCompare(r.data_type);
+      if (compare) col.compare = compare;
       if (r.collation) col.collation = r.collation;
       if (pkColumns.has(r.column_name)) {
         col.key = "pk";
@@ -393,7 +419,7 @@ export class PostgresSource implements DbSource {
       const { rows } = await client
         .query(`select ${body}`, [opts.limit + 1, opts.offset, ...values])
         .catch((err: unknown) => {
-          throw mapSelectDenied(err, spec.table, opts.sort);
+          throw mapSelectDenied(err, spec.table, opts.sort, values.length > 0);
         });
       const out = joinRows(plan, rows as Record<string, unknown>[], opts.limit, cellToJson);
       return { columns: joinColumnInfos(plan, realSchema), rows: out.rows, has_more: out.hasMore };
@@ -420,13 +446,7 @@ export class PostgresSource implements DbSource {
         }
       }
 
-      let whereClause = "";
-      let filterValues: string[] = [];
-      if (opts.filter.length > 0) {
-        const built = buildWhereClause(opts.filter, columnNames, 3);
-        whereClause = built.where;
-        filterValues = built.values;
-      }
+      const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
 
       const selectList = columns.map((col) => `${quoteIdent(col.name)}::text`).join(", ");
 
@@ -440,13 +460,13 @@ export class PostgresSource implements DbSource {
       // Identifiers spliced here are schema-validated (realSchema via
       // resolveSchema, realTable/columns via allowedTables/allowedColumns,
       // sort via the findExact check above, filter columns via
-      // buildWhereClause's own allow-list check); every value is a bound
+      // tableWhereClause's own allow-list check); every value is a bound
       // $N parameter.
       const query = `select ${selectList} from ${quoteIdent(realSchema)}.${quoteIdent(realTable)}${whereClause}${orderClause} limit $1 offset $2`;
       const args: unknown[] = [opts.limit, opts.offset, ...filterValues];
 
       const { rows: dataRows } = await client.query(query, args).catch((err: unknown) => {
-        throw mapSelectDenied(err, realTable, opts.sort);
+        throw mapSelectDenied(err, realTable, opts.sort, filterValues.length > 0);
       });
       const outRows: Record<string, string | null>[] = dataRows.map((row: Record<string, unknown>) => {
         const out: Record<string, string | null> = {};

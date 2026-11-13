@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { NotAllowedError } from "../src/errors.js";
-import { buildWhereClause, parseFilter } from "../src/filter.js";
+import { JOIN_DIALECT as pg, pgColumnClass, pgTypedCompare } from "../src/db/postgres.js";
+import { FilterError, NotAllowedError, quoteIdent } from "../src/errors.js";
+import { parseFilter } from "../src/filter.js";
+import { type ColMeta, type JoinDialect, type TableMeta, tableWhereClause } from "../src/join.js";
 
 // Consumes spec/fixtures/filter-builder-tests.json directly from the repo
 // root (schema: spec/fixtures/README.md) — the same file the Rust
@@ -24,28 +26,29 @@ interface FixtureCase {
 }
 
 interface FixtureFile {
+  tables: Record<string, Record<string, { type: string }>>;
   cases: FixtureCase[];
 }
 
-// Static mirror of the seed schema's columns for the fixture's tables
-// (spec/fixtures/README.md: unit runners substitute this for the live
-// information_schema lookup), matching the Rust/Go/Spring runners' own
-// copies.
-function seedColumns(table: string): string[] {
-  switch (table) {
-    case "users":
-      return ["id", "email", "full_name", "age", "is_active", "login_count", "metadata", "last_login_at", "created_at"];
-    case "orders":
-      return ["id", "user_id", "status", "total_cents", "discount_pct", "tags", "line_items", "created_at"];
-    case "products":
-      return ["id", "sku", "name", "category", "price", "weight_kg", "in_stock", "description", "created_on"];
-    default:
-      throw new Error(`fixture references unmapped table "${table}"`);
-  }
+// The fixture's tables map stands in for the live catalog lookup
+// (spec/fixtures/README.md).
+function seedTable(table: string): TableMeta {
+  const columns = fixture.tables[table];
+  if (!columns) throw new Error(`fixture references unmapped table "${table}"`);
+  return {
+    name: table,
+    orderKeys: [],
+    columns: Object.entries(columns).map(([name, c]): ColMeta => {
+      const col: ColMeta = { name, type: c.type, class: pgColumnClass(c.type, "", "", false) };
+      const compare = pgTypedCompare(c.type);
+      if (compare) col.compare = compare;
+      return col;
+    }),
+  };
 }
 
 // Re-numbers the fixture's $1-based placeholders to match
-// buildWhereClause's real numbering, which starts at $3 in production
+// tableWhereClause's real numbering, which starts at $3 in production
 // (queryTable binds limit/offset as $1/$2 first) — spec/fixtures/README.md:
 // "Runners with a different placeholder scheme ... normalize before
 // comparing", mirroring the Rust/Go runners' own shift-by-2 helper since
@@ -68,16 +71,18 @@ describe("filter-builder-tests.json fixtures", () => {
 
       if (testCase.expect !== undefined) {
         const conditions = parseFilter(raw);
-        const { where, values } = buildWhereClause(conditions, seedColumns(testCase.table), 3);
+        const { where, values } = tableWhereClause(conditions, seedTable(testCase.table), pg);
         const expectedWhere = testCase.expect.where ? ` where ${shiftPlaceholders(testCase.expect.where, 2)}` : "";
         expect(where).toBe(expectedWhere);
         expect(values).toEqual(testCase.expect.values);
         return;
       }
 
-      if (testCase.expect_error === "unknown_column") {
+      if (testCase.expect_error === "unknown_column" || testCase.expect_error === "invalid_value") {
         const conditions = parseFilter(raw);
-        expect(() => buildWhereClause(conditions, seedColumns(testCase.table), 3)).toThrow(NotAllowedError);
+        expect(() => tableWhereClause(conditions, seedTable(testCase.table), pg)).toThrow(
+          testCase.expect_error === "unknown_column" ? NotAllowedError : FilterError,
+        );
         return;
       }
 

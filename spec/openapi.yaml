@@ -163,10 +163,11 @@ paths:
             never DSL text; DSL parsing is frontend-only, see
             spec/filter-dsl.md). `logic` is absent on the first element and
             required on every subsequent one; `value` is present iff `op`
-            is not IS NULL / IS NOT NULL; at most 10 conditions; the
-            encoded size is bounded (see spec/protocol.md §5.4.2). An
-            empty array means no filter. Structural violations and unknown
-            columns yield 400.
+            is not IS NULL / IS NOT NULL, and is an array for IN and
+            BETWEEN; at most 10 conditions; the encoded size is bounded
+            (see spec/protocol.md §5.4.2). An empty array means no filter.
+            Structural violations, unknown columns, and a value that does
+            not fit a typed column yield 400.
           content:
             application/json:
               schema:
@@ -1058,13 +1059,53 @@ components:
             400.
         op:
           type: string
-          enum: ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]
+          enum: ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"]
         value:
-          type: string
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+              minItems: 1
           description: >
-            Required for every op except IS NULL / IS NOT NULL, for which
-            it must be absent. Always bound as a query parameter;
-            comparison applies to the column cast to text.
+            Absent for IS NULL / IS NOT NULL. An array of 1-1000 strings
+            for IN, exactly two strings (inclusive bounds) for BETWEEN,
+            and a string for every other op. Always bound as a query
+            parameter. A number, float, temporal or time column compares
+            in its own type (except LIKE / ILIKE), after the value is
+            checked against that class's form; every other column
+            compares as text (spec/protocol.md §5.4.2).
+      # Listed after `properties` so the op enum above stays the first one
+      # tools/check-frontend-api-reference.sh finds. No maxItems on IN's
+      # 1000-item cap: a generator would build a URL that the HTTP layer
+      # rejects (414) before the cap is ever checked.
+      allOf:
+        - if:
+            properties: {op: {const: BETWEEN}}
+            required: [op]
+          then:
+            properties:
+              value: {type: array, minItems: 2, maxItems: 2}
+            required: [value]
+        - if:
+            properties: {op: {const: IN}}
+            required: [op]
+          then:
+            properties:
+              value: {type: array}
+            required: [value]
+        - if:
+            properties: {op: {enum: ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE"]}}
+            required: [op]
+          then:
+            properties:
+              value: {type: string}
+            required: [value]
+        - if:
+            properties: {op: {enum: ["IS NULL", "IS NOT NULL"]}}
+            required: [op]
+          then:
+            not: {required: [value]}
 
     JoinColumnRef:
       type: object

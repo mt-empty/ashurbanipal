@@ -14,8 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from ashurbanipal.db import KeyKind, NotAllowed, QueryOpts, QueryTimeout, SchemaListing, wrap_driver_errors
-from ashurbanipal.db.sqlite import SqliteSource, partial_index_predicate
+from ashurbanipal.db import (
+    FilterParseError,
+    KeyKind,
+    NotAllowed,
+    QueryOpts,
+    QueryTimeout,
+    SchemaListing,
+    wrap_driver_errors,
+)
+from ashurbanipal.db.sqlite import SqliteSource, _execute_filtered, partial_index_predicate
 from ashurbanipal.routes import _column_to_dict
 
 
@@ -348,3 +356,12 @@ def test_slow_query_is_aborted_by_the_progress_handler_not_left_to_run(seeded_pa
     # was cleared, not left armed with a stale deadline.
     assert conn.execute("select 1").fetchone() == (1,)
     conn.close()
+
+
+def test_too_many_bound_values_is_a_filter_error() -> None:
+    # A system SQLite before 3.32 caps bound values at 999.
+    conn = sqlite3.connect(":memory:")
+    conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+    params = tuple(str(i) for i in range(1000))
+    with pytest.raises(FilterParseError, match="1000 values"):
+        _execute_filtered(conn.cursor(), f"select 1 where 1 in ({', '.join('?' * 1000)})", params)

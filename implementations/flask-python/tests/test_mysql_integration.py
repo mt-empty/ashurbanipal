@@ -314,7 +314,7 @@ def test_join_differing_text_collations_are_a_bad_join(seeded) -> None:
 
 def test_join_column_classes() -> None:
     from ashurbanipal.db.mysql import column_class
-    from ashurbanipal.join import FLOAT, JSON, NUMBER, OTHER, TEXT, enum_class
+    from ashurbanipal.join import FLOAT, JSON, NUMBER, OTHER, TEMPORAL, TEXT, TIME, enum_class
 
     assert column_class("bigint", "bigint") == NUMBER
     assert column_class("VARCHAR", "varchar(20)") == TEXT
@@ -322,3 +322,14 @@ def test_join_column_classes() -> None:
     assert column_class("json", "json") == JSON
     assert column_class("double", "double") == FLOAT
     assert column_class("set", "set('a','b')") == OTHER
+    for t, expected in (
+        ("TINYINT", NUMBER),
+        ("decimal", NUMBER),
+        ("date", TEMPORAL),
+        ("datetime", TEMPORAL),
+        ("timestamp", TEMPORAL),
+        ("time", TIME),
+        ("float", FLOAT),
+        ("year", OTHER),
+    ):
+        assert column_class(t, t) == expected, t

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pgColumnClass } from "../src/db/postgres.js";
 import { FilterError, isQueryTimeout, NotAllowedError } from "../src/errors.js";
-import { parseFilter, parseFilterForJoin } from "../src/filter.js";
+import { formAccepts, parseFilter, parseFilterForJoin, type ValueForm } from "../src/filter.js";
 import {
   assignJoinLabels,
   BadJoinError,
@@ -53,6 +53,7 @@ const JOIN = `{"table":"orders","joins":[{"type":"left","table":"users",
 const pg: JoinDialect = {
   quote: (n) => `"${n.replace(/"/g, '""')}"`,
   castText: (e) => `${e}::text`,
+  castParam: (p, t) => `${p}::${t}`,
   numbered: true,
   ilike: "native",
 };
@@ -316,6 +317,132 @@ describe("buildJoinSelect", () => {
     expect(body).toMatch(/ order by t1\."email" asc, t0\."id" asc limit \$1 offset \$2$/);
     expect(values).toEqual(["a@b.c"]);
   });
+
+  it("compares a typed column in its own type and checks its values", () => {
+    const withTotal = orders();
+    withTotal.columns.push({
+      name: "total",
+      type: "integer",
+      class: { kind: "number" },
+      compare: { form: "pg-numeric", cast: "numeric", intCast: "int8" },
+    });
+    const plan = planJoin(
+      parseJoin(JOIN),
+      [withTotal, users()],
+      opts({
+        filter: [
+          { column: "total", op: "BETWEEN", value: ["1", "9.5"] },
+          { logic: "AND", not: true, column: "status", op: "IN", value: ["a", "b"] },
+          { logic: "OR", column: "total", op: "LIKE", value: "1%" },
+        ],
+      }),
+    );
+    const { body, values } = buildJoinSelect(plan, pg);
+    expect(body).toContain(
+      ' where (t0."total" BETWEEN $3::int8 AND $4::numeric) AND (NOT (t0."status"::text IN ($5, $6)))' +
+        ' OR (t0."total"::text LIKE $7)',
+    );
+    expect(values).toEqual(["1", "9.5", "a", "b", "1%"]);
+    expect(() =>
+      planJoin(
+        parseJoin(JOIN),
+        [withTotal, users()],
+        opts({ filter: [{ column: "total", op: "IN", value: ["1", "x"] }] }),
+      ),
+    ).toThrow(/"x" for column "total"/);
+  });
+});
+
+describe("value forms (spec/protocol.md §5.4.2)", () => {
+  const cases: [ValueForm, string, boolean][] = [
+    ["mysql-decimal", "-12", true],
+    ["mysql-decimal", "+3.25", true],
+    ["mysql-decimal", "0.5", true],
+    ["mysql-decimal", ".5", false],
+    ["mysql-decimal", "5.", false],
+    ["mysql-decimal", "1e3", false],
+    ["mysql-decimal", "abc", false],
+    ["mysql-decimal", "", false],
+    ["mysql-decimal", "NaN", false],
+    ["mysql-decimal", "9".repeat(35), true],
+    ["mysql-decimal", "9".repeat(36), false],
+    ["mysql-float", "1.5e-3", true],
+    ["mysql-float", "2E10", true],
+    ["mysql-float", "1e", false],
+    ["mysql-float", "NaN", false],
+    ["mysql-date", "2016-02-29", true],
+    ["mysql-date", "2015-02-29", false],
+    ["mysql-date", "2016-02-30", false],
+    ["mysql-date", "0000-00-00", true],
+    ["mysql-date", "0000-01-01", false],
+    ["mysql-date", "12000-01-01", false],
+    ["mysql-date", "2016-01-01 10:00", false],
+    ["mysql-datetime", "2016-01-01", true],
+    ["mysql-datetime", "2016-01-01 10:30", true],
+    ["mysql-datetime", "2016-01-01T10:30:00.123456", true],
+    ["mysql-datetime", "0000-00-00 00:00:00", true],
+    ["mysql-datetime", "2016-01-01T10:30:00.1234567", false],
+    ["mysql-datetime", "2016-01-01T10:30:00Z", false],
+    ["mysql-datetime", "2016-01-01 ", false],
+    ["mysql-datetime", "2016-01-01 24:00", false],
+    ["mysql-time", "23:59:59", true],
+    ["mysql-time", "-01:00:00", true],
+    ["mysql-time", "100:00:00.5", true],
+    ["mysql-time", "838:59:59", true],
+    ["mysql-time", "839:00:00", false],
+    ["mysql-time", "9:30", false],
+    ["mysql-time", "10:60", false],
+    ["pg-numeric", "-12", true],
+    ["pg-numeric", "9".repeat(40), true],
+    ["pg-numeric", "NaN", true],
+    ["pg-numeric", "-Infinity", true],
+    ["pg-numeric", "1e3", false],
+    ["pg-numeric", "abc", false],
+    ["pg-float", "1e+300", true],
+    ["pg-float", "infinity", true],
+    ["pg-float", "1e", false],
+    ["pg-date", "2016-02-29", true],
+    ["pg-date", "2016-02-30", false],
+    ["pg-date", "12000-01-01", true],
+    ["pg-date", "0044-03-15 BC", true],
+    ["pg-date", "0001-02-29 BC", true],
+    ["pg-date", "0002-02-29 BC", false],
+    ["pg-date", "infinity", true],
+    ["pg-date", "-infinity", true],
+    ["pg-date", "0000-01-01", false],
+    ["pg-date", "0000-00-00", false],
+    ["pg-timestamp", "2016-01-01 10:30", true],
+    ["pg-timestamp", "0044-03-15 10:00:00 BC", true],
+    ["pg-timestamp", "12000-01-01 10:00:00", true],
+    ["pg-timestamp", "2016-01-01 24:00:00", true],
+    ["pg-timestamp", "infinity", true],
+    ["pg-timestamp", "2016-01-01T10:30:00Z", false],
+    ["pg-time", "23:59:59", true],
+    ["pg-time", "24:00", true],
+    ["pg-time", "24:00:00.000", true],
+    ["pg-time", "24:00:01", false],
+    ["pg-time", "10:60", false],
+    ["pg-time", "9:30", false],
+    ["pg-time", "10:00+02", false],
+    ["pg-timestamptz", "2016-01-01 10:00:00+00", true],
+    ["pg-timestamptz", "2016-01-01T10:00:00.5+05:30", true],
+    ["pg-timestamptz", "1890-01-01 00:00:00+00:53:28", true],
+    ["pg-timestamptz", "0044-03-15 10:00:00+00:53:28 BC", true],
+    ["pg-timestamptz", "2016-01-01 10:00-0300", true],
+    ["pg-timestamptz", "2016-01-01 10:00Z", true],
+    ["pg-timestamptz", "2016-01-01", true],
+    ["pg-timestamptz", "-infinity", true],
+    ["pg-timestamptz", "2016-01-01Z", false],
+    ["pg-timestamptz", "2016-01-01 10:00+5", false],
+    ["pg-timestamptz", "2016-01-01 10:00+05:3", false],
+    ["pg-timetz", "10:00:00+02", true],
+    ["pg-timetz", "24:00:00+00", true],
+    ["pg-timetz", "10:00", true],
+    ["pg-timetz", "10:00+", false],
+  ];
+  for (const [form, v, ok] of cases) {
+    it(`${form} ${JSON.stringify(v)} → ${ok}`, () => expect(formAccepts(form, v)).toBe(ok));
+  }
 });
 
 describe("own schema", () => {
@@ -385,6 +512,11 @@ describe("pgColumnClass", () => {
       ["json", "json"],
       ["double precision", "float"],
       ["real", "float"],
+      ["smallint", "number"],
+      ["date", "temporal"],
+      ["timestamp without time zone", "temporal"],
+      ["time without time zone", "time"],
+      ["time with time zone", "time"],
       ["money", "other"],
     ] as const) {
       expect(pgColumnClass(t, "", "", false), t).toEqual({ kind });

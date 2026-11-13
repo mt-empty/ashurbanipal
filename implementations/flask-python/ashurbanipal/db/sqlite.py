@@ -9,7 +9,6 @@ import re
 import sqlite3
 import time
 
-from ..filter import Condition, NullCheck
 from ..join import (
     BINARY,
     BOOLEAN,
@@ -28,12 +27,14 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     build_select,
     group_unique_keys,
     plan_join,
     table_order_clause,
     table_schemas,
+    table_where_clause,
     tie_break_keys,
 )
 from . import (
@@ -98,11 +99,6 @@ def partial_index_predicate(sql: str) -> str | None:
 # list_schemas ever returns.
 ONLY_SCHEMA = "main"
 
-# SQLite's plain LIKE is already ASCII case-insensitive by default, so
-# ILIKE and LIKE compile to the same fragment here — only the mechanism
-# collapses, the case-insensitive *behavior* ILIKE promises still holds.
-_KEYWORD = {"ILIKE": "LIKE"}
-
 
 def _lenient_text_factory(data: bytes) -> str:
     """stdlib sqlite3's default text_factory raises UnicodeDecodeError on
@@ -120,39 +116,29 @@ def _check_schema(schema: str | None) -> None:
         raise NotAllowed(f"schema {schema!r}", kind=NotAllowedKind.SCHEMA)
 
 
-def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
-    if not conditions:
-        return "", []
-
-    values: list[str] = []
-    clause_parts: list[str] = []
-    for i, cond in enumerate(conditions):
-        if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
-        keyword = _KEYWORD.get(cond.op, cond.op)
-        quoted_column = quote_ident(cond.column)
-        if isinstance(cond, NullCheck):
-            inner = f"CAST({quoted_column} AS TEXT) {keyword}"
-        else:
-            inner = f"CAST({quoted_column} AS TEXT) {keyword} ?"
-            values.append(cond.value)
-        wrapped = f"(NOT ({inner}))" if cond.not_ else f"({inner})"
-
-        if i > 0:
-            if cond.logic not in ("AND", "OR"):
-                raise FilterParseError(f"condition {i} is missing logic")
-            clause_parts.append(" AND " if cond.logic == "AND" else " OR ")
-        clause_parts.append(wrapped)
-
-    return " where " + "".join(clause_parts), values
-
-
 _JOIN_DIALECT = Dialect(
     quote=quote_ident,
     cast_text=lambda expr: f"CAST({expr} AS TEXT)",
+    cast_param=lambda ph, target: f"CAST({ph} AS {target})",
     placeholder="?",
     ilike="like",
 )
+
+
+def _execute_filtered(cur: sqlite3.Cursor, sql: str, params: tuple[object, ...]) -> None:
+    """`cur.execute` for a filtered query. A system SQLite before 3.32 allows
+    only 999 bound values, so a long `IN` list is a filter error there."""
+    if len(params) > cur.connection.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER):
+        raise FilterParseError(f"filter binds {len(params)} values, more than this SQLite allows")
+    cur.execute(sql, params)
+
+
+def typed_compare(cls: ColumnClass) -> TypedCompare | None:
+    """The typed filter comparison for a column class (`spec/protocol.md`
+    §5.4.2). A stored value need not match its declared type, so values are
+    not checked; bound bare, the column's affinity compares a value that
+    reads as a number numerically and anything else as text."""
+    return TypedCompare(None) if cls in (NUMBER, FLOAT, TEMPORAL, TIME) else None
 
 
 def column_class(declared: str) -> ColumnClass:
@@ -229,7 +215,8 @@ class SqliteSource(DbSource):
                 name=col,
                 # A declared type can be empty (""); a stable label beats emitting "".
                 type_name=declared or "unknown",
-                column_class=column_class(declared or ""),
+                column_class=(cls := column_class(declared or "")),
+                compare=typed_compare(cls),
                 key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
                 references=fk_columns.get(col),
             )
@@ -347,7 +334,7 @@ class SqliteSource(DbSource):
                         raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
-                where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
+                where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
                 quoted_table = quote_ident(table)
             finally:
@@ -359,7 +346,7 @@ class SqliteSource(DbSource):
 
             self._bounded(conn, opts.timeout_secs)
             try:
-                cur.execute(sql, (*filter_values, opts.limit, opts.offset))
+                _execute_filtered(cur, sql, (*filter_values, opts.limit, opts.offset))
                 sqlite_rows = cur.fetchall()
             finally:
                 self._clear_bound(conn)
@@ -408,7 +395,7 @@ class SqliteSource(DbSource):
                 # The statement is built from catalog names and generated
                 # aliases only; every value is a bound parameter.
                 body, values = build_select(plan, _JOIN_DIALECT)
-                cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
+                _execute_filtered(cur, f"select {body}", (*values, opts.limit + 1, opts.offset))
                 rows, has_more = plan.rows_from(
                     cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)
                 )

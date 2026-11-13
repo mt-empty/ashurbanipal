@@ -13,8 +13,8 @@ import {
   tableLabelOf,
 } from "../core/state.js";
 import type { Column, CommonValue, FilterCondition, TableRef } from "../core/types.js";
-import { filterClause, parseFilterDsl, quoteFilterValue } from "../lib/filter-dsl.js";
-import { type Completion, completionAt, optionsFor } from "../lib/filter-tokens.js";
+import { filterClause, parseFilterDsl, quoteFilterValue, quoteListItem } from "../lib/filter-dsl.js";
+import { type Completion, completionAt, expectsValue, optionsFor } from "../lib/filter-tokens.js";
 import { truncateType } from "../lib/join-types.js";
 import { refKey, tableParams } from "../lib/table-ref.js";
 import { columnKey } from "./join-view.js";
@@ -272,13 +272,16 @@ function updateFilterSuggestions(): void {
     if (columnNamed(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")));
-  } else if (ctx.expect === "value") {
+  } else if (ctx.expect === "notTail" || ctx.expect === "boundAnd") {
+    showFilterSuggestions(ctx, plain(optionsFor(ctx.expect)));
+  } else if (expectsValue(ctx.expect)) {
+    const quote = ctx.expect === "listItem" ? quoteListItem : quoteFilterValue;
     const col = columnNamed(ctx.column);
     const source = col && commonValueSource(col);
     if (source) {
       commonValuesFor(source.table, source.column).then((values) => {
         if (token !== suggest.token() || document.activeElement !== input) return;
-        const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+        const rows = values.map((value) => ({ label: value, insert: quote(value) }));
         showFilterSuggestions(ctx, rows);
       });
     }

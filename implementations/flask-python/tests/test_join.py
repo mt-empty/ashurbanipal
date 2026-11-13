@@ -19,20 +19,31 @@ from ashurbanipal.db import BadJoin, BadParam, FilterParseError, NotAllowed, Que
 from ashurbanipal.db.postgres import column_class as pg_column_class
 from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import column_class as sqlite_column_class
-from ashurbanipal.filter import Comparison, FilterError, NullCheck, parse, parse_for_join
+from ashurbanipal.filter import (
+    Comparison,
+    FilterError,
+    ListComparison,
+    NullCheck,
+    form_accepts,
+    parse,
+    parse_for_join,
+)
 from ashurbanipal.join import (
     ARRAY,
     FLOAT,
     JSON,
     NUMBER,
     OTHER,
+    TEMPORAL,
     TEXT,
+    TIME,
     UNTYPED,
     UUID,
     ColMeta,
     Dialect,
     JoinOpts,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     assign_labels,
     build_select,
@@ -59,6 +70,7 @@ JOIN = json.dumps(
 _PG = Dialect(
     quote=lambda n: '"' + n.replace('"', '""') + '"',
     cast_text=lambda e: f"{e}::text",
+    cast_param=lambda ph, t: f"{ph}::{t}",
     placeholder="%s",
     ilike="native",
 )
@@ -217,6 +229,134 @@ def test_labels_are_unique_and_stable() -> None:
     assert assign_labels(["id", "id", "email"], [0, 1, 1]) == ["id_0", "id_1", "email"]
 
 
+def test_typed_columns_compare_in_their_own_type() -> None:
+    orders = _orders()
+    orders.columns.append(
+        ColMeta(
+            name="total",
+            type_name="integer",
+            column_class=NUMBER,
+            compare=TypedCompare("pg-numeric", "numeric", "int8"),
+        )
+    )
+    plan = plan_join(
+        parse_join(JOIN),
+        [orders, _users()],
+        _opts(
+            filter=[
+                ListComparison(column="total", op="BETWEEN", value=("1", "9.5")),
+                ListComparison(column="status", op="IN", value=("a", "b"), logic="AND", not_=True),
+                Comparison(column="total", op="LIKE", value="1%", logic="OR"),
+            ]
+        ),
+    )
+    body, values = build_select(plan, _PG)
+    assert (
+        ' where (t0."total" BETWEEN %s::int8 AND %s::numeric) AND (NOT (t0."status"::text IN (%s, %s)))'
+        ' OR (t0."total"::text LIKE %s)'
+    ) in body
+    assert values == ["1", "9.5", "a", "b", "1%"]
+    with pytest.raises(FilterParseError, match="'x' for column 'total'"):
+        plan_join(
+            parse_join(JOIN),
+            [orders, _users()],
+            _opts(filter=[ListComparison(column="total", op="IN", value=("1", "x"))]),
+        )
+
+
+@pytest.mark.parametrize(
+    ("form", "value", "ok"),
+    [
+        ("mysql-decimal", "-12", True),
+        ("mysql-decimal", "+3.25", True),
+        ("mysql-decimal", "0.5", True),
+        ("mysql-decimal", ".5", False),
+        ("mysql-decimal", "5.", False),
+        ("mysql-decimal", "1e3", False),
+        ("mysql-decimal", "abc", False),
+        ("mysql-decimal", "", False),
+        ("mysql-decimal", "NaN", False),
+        ("mysql-decimal", "9" * 35, True),
+        ("mysql-decimal", "9" * 36, False),
+        ("mysql-float", "1.5e-3", True),
+        ("mysql-float", "2E10", True),
+        ("mysql-float", "1e", False),
+        ("mysql-float", "NaN", False),
+        ("mysql-date", "2016-02-29", True),
+        ("mysql-date", "2015-02-29", False),
+        ("mysql-date", "2016-02-30", False),
+        ("mysql-date", "0000-00-00", True),
+        ("mysql-date", "0000-01-01", False),
+        ("mysql-date", "12000-01-01", False),
+        ("mysql-date", "2016-01-01 10:00", False),
+        ("mysql-datetime", "2016-01-01", True),
+        ("mysql-datetime", "2016-01-01 10:30", True),
+        ("mysql-datetime", "2016-01-01T10:30:00.123456", True),
+        ("mysql-datetime", "0000-00-00 00:00:00", True),
+        ("mysql-datetime", "2016-01-01T10:30:00.1234567", False),
+        ("mysql-datetime", "2016-01-01T10:30:00Z", False),
+        ("mysql-datetime", "2016-01-01 ", False),
+        ("mysql-datetime", "2016-01-01 24:00", False),
+        ("mysql-time", "23:59:59", True),
+        ("mysql-time", "-01:00:00", True),
+        ("mysql-time", "100:00:00.5", True),
+        ("mysql-time", "838:59:59", True),
+        ("mysql-time", "839:00:00", False),
+        ("mysql-time", "9:30", False),
+        ("mysql-time", "10:60", False),
+        ("pg-numeric", "-12", True),
+        ("pg-numeric", "9" * 40, True),
+        ("pg-numeric", "NaN", True),
+        ("pg-numeric", "-Infinity", True),
+        ("pg-numeric", "1e3", False),
+        ("pg-numeric", "abc", False),
+        ("pg-float", "1e+300", True),
+        ("pg-float", "infinity", True),
+        ("pg-float", "1e", False),
+        ("pg-date", "2016-02-29", True),
+        ("pg-date", "2016-02-30", False),
+        ("pg-date", "12000-01-01", True),
+        ("pg-date", "0044-03-15 BC", True),
+        ("pg-date", "0001-02-29 BC", True),
+        ("pg-date", "0002-02-29 BC", False),
+        ("pg-date", "infinity", True),
+        ("pg-date", "-infinity", True),
+        ("pg-date", "0000-01-01", False),
+        ("pg-date", "0000-00-00", False),
+        ("pg-timestamp", "2016-01-01 10:30", True),
+        ("pg-timestamp", "0044-03-15 10:00:00 BC", True),
+        ("pg-timestamp", "12000-01-01 10:00:00", True),
+        ("pg-timestamp", "2016-01-01 24:00:00", True),
+        ("pg-timestamp", "infinity", True),
+        ("pg-timestamp", "2016-01-01T10:30:00Z", False),
+        ("pg-time", "23:59:59", True),
+        ("pg-time", "24:00", True),
+        ("pg-time", "24:00:00.000", True),
+        ("pg-time", "24:00:01", False),
+        ("pg-time", "10:60", False),
+        ("pg-time", "9:30", False),
+        ("pg-time", "10:00+02", False),
+        ("pg-timestamptz", "2016-01-01 10:00:00+00", True),
+        ("pg-timestamptz", "2016-01-01T10:00:00.5+05:30", True),
+        ("pg-timestamptz", "1890-01-01 00:00:00+00:53:28", True),
+        ("pg-timestamptz", "0044-03-15 10:00:00+00:53:28 BC", True),
+        ("pg-timestamptz", "2016-01-01 10:00-0300", True),
+        ("pg-timestamptz", "2016-01-01 10:00Z", True),
+        ("pg-timestamptz", "2016-01-01", True),
+        ("pg-timestamptz", "-infinity", True),
+        ("pg-timestamptz", "2016-01-01Z", False),
+        ("pg-timestamptz", "2016-01-01 10:00+5", False),
+        ("pg-timestamptz", "2016-01-01 10:00+05:3", False),
+        ("pg-timetz", "10:00:00+02", True),
+        ("pg-timetz", "24:00:00+00", True),
+        ("pg-timetz", "10:00", True),
+        ("pg-timetz", "10:00+", False),
+    ],
+)
+def test_value_forms(form, value: str, ok: bool) -> None:
+    assert form_accepts(form, value) is ok
+
+
 def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
     plan = plan_join(
         parse_join(JOIN),
@@ -295,6 +435,12 @@ def test_column_classes() -> None:
         ("json", JSON),
         ("double precision", FLOAT),
         ("real", FLOAT),
+        ("smallint", NUMBER),
+        ("date", TEMPORAL),
+        ("timestamp without time zone", TEMPORAL),
+        ("timestamp with time zone", TEMPORAL),
+        ("time without time zone", TIME),
+        ("time with time zone", TIME),
         ("money", OTHER),
     ):
         assert pg_column_class(t, "", "", False) == expected, t

@@ -8,9 +8,10 @@ fixture file ships in the same PR.
 
 ## `parser-tests.json` — frontend DSL parser (DSL text → AST)
 
-Consumed only by the frontend parser's fixture runner
-(`frontend/test/filter-dsl.test.ts`, `node --test`), since DSL parsing exists
-only in `dbviewer.html`. Not part of backend conformance.
+Consumed only by the frontend's fixture runners
+(`frontend/test/filter-dsl.test.ts` for the parser,
+`frontend/test/filter-tokens.test.ts` for the highlighting tokenizer), since
+DSL parsing exists only in the frontend. Not part of backend conformance.
 
 Each entry in `cases`:
 
@@ -65,6 +66,12 @@ Consumed by every backend's fixture runner (reference:
 and, over HTTP, by the black-box suite (`conformance/runner/filter_dsl.rs`),
 which JSON-encodes each case into a real `filter` query param.
 
+Top-level `tables` maps each seed table a case names to its columns, each
+with the Postgres `type` (`information_schema.columns.data_type`) and the
+`spec/protocol.md` §5.11.2 `class`. Unit runners use it in place of a live
+catalog: the class picks typed or text comparison, and the type picks the
+cast target.
+
 Each entry in `cases`:
 
 - `name` — stable case ID.
@@ -75,21 +82,31 @@ Each entry in `cases`:
   a literal pre-URL-encoding `filter` param value, for cases that aren't
   a valid conditions array at all (malformed JSON, DSL text).
 - `expect` — the case is valid; the resulting WHERE clause must match:
-  - `where` — the fragment in the Rust implementation's normalized shape:
-    double-quoted column identifiers, `::text` casts, `$n` placeholders
-    numbered **from `$1` in condition order**. Runners with a different
+  - `where` — the fragment in the Postgres shape: double-quoted column
+    identifiers, a `::text` cast on the column for a text comparison, a
+    cast on the placeholder for a typed one (`$1::numeric`), no cast for
+    `IS [NOT] NULL` on a typed column, `$n` placeholders numbered **from `$1` in condition
+    order** (an `IN` or `BETWEEN` takes one per item). Runners with a different
     placeholder scheme (`?`, offset numbering — the Rust implementation
     itself binds limit/offset first, so it checks against `$n+2`) normalize
     before comparing; the operator spellings and parenthesization are
     normative.
   - `values` — the bind values, in placeholder order.
+- `engines` (optional) — the engines whose stored values include this
+  case's value (`NaN`, a ` BC` date), so the HTTP runner checks the case
+  only there; SQLite is listed because it skips the value check. Absent
+  means every engine.
 - `expect_error` — the case must be rejected (HTTP: 400). The kind names
   *why*, and implies the stage:
   - `unknown_column` — structurally valid AST, column fails the live
-    schema allow-list (the only builder-stage kind).
+    schema allow-list (builder stage).
+  - `invalid_value` — the column compares typed and a value does not
+    match its class's form (builder stage: it needs the column's class).
   - `malformed`, `bad_op`, `bad_logic`, `missing_value`,
-    `unexpected_value`, `missing_logic`, `unexpected_logic`,
-    `too_many_conditions`, `oversize` — structural validation, rejected
-    before any schema access. Error message text is
+    `unexpected_value`, `bad_value` (wrong value shape for the op: an
+    array where a string belongs, or a bad `IN`/`BETWEEN` list),
+    `missing_logic`, `unexpected_logic`, `too_many_conditions`,
+    `oversize` — structural validation, rejected before any schema
+    access. Error message text is
     implementation-defined (`spec/protocol.md` §2); only the rejection
     is asserted.

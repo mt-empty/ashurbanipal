@@ -198,39 +198,3 @@ export function cellToJson(value: unknown): string | null {
   if (Buffer.isBuffer(value)) return value.toString("utf8");
   return "<undecodable>";
 }
-
-// The hardcoded operator -> SQL-keyword table (spec/protocol.md §5.4.2),
-// shared across backends — wire text never becomes an operator except
-// through this match. The *fragment* built around the keyword (cast
-// syntax, placeholder style, ILIKE special-casing) is backend-specific;
-// see each db/*.ts's own buildWhereClause.
-export function opSql(op: string): string {
-  switch (op) {
-    case "=":
-      return "=";
-    case "!=":
-      return "!=";
-    case ">":
-      return ">";
-    case "<":
-      return "<";
-    case ">=":
-      return ">=";
-    case "<=":
-      return "<=";
-    case "LIKE":
-      return "LIKE";
-    case "ILIKE":
-      return "ILIKE";
-    case "IS NULL":
-      return "IS NULL";
-    case "IS NOT NULL":
-      return "IS NOT NULL";
-    default:
-      throw new Error(`opSql called with an op the caller should have validated: ${op}`);
-  }
-}
-
-export function opTakesValue(op: string): boolean {
-  return op !== "IS NULL" && op !== "IS NOT NULL";
-}

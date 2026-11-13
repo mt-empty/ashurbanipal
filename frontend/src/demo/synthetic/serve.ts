@@ -3,6 +3,7 @@
 // /tables/data filters, sorts, and pages the snapshot rows in JS.
 import snapshotData from "virtual:demo-snapshot";
 import type { ClassedColumn, FilterCondition, FilterOp } from "../../core/types.js";
+import { FILTER_OPERATORS } from "../../lib/filter-tokens.js";
 import { columnTypeClass } from "../../lib/format.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
 import { DEMO_ENGINE } from "../sources.js";
@@ -34,9 +35,9 @@ function tableIn(params: URLSearchParams): { table: SnapshotTable } | ApiRespons
   return { table };
 }
 
-// Compares by native type, not spec/protocol.md §5.4.2's text-cast
-// lexicographic quirk ("10" < "9") — a demo should show filtering work.
-// Nulls sort as greater than any value: Postgres's NULLS LAST ascending.
+// Compares number and date columns by value, as spec/protocol.md §5.4.2's
+// typed comparison does. Nulls sort as greater than any value: Postgres's
+// NULLS LAST ascending.
 function typedCompare(col: ClassedColumn, a: Cell, b: Cell): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
@@ -46,7 +47,7 @@ function typedCompare(col: ClassedColumn, a: Cell, b: Cell): number {
   if (typeClass === "date") return new Date(a).getTime() - new Date(b).getTime();
   return a < b ? -1 : a > b ? 1 : 0;
 }
-const VALID_OPS = new Set<FilterOp>(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
+const VALID_OPS = new Set<FilterOp>(FILTER_OPERATORS);
 function likeToRegExp(pattern: string, ci: boolean): RegExp {
   const escaped = pattern
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -55,6 +56,12 @@ function likeToRegExp(pattern: string, ci: boolean): RegExp {
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
 }
 function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean {
+  // As in SQL, a comparison with NULL is unknown, so neither it nor its NOT matches.
+  if (cell === null && cond.op !== "IS NULL" && cond.op !== "IS NOT NULL") return false;
+  const items = cond.value === undefined ? [] : Array.isArray(cond.value) ? cond.value : [cond.value];
+  const bucket = columnTypeClass(col);
+  const typed = bucket === "number" || bucket === "date";
+  const equal = (v: string): boolean => cell !== null && (typed ? typedCompare(col, cell, v) === 0 : cell === v);
   let result: boolean;
   switch (cond.op) {
     case "IS NULL":
@@ -64,14 +71,20 @@ function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean
       result = cell !== null;
       break;
     case "=":
-      result = cell !== null && cell === cond.value;
+      result = equal(items[0]);
       break;
     case "!=":
-      result = cell === null || cell !== cond.value;
+      result = !equal(items[0]);
+      break;
+    case "IN":
+      result = items.some(equal);
+      break;
+    case "BETWEEN":
+      result = cell !== null && typedCompare(col, cell, items[0]) >= 0 && typedCompare(col, cell, items[1]) <= 0;
       break;
     case "LIKE":
     case "ILIKE":
-      result = cell !== null && likeToRegExp(cond.value ?? "", cond.op === "ILIKE").test(cell);
+      result = cell !== null && likeToRegExp(items[0] ?? "", cond.op === "ILIKE").test(cell);
       break;
     case ">":
     case "<":
@@ -81,7 +94,7 @@ function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean
         result = false;
         break;
       }
-      const cmp = typedCompare(col, cell, cond.value ?? "");
+      const cmp = typedCompare(col, cell, items[0] ?? "");
       result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
       break;
     }

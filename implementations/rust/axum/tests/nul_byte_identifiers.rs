@@ -126,7 +126,7 @@ async fn nul_byte_filter_value_is_rejected_as_filter_parse_not_a_500() {
             not: false,
             column: "val".to_string(),
             op: FilterOp::Eq,
-            value: Some("ashb\0nul".to_string()),
+            value: Some("ashb\0nul".into()),
             join: None,
         }]),
         ..base_opts()

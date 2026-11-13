@@ -8,16 +8,11 @@ from urllib.parse import urlsplit
 import pymysql
 from pymysql.cursors import Cursor
 
-from ..filter import Condition, NullCheck
 from ..join import (
     BINARY,
-    FLOAT,
     JSON,
-    NUMBER,
     OTHER,
-    TEMPORAL,
     TEXT,
-    TIME,
     UUID,
     ColMeta,
     ColumnClass,
@@ -26,6 +21,7 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     build_select,
     enum_class,
@@ -33,7 +29,9 @@ from ..join import (
     plan_join,
     table_order_clause,
     table_schemas,
+    table_where_clause,
     tie_break_keys,
+    typed_class,
 )
 from . import (
     BadJoin,
@@ -114,64 +112,56 @@ def _decode_cell(value: bytes | None, encoding: str) -> str | None:
         return "<undecodable>"
 
 
-def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
-    """Map ILIKE through LOWER for collation independence (`spec/protocol.md` §5.4.2)."""
-    if not conditions:
-        return "", []
-
-    values: list[str] = []
-    clause_parts: list[str] = []
-    for i, cond in enumerate(conditions):
-        if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
-        cast = f"CAST({_quote_ident(cond.column)} AS CHAR)"
-
-        if isinstance(cond, NullCheck):
-            inner = f"{cast} {cond.op}"
-        elif cond.op == "ILIKE":
-            values.append(cond.value)
-            inner = f"LOWER({cast}) LIKE LOWER(%s)"
-        else:
-            values.append(cond.value)
-            inner = f"{cast} {cond.op} %s"
-        wrapped = f"(NOT ({inner}))" if cond.not_ else f"({inner})"
-
-        if i > 0:
-            if cond.logic not in ("AND", "OR"):
-                raise FilterParseError(f"condition {i} is missing logic")
-            clause_parts.append(" AND " if cond.logic == "AND" else " OR ")
-        clause_parts.append(wrapped)
-
-    return " where " + "".join(clause_parts), values
-
-
 _JOIN_DIALECT = Dialect(
     quote=_quote_ident,
     cast_text=lambda expr: f"CAST({expr} AS CHAR)",
+    cast_param=lambda ph, target: f"CAST({ph} AS {target})",
     placeholder="%s",
     ilike="lowered-like",
 )
 
 
-def column_class(data_type: str, column_type: str) -> ColumnClass:
-    """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
+# The errors MySQL reports with SQLSTATE 22003, 22007 or 22008; pymysql
+# exposes only the error number.
+_BAD_VALUE_ERRNOS = frozenset({1264, 1292, 1367, 1441, 1690})
+
+
+def _raise_if_bad_value(exc: pymysql.Error, filtered: bool) -> None:
+    """A bad value in a filtered query (a cast out of range) is the filter's
+    (`spec/protocol.md` §5.4.2)."""
+    if filtered and exc.args and exc.args[0] in _BAD_VALUE_ERRNOS:
+        raise FilterParseError(f"value invalid for this backend: {exc.args[-1]}") from exc
+
+
+def typed_compare(data_type: str) -> TypedCompare | None:
+    """The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
+    (`spec/protocol.md` §5.4.2); the casts are in `docs/adapter-decisions.md` §5.4.2."""
     t = data_type.lower()
     if t in ("tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric"):
-        return NUMBER
+        return TypedCompare("mysql-decimal", "DECIMAL(65,30)")
+    return {
+        "float": TypedCompare("mysql-float", "FLOAT"),
+        "double": TypedCompare("mysql-float", "DOUBLE"),
+        "date": TypedCompare("mysql-date"),
+        "datetime": TypedCompare("mysql-datetime"),
+        "timestamp": TypedCompare("mysql-datetime"),
+        "time": TypedCompare("mysql-time"),
+    }.get(t)
+
+
+def column_class(data_type: str, column_type: str) -> ColumnClass:
+    """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
+    if (typed := typed_class(typed_compare(data_type))) is not None:
+        return typed
+    t = data_type.lower()
     if t in ("char", "varchar", "tinytext", "text", "mediumtext", "longtext"):
         return TEXT
-    if t in ("date", "datetime", "timestamp"):
-        return TEMPORAL
-    if t == "time":
-        return TIME
     if t in ("binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob"):
         return BINARY
     if t == "uuid":
         return UUID
     if t == "enum":
         return enum_class(column_type)
-    if t in ("float", "double"):
-        return FLOAT
     if t == "json":
         return JSON
     return OTHER
@@ -390,7 +380,7 @@ class MySqlSource(DbSource):
                         raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
-                where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
+                where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
                 order_clause = table_order_clause(meta, sort, opts.descending, _quote_ident)
@@ -409,6 +399,7 @@ class MySqlSource(DbSource):
                     # to NotAllowed(NOT_READABLE).
                     if exc.args and exc.args[0] == 1142:
                         raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                    _raise_if_bad_value(exc, bool(filter_values))
                     raise
                 finally:
                     conn.use_unicode = True
@@ -463,6 +454,7 @@ class MySqlSource(DbSource):
                 # column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
                 type_name="json" if name in json_columns else column_type,
                 column_class=JSON if name in json_columns else column_class(data_type, column_type),
+                compare=None if name in json_columns else typed_compare(data_type),
                 collation=collation or None,
                 key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                 references=fk_columns.get(name),
@@ -525,6 +517,7 @@ class MySqlSource(DbSource):
                 except pymysql.Error as exc:
                     if exc.args and exc.args[0] == 1142:
                         raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                    _raise_if_bad_value(exc, bool(values))
                     raise
                 finally:
                     conn.use_unicode = True

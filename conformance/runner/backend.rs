@@ -115,6 +115,17 @@ pub enum NotJoinableColumns {
     NotSeeded,
 }
 
+/// Whether a value compared typed must fit its column's form
+/// (`spec/protocol.md` §5.4.2).
+#[derive(PartialEq, Eq)]
+pub enum TypedValueCheck {
+    /// Postgres and MySQL/MariaDB: a value that does not fit is a 400.
+    Enforced,
+    /// SQLite: a stored value need not match its declared type, so the
+    /// check is skipped and a bad value simply matches what it matches.
+    Skipped,
+}
+
 impl Backend {
     pub(crate) fn parse(raw: &str) -> Option<Backend> {
         match raw.trim().to_ascii_lowercase().as_str() {
@@ -147,6 +158,15 @@ impl Backend {
     /// dialect if [`record_from_seed`](Self::record_from_seed) saw one,
     /// otherwise `ASHURBANIPAL_CONFORMANCE_BACKEND`, otherwise Postgres —
     /// the reference.
+    /// The engine's name in a fixture case's `engines` list.
+    pub fn fixture_name(&self) -> &'static str {
+        match self {
+            Backend::Postgres => "postgres",
+            Backend::Mysql => "mysql",
+            Backend::Sqlite => "sqlite",
+        }
+    }
+
     pub fn current() -> Backend {
         debug_assert!(
             SEED_CHECKED.get().is_some(),
@@ -215,6 +235,13 @@ impl Backend {
         match self {
             Backend::Postgres | Backend::Mysql => NotJoinableColumns::Seeded,
             Backend::Sqlite => NotJoinableColumns::NotSeeded,
+        }
+    }
+
+    pub fn typed_value_check(self) -> TypedValueCheck {
+        match self {
+            Backend::Postgres | Backend::Mysql => TypedValueCheck::Enforced,
+            Backend::Sqlite => TypedValueCheck::Skipped,
         }
     }
 

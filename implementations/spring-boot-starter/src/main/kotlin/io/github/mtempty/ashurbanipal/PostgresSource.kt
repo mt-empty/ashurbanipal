@@ -10,34 +10,50 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import javax.sql.DataSource
 
-private val JOIN_DIALECT = JoinDialect(
+internal val PG_DIALECT = JoinDialect(
     quote = ::quoteIdent,
     castText = { "$it::text" },
+    castParam = { ph, target -> "$ph::$target" },
     ilike = "native",
 )
 
-/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass = when (dataType) {
-    "smallint", "integer", "bigint", "numeric" -> ColumnClass.NUMBER
-    "character varying", "character", "text" -> ColumnClass.TEXT
-    "uuid" -> ColumnClass.UUID
-    "boolean" -> ColumnClass.BOOLEAN
-    "bytea" -> ColumnClass.BINARY
-    "date", "timestamp without time zone", "timestamp with time zone" -> ColumnClass.TEMPORAL
-    "time without time zone", "time with time zone" -> ColumnClass.TIME
-    "USER-DEFINED" -> when {
-        isEnum -> ColumnClass.enum("$udtSchema.$udtName")
-        udtName == "citext" -> ColumnClass.TEXT
-        else -> ColumnClass.OTHER
-    }
-    "real", "double precision" -> ColumnClass.FLOAT
-    "json", "jsonb" -> ColumnClass.JSON
-    "ARRAY" -> ColumnClass.ARRAY
-    else -> ColumnClass.OTHER
+/**
+ * The typed filter comparison for an `information_schema.columns.data_type`
+ * (`spec/protocol.md` §5.4.2); the cast target matches the column's own type
+ * so `real` compares as `real`.
+ */
+internal fun pgTypedCompare(dataType: String): TypedCompare? = when (dataType) {
+    "smallint", "integer", "bigint" -> TypedCompare(ValueForm.PG_NUMERIC, "numeric", intCast = "int8")
+    "numeric" -> TypedCompare(ValueForm.PG_NUMERIC, "numeric")
+    "real" -> TypedCompare(ValueForm.PG_FLOAT, "real")
+    "double precision" -> TypedCompare(ValueForm.PG_FLOAT, "float8")
+    "date" -> TypedCompare(ValueForm.PG_DATE, "date")
+    "timestamp without time zone" -> TypedCompare(ValueForm.PG_TIMESTAMP, "timestamp")
+    "timestamp with time zone" -> TypedCompare(ValueForm.PG_TIMESTAMP_TZ, "timestamptz")
+    "time without time zone" -> TypedCompare(ValueForm.PG_TIME, "time")
+    "time with time zone" -> TypedCompare(ValueForm.PG_TIME_TZ, "timetz")
+    else -> null
 }
 
+/** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
+internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass =
+    typedClass(pgTypedCompare(dataType)) ?: when (dataType) {
+        "character varying", "character", "text" -> ColumnClass.TEXT
+        "uuid" -> ColumnClass.UUID
+        "boolean" -> ColumnClass.BOOLEAN
+        "bytea" -> ColumnClass.BINARY
+        "USER-DEFINED" -> when {
+            isEnum -> ColumnClass.enum("$udtSchema.$udtName")
+            udtName == "citext" -> ColumnClass.TEXT
+            else -> ColumnClass.OTHER
+        }
+        "json", "jsonb" -> ColumnClass.JSON
+        "ARRAY" -> ColumnClass.ARRAY
+        else -> ColumnClass.OTHER
+    }
+
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
-class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
+class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     override val engine = Engine.POSTGRES
 
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
@@ -48,7 +64,11 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
     }
 
     private fun <T> inReadOnlyTransaction(action: () -> T): T =
-        transactionTemplate.execute { action() }
+        transactionTemplate.execute {
+            // Typed filters read values in ISO form, and a cell's text must be one.
+            jdbcTemplate.execute("set local datestyle = 'ISO'")
+            action()
+        }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
 
     override fun listSchemas(): SchemaListing =
@@ -241,6 +261,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 name = c.name,
                 type = c.fullType,
                 columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                compare = pgTypedCompare(c.type),
                 collation = c.collation,
                 key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                 references = fkColumns[c.name],
@@ -287,7 +308,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
         // The statement is built from catalog names and generated aliases
         // only; every value is a bound parameter.
-        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
+        val (body, values) = buildJoinSelect(plan, PG_DIALECT)
         val bindArgs: List<Any> = values + (opts.limit + 1) + opts.offset
         val rows = try {
             jdbcTemplate.query(
@@ -296,19 +317,27 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 *bindArgs.toTypedArray(),
             )
         } catch (e: DataAccessException) {
-            val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
-            if (sqlState == "42501") {
-                throw NotAllowedException("not allowed: table ${spec.table}", NotAllowedKind.NOT_READABLE)
-            }
-            if (sqlState == "22021" || sqlState == "22P05") {
-                throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
-            }
-            // With a sort, an undefined function is the sort column's type having no
-            // ordering operator (json, xml, geometric types).
-            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
-            throw e
+            throw mapSelectError(e, spec.table, opts.sort, values.isNotEmpty())
         }
         plan.joinData(rows, opts.limit, realSchema)
+    }
+
+    /** The protocol error for a failed data or join SELECT, or [e] itself when none applies. */
+    private fun mapSelectError(e: DataAccessException, table: String, sort: String?, filtered: Boolean): Exception {
+        val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
+        return when {
+            // Residual SELECT-denied errors are NotAllowed (spec/protocol.md §2).
+            sqlState == "42501" -> NotAllowedException("not allowed: table $table", NotAllowedKind.NOT_READABLE)
+            // A filter value Postgres rejects (a bad-value SQLSTATE: a NUL byte, or a
+            // value a typed comparison's cast refuses) is a 400, never a raw 500
+            // (docs/adapter-decisions.md §5.4.2).
+            sqlState in BAD_VALUE_SQLSTATES && filtered ->
+                FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
+            // With a sort, an undefined function is the sort column's type having no
+            // ordering operator (json, xml, geometric types).
+            sqlState == "42883" && sort != null -> UnsortableException(sort)
+            else -> e
+        }
     }
 
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
@@ -325,7 +354,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { filterValidator.buildWhereClause(it, columnNames) }
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta, PG_DIALECT) }
             ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
@@ -341,22 +370,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val rows = try {
             jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
         } catch (e: DataAccessException) {
-            // Map residual SELECT-denied errors to NotAllowed (spec/protocol.md §2).
-            val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
-            if (sqlState == "42501") {
-                throw NotAllowedException("not allowed: table $realTable", NotAllowedKind.NOT_READABLE)
-            }
-            // A filter value Postgres's text encoding rejects (SQLSTATE
-            // 22021/22P05) maps to FilterException, also 400, never a raw
-            // 500 (docs/adapter-decisions.md §5.4.2 has the cross-backend
-            // rationale).
-            if (sqlState == "22021" || sqlState == "22P05") {
-                throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
-            }
-            // With a sort, an undefined function is the sort column's type having no
-            // ordering operator (json, xml, geometric types).
-            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
-            throw e
+            throw mapSelectError(e, realTable, opts.sort, whereClause.values.isNotEmpty())
         }
 
         val totalApprox = jdbcTemplate.queryForObject(

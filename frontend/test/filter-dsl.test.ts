@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { eqClause, filterTooLong, parseFilterDsl, quoteFilterValue } from "../src/lib/filter-dsl.ts";
+import { eqClause, filterTooLong, parseFilterDsl, quoteFilterValue, quoteListItem } from "../src/lib/filter-dsl.ts";
 
 // The single canonical DSL-text -> wire-AST parser (spec/filter-dsl.md). Cases
 // come from spec/fixtures/parser-tests.json, generated from the doc's §5
@@ -49,6 +49,14 @@ test("quoteFilterValue output round-trips through the parser unchanged", () => {
   for (const v of values) {
     const parsed = parseFilterDsl(`col = ${quoteFilterValue(v)}`);
     assert.equal(parsed[0].value, v);
+  }
+});
+
+test("quoteListItem output round-trips through an IN list unchanged", () => {
+  const values = ["a,b", "(x)", "NULL", "null", "it's", "AND", "", "plain"];
+  for (const v of values) {
+    const parsed = parseFilterDsl(`col IN (${quoteListItem(v)}, z)`);
+    assert.deepEqual(parsed[0].value, [v, "z"]);
   }
 });
 
