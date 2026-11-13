@@ -99,7 +99,7 @@ class JoinSupportTest {
     private val join = """{"table":"orders","joins":[{"type":"left","table":"users",
         "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"""
 
-    private val pg = JoinDialect(::quoteIdent, { "$it::text" }, "native")
+    private val pg = JoinDialect(::quoteIdent, { "$it::text" }, { ph, t -> "$ph::$t" }, "native")
 
     @Test
     fun `only a text column reports its collation`() {
@@ -216,9 +216,64 @@ class JoinSupportTest {
         val (body, values) = buildJoinSelect(plan, pg)
         assertTrue(body.startsWith("t0.\"id\"::text as c0, "), body)
         assertTrue(body.contains(" from \"public\".\"orders\" t0 left join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\""), body)
-        assertTrue(body.contains(" where (t1.\"email\"::text = ?) OR (NOT (t0.\"status\"::text IS NULL))"), body)
+        assertTrue(body.contains(" where (t1.\"email\"::text = ?) OR (NOT (t0.\"status\" IS NULL))"), body)
         assertTrue(body.endsWith(" order by t1.\"email\" asc, t0.\"id\" asc limit ? offset ?"), body)
         assertEquals(listOf("a@b.c"), values)
+    }
+
+    @Test
+    fun `typed columns compare in their own type and check their values`() {
+        val withTotal = orders().let {
+            it.copy(columns = it.columns + ColMeta("total", "integer", ColumnClass.NUMBER, compare = TypedCompare(ValueForm.NUMBER, "numeric", intCast = "int8")))
+        }
+        val plan = planJoin(
+            parseJoin(join),
+            listOf(withTotal, users()),
+            opts(
+                filter = listOf(
+                    Condition(column = "total", op = "BETWEEN", value = listOf("1", "9.5")),
+                    Condition(logic = "AND", not = true, column = "status", op = "IN", value = listOf("a", "b")),
+                    Condition(logic = "OR", column = "total", op = "LIKE", value = "1%"),
+                ),
+            ),
+        )
+        val (body, values) = buildJoinSelect(plan, pg)
+        assertTrue(
+            body.contains(
+                " where (t0.\"total\" BETWEEN ?::int8 AND ?::numeric) AND (NOT (t0.\"status\"::text IN (?, ?)))" +
+                    " OR (t0.\"total\"::text LIKE ?)",
+            ),
+            body,
+        )
+        assertEquals(listOf("1", "9.5", "a", "b", "1%"), values)
+        val thrown = assertThrows(FilterException::class.java) {
+            planJoin(parseJoin(join), listOf(withTotal, users()), opts(filter = listOf(Condition(column = "total", op = "IN", value = listOf("1", "x")))))
+        }
+        assertTrue(thrown.message!!.contains("\"x\" for column \"total\""), thrown.message)
+    }
+
+    @Test
+    fun `value forms`() {
+        val cases = listOf(
+            Triple(ValueForm.NUMBER, "-12", true), Triple(ValueForm.NUMBER, "+3.25", true),
+            Triple(ValueForm.NUMBER, ".5", false), Triple(ValueForm.NUMBER, "5.", false),
+            Triple(ValueForm.NUMBER, "1e3", false), Triple(ValueForm.NUMBER, "9".repeat(35), true),
+            Triple(ValueForm.NUMBER, "9".repeat(36), false), Triple(ValueForm.FLOAT, "1.5e-3", true),
+            Triple(ValueForm.FLOAT, "NaN", false), Triple(ValueForm.DATE, "2016-02-29", true),
+            Triple(ValueForm.DATE, "2015-02-29", false), Triple(ValueForm.DATE, "0000-01-01", false),
+            Triple(ValueForm.DATE, "2016-01-01 10:00", false),
+            Triple(ValueForm.TIMESTAMP, "2016-01-01T10:30:00.123456", true),
+            Triple(ValueForm.TIMESTAMP, "2016-01-01T10:30:00Z", false), Triple(ValueForm.TIMESTAMP, "2016-01-01 ", false),
+            Triple(ValueForm.TIME, "23:59:59", true), Triple(ValueForm.TIME, "24:00", false), Triple(ValueForm.TIME, "9:30", false),
+            Triple(ValueForm.TIME, "10:00+02", false), Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01 10:00:00+00", true),
+            Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01T10:00:00.5+05:30", true),
+            Triple(ValueForm.TIMESTAMP_TZ, "1890-01-01 00:00:00+00:53:28", true),
+            Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01 10:00-0300", true), Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01 10:00Z", true),
+            Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01", true), Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01Z", false),
+            Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01 10:00+5", false), Triple(ValueForm.TIMESTAMP_TZ, "2016-01-01 10:00+05:3", false),
+            Triple(ValueForm.TIME_TZ, "10:00:00+02", true), Triple(ValueForm.TIME_TZ, "10:00", true), Triple(ValueForm.TIME_TZ, "10:00+", false),
+        )
+        for ((form, v, ok) in cases) assertEquals(ok, form.accepts(v), "$form $v")
     }
 
     @Test

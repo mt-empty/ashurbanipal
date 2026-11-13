@@ -22,39 +22,6 @@ internal fun timedSelect(variant: Variant, timeoutSecs: Int, body: String): Stri
 /** Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5). */
 private fun quoteIdentMysql(ident: String): String = "`" + ident.replace("`", "``") + "`"
 
-/** Maps ILIKE through LOWER for collation independence (`spec/protocol.md` §5.4.2). */
-private fun buildWhereClauseMysql(conditions: List<Condition>, columnNames: List<String>): WhereClause {
-    if (conditions.isEmpty()) {
-        return WhereClause("", emptyList())
-    }
-    val values = mutableListOf<String>()
-    val clause = StringBuilder()
-    conditions.forEachIndexed { i, condition ->
-        val column = columnNames.find { it == condition.column }
-            ?: throw NotAllowedException("not allowed: column ${condition.column}", NotAllowedKind.COLUMN)
-        val cast = "CAST(${quoteIdentMysql(column)} AS CHAR)"
-
-        val inner = if (condition.op == "ILIKE") {
-            val value = condition.value ?: throw FilterException("op ${condition.op} requires a value")
-            values.add(value)
-            "LOWER($cast) LIKE LOWER(?)"
-        } else if (condition.op !in OPS_WITHOUT_VALUE) {
-            val value = condition.value ?: throw FilterException("op ${condition.op} requires a value")
-            values.add(value)
-            "$cast ${opSqlKeyword(condition.op)} ?"
-        } else {
-            "$cast ${opSqlKeyword(condition.op)}"
-        }
-        val wrapped = if (condition.not) "(NOT ($inner))" else "($inner)"
-
-        if (i > 0) {
-            clause.append(if (condition.logic == "OR") " OR " else " AND ")
-        }
-        clause.append(wrapped)
-    }
-    return WhereClause(" where $clause", values)
-}
-
 private fun bindParams(ps: PreparedStatement, params: List<Any?>) {
     params.forEachIndexed { i, param ->
         when (param) {
@@ -104,8 +71,27 @@ private data class FkCandidate(val columnName: String, val refSchema: String?, v
 private val JOIN_DIALECT = JoinDialect(
     quote = ::quoteIdentMysql,
     castText = { "CAST($it AS CHAR)" },
+    castParam = { ph, target -> "CAST($ph AS $target)" },
     ilike = "lowered-like",
 )
+
+/**
+ * The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
+ * (`spec/protocol.md` §5.4.2). A bare DECIMAL cast is DECIMAL(10,0) and
+ * rounds; a temporal value is bound bare because MySQL 8.4 compares a TIME
+ * column unequal to an equal CAST(? AS TIME), and coerces a string to the
+ * column's own temporal type.
+ */
+internal fun mysqlTypedCompare(dataType: String): TypedCompare? = when (dataType.lowercase()) {
+    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" ->
+        TypedCompare(ValueForm.NUMBER, "DECIMAL(65,30)")
+    "float" -> TypedCompare(ValueForm.FLOAT, "FLOAT")
+    "double" -> TypedCompare(ValueForm.FLOAT, "DOUBLE")
+    "date" -> TypedCompare(ValueForm.DATE)
+    "datetime", "timestamp" -> TypedCompare(ValueForm.TIMESTAMP)
+    "time" -> TypedCompare(ValueForm.TIME)
+    else -> null
+}
 
 /** Matches the column check MariaDB adds to every JSON column exactly, so a user's own json_valid check on another column doesn't count. */
 private const val MARIADB_JSON_COLUMNS_SQL =
@@ -336,6 +322,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                 // column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
                 type = if (isJson) "json" else c.columnType,
                 columnClass = if (isJson) ColumnClass.JSON else mysqlColumnClass(c.type, c.columnType),
+                compare = if (isJson) null else mysqlTypedCompare(c.type),
                 collation = c.collation?.takeIf { it.isNotEmpty() },
                 key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                 references = fkColumns[c.name],
@@ -416,7 +403,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { buildWhereClauseMysql(it, columnNames) } ?: WhereClause("", emptyList())
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta.columns, JOIN_DIALECT) } ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
         val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdentMysql)

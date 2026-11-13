@@ -17,21 +17,13 @@ class FilterValidatorFixtureTest {
         File(repoRoot, "spec/fixtures/filter-builder-tests.json")
     }
 
-    /** Static mirror of the seed schema's columns for the fixture's tables (README: unit runners substitute this for the live information_schema lookup). */
-    private fun seedColumns(table: String): List<String> = when (table) {
-        "users" -> listOf(
-            "id", "email", "full_name", "age", "is_active", "login_count",
-            "metadata", "last_login_at", "created_at",
-        )
-        "orders" -> listOf(
-            "id", "user_id", "status", "total_cents", "discount_pct", "tags",
-            "line_items", "created_at",
-        )
-        "products" -> listOf(
-            "id", "sku", "name", "category", "price", "weight_kg", "in_stock",
-            "description", "created_on",
-        )
-        else -> error("fixture references unmapped table $table")
+    /** The fixture's `tables` map in place of the live catalog lookup (spec/fixtures/README.md). */
+    private fun seedColumns(root: JsonNode, table: String): List<ColMeta> {
+        val columns = root["tables"][table] ?: error("fixture references unmapped table $table")
+        return columns.properties().map { (name, c) ->
+            val type = c["type"].asText()
+            ColMeta(name = name, type = type, columnClass = pgColumnClass(type, "", "", false), compare = pgTypedCompare(type))
+        }
     }
 
     /** The fixture's `$n` placeholders are Postgres-numbered; this port binds positional `?` instead, so only order/count matter, not numbering. */
@@ -55,7 +47,7 @@ class FilterValidatorFixtureTest {
                 expect != null -> {
                     val conditions = runCatching { validator.parse(raw) }
                         .getOrElse { throw AssertionError("case $name: parse failed: ${it.message}", it) }
-                    val whereClause = runCatching { validator.buildWhereClause(conditions, seedColumns(table)) }
+                    val whereClause = runCatching { tableWhereClause(conditions, seedColumns(root, table), PG_DIALECT) }
                         .getOrElse { throw AssertionError("case $name: build failed: ${it.message}", it) }
 
                     val expectedWhereRaw = expect["where"].asText()
@@ -68,12 +60,13 @@ class FilterValidatorFixtureTest {
                 expectError == "unknown_column" -> {
                     val conditions = runCatching { validator.parse(raw) }
                         .getOrElse { throw AssertionError("case $name: should parse (rejection is builder-stage): ${it.message}", it) }
-                    // Matches spec/protocol.md §2's unknown_column code (and
-                    // MySqlSource/SqliteSource's own buildWhereClause*, which
-                    // already threw NotAllowedException here) — not a
-                    // structural filter-AST problem.
-                    val thrown = assertThrows(NotAllowedException::class.java, { validator.buildWhereClause(conditions, seedColumns(table)) }, "case $name")
+                    val thrown = assertThrows(NotAllowedException::class.java, { tableWhereClause(conditions, seedColumns(root, table), PG_DIALECT) }, "case $name")
                     assertEquals(NotAllowedKind.COLUMN, thrown.kind, "case $name")
+                }
+                expectError == "invalid_value" -> {
+                    val conditions = runCatching { validator.parse(raw) }
+                        .getOrElse { throw AssertionError("case $name: should parse (rejection is builder-stage): ${it.message}", it) }
+                    assertThrows(FilterException::class.java, { tableWhereClause(conditions, seedColumns(root, table), PG_DIALECT) }, "case $name")
                 }
                 expectError != null -> {
                     assertThrows(FilterException::class.java, { validator.parse(raw) }, "case $name: expected structural rejection ($expectError)")

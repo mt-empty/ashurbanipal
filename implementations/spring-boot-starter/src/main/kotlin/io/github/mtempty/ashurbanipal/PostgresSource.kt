@@ -10,11 +10,30 @@ import java.sql.ResultSet
 import java.sql.SQLException
 import javax.sql.DataSource
 
-private val JOIN_DIALECT = JoinDialect(
+internal val PG_DIALECT = JoinDialect(
     quote = ::quoteIdent,
     castText = { "$it::text" },
+    castParam = { ph, target -> "$ph::$target" },
     ilike = "native",
 )
+
+/**
+ * The typed filter comparison for an `information_schema.columns.data_type`
+ * (`spec/protocol.md` §5.4.2); the cast target matches the column's own type
+ * so `real` compares as `real`.
+ */
+internal fun pgTypedCompare(dataType: String): TypedCompare? = when (dataType) {
+    "smallint", "integer", "bigint" -> TypedCompare(ValueForm.NUMBER, "numeric", intCast = "int8")
+    "numeric" -> TypedCompare(ValueForm.NUMBER, "numeric")
+    "real" -> TypedCompare(ValueForm.FLOAT, "real")
+    "double precision" -> TypedCompare(ValueForm.FLOAT, "float8")
+    "date" -> TypedCompare(ValueForm.DATE, "date")
+    "timestamp without time zone" -> TypedCompare(ValueForm.TIMESTAMP, "timestamp")
+    "timestamp with time zone" -> TypedCompare(ValueForm.TIMESTAMP_TZ, "timestamptz")
+    "time without time zone" -> TypedCompare(ValueForm.TIME, "time")
+    "time with time zone" -> TypedCompare(ValueForm.TIME_TZ, "timetz")
+    else -> null
+}
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass = when (dataType) {
@@ -241,6 +260,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 name = c.name,
                 type = c.fullType,
                 columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
+                compare = pgTypedCompare(c.type),
                 collation = c.collation,
                 key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
                 references = fkColumns[c.name],
@@ -287,7 +307,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
         // The statement is built from catalog names and generated aliases
         // only; every value is a bound parameter.
-        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
+        val (body, values) = buildJoinSelect(plan, PG_DIALECT)
         val bindArgs: List<Any> = values + (opts.limit + 1) + opts.offset
         val rows = try {
             jdbcTemplate.query(
@@ -300,7 +320,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "42501") {
                 throw NotAllowedException("not allowed: table ${spec.table}", NotAllowedKind.NOT_READABLE)
             }
-            if (sqlState == "22021" || sqlState == "22P05") {
+            if (sqlState?.startsWith("22") == true && values.isNotEmpty()) {
                 throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
             // With a sort, an undefined function is the sort column's type having no
@@ -325,7 +345,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { filterValidator.buildWhereClause(it, columnNames) }
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta.columns, PG_DIALECT) }
             ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
@@ -346,11 +366,11 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             if (sqlState == "42501") {
                 throw NotAllowedException("not allowed: table $realTable", NotAllowedKind.NOT_READABLE)
             }
-            // A filter value Postgres's text encoding rejects (SQLSTATE
-            // 22021/22P05) maps to FilterException, also 400, never a raw
-            // 500 (docs/adapter-decisions.md §5.4.2 has the cross-backend
-            // rationale).
-            if (sqlState == "22021" || sqlState == "22P05") {
+            // A filter value Postgres rejects (SQLSTATE class 22: a NUL byte,
+            // or a value a typed comparison's cast refuses) maps to
+            // FilterException, also 400, never a raw 500
+            // (docs/adapter-decisions.md §5.4.2).
+            if (sqlState?.startsWith("22") == true && whereClause.values.isNotEmpty()) {
                 throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             }
             // With a sort, an undefined function is the sort column's type having no

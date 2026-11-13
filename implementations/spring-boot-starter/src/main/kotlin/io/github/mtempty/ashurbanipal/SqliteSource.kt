@@ -15,36 +15,6 @@ private fun checkSchema(schema: String?) {
     }
 }
 
-/** SQLite filters use `CAST(... AS TEXT)` and `LIKE` for `ILIKE`. */
-private fun buildWhereClauseSqlite(conditions: List<Condition>, columnNames: List<String>): WhereClause {
-    if (conditions.isEmpty()) {
-        return WhereClause("", emptyList())
-    }
-    val values = mutableListOf<String>()
-    val clause = StringBuilder()
-    conditions.forEachIndexed { i, condition ->
-        val column = columnNames.find { it == condition.column }
-            ?: throw NotAllowedException("not allowed: column ${condition.column}", NotAllowedKind.COLUMN)
-        val keyword = if (condition.op == "ILIKE") "LIKE" else opSqlKeyword(condition.op)
-        val cast = "CAST(${quoteIdent(column)} AS TEXT)"
-
-        val inner = if (condition.op !in OPS_WITHOUT_VALUE) {
-            val value = condition.value ?: throw FilterException("op ${condition.op} requires a value")
-            values.add(value)
-            "$cast $keyword ?"
-        } else {
-            "$cast $keyword"
-        }
-        val wrapped = if (condition.not) "(NOT ($inner))" else "($inner)"
-
-        if (i > 0) {
-            clause.append(if (condition.logic == "OR") " OR " else " AND ")
-        }
-        clause.append(wrapped)
-    }
-    return WhereClause(" where $clause", values)
-}
-
 private fun bindParams(ps: java.sql.PreparedStatement, params: List<Any?>) {
     params.forEachIndexed { i, param ->
         when (param) {
@@ -73,8 +43,20 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
 private val JOIN_DIALECT = JoinDialect(
     quote = ::quoteIdent,
     castText = { "CAST($it AS TEXT)" },
+    castParam = { ph, target -> "CAST($ph AS $target)" },
     ilike = "like",
 )
+
+/**
+ * The typed filter comparison for a column class (`spec/protocol.md` §5.4.2).
+ * A stored value need not match its declared type, so values are not
+ * checked; bound bare, the column's affinity compares a value that reads as
+ * a number numerically and anything else as text.
+ */
+internal fun sqliteTypedCompare(columnClass: ColumnClass): TypedCompare? = when (columnClass) {
+    ColumnClass.NUMBER, ColumnClass.FLOAT, ColumnClass.TEMPORAL, ColumnClass.TIME -> TypedCompare(form = null)
+    else -> null
+}
 
 /** Recognised names first, then SQLite's own affinity rules (`docs/adapter-decisions.md` §5.11). */
 internal fun sqliteColumnClass(declared: String): ColumnClass {
@@ -152,6 +134,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
                 // A declared type can be empty (""); a stable label beats emitting "".
                 type = declared.ifEmpty { "unknown" },
                 columnClass = sqliteColumnClass(declared),
+                compare = sqliteTypedCompare(sqliteColumnClass(declared)),
                 key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
                 references = fkColumns[col],
             )
@@ -277,7 +260,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { buildWhereClauseSqlite(it, columnNames) } ?: WhereClause("", emptyList())
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta.columns, JOIN_DIALECT) } ?: WhereClause("", emptyList())
         val quotedTable = quoteIdent(realTable)
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
