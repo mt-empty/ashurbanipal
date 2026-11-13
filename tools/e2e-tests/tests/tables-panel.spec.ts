@@ -128,6 +128,8 @@ test("on an engine without counts a row has no count cell, and its spinner still
     for (const source of body.sources) source.engine = "sqlite";
     await route.fulfill({ response, json: body });
   });
+  // A spinning spinner's bounding box grows with its rotation; measure it still.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await hideTablesPanel(page);
   await gotoApp(page);
   await expect(row(page, "users").locator(".count")).toHaveCount(0);
