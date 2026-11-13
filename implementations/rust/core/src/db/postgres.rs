@@ -942,7 +942,8 @@ impl DbSource for PgPoolSource {
 }
 
 /// The primary key and every unique index that can break ties: plain key
-/// columns (`INCLUDE` columns left out), not partial, and all NOT NULL.
+/// columns (`INCLUDE` columns left out), not partial, all NOT NULL, and each
+/// in its column's own collation, so the key is unique under the order by.
 /// `pg_index` has no privilege filter, unlike `information_schema`, so a role
 /// with only `SELECT` still sees the key.
 async fn unique_keys_in_tx(
@@ -955,13 +956,13 @@ async fn unique_keys_in_tx(
          join pg_class c on c.oid = i.indexrelid \
          cross join lateral ( \
            select array_agg(a.attname::text order by k.n) as cols, \
-                  bool_and(a.attnotnull) as all_not_null \
+                  bool_and(a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation) as usable \
              from unnest(i.indkey::int2[]) with ordinality k(attnum, n) \
              join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum \
             where k.n <= i.indnkeyatts) u \
          where i.indrelid = $1 and i.indisunique and i.indisvalid \
            and i.indpred is null and i.indexprs is null \
-           and (i.indisprimary or u.all_not_null)",
+           and (i.indisprimary or u.usable)",
     )
     .bind(table)
     .fetch_all(&mut **tx)

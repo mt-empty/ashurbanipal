@@ -252,13 +252,14 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
 
     /**
      * The primary key and every unique index that can break ties: plain key
-     * columns (INCLUDE columns left out), not partial, and all NOT NULL.
+     * columns (INCLUDE columns left out), not partial, all NOT NULL, and each
+     * in its column's own collation, so the key is unique under the order by.
      * pg_index has no privilege filter, unlike information_schema, so a role
      * with only SELECT still sees the key.
      */
     private fun uniqueKeys(oid: Long): List<UniqueKey> = groupUniqueKeys(
         jdbcTemplate.query(
-            "select c.relname, i.indisprimary, a.attname, a.attnotnull " +
+            "select c.relname, i.indisprimary, a.attname, a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation " +
                 "from pg_index i " +
                 "join pg_class c on c.oid = i.indexrelid " +
                 "cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n) " +

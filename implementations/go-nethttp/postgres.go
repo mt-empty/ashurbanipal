@@ -322,12 +322,13 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 }
 
 // uniqueKeys lists the primary key and every unique index that can break
-// ties: plain key columns (INCLUDE columns left out), not partial, and all
-// NOT NULL. pg_index has no privilege filter, unlike information_schema, so a
+// ties: plain key columns (INCLUDE columns left out), not partial, all NOT
+// NULL, and each in its column's own collation, so the key is unique under
+// the order by. pg_index has no privilege filter, unlike information_schema, so a
 // role with only SELECT still sees the key.
 func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([]uniqueKey, error) {
 	rows, err := tx.QueryContext(ctx,
-		`select c.relname, i.indisprimary, a.attname, a.attnotnull
+		`select c.relname, i.indisprimary, a.attname, a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation
 		 from pg_index i
 		 join pg_class c on c.oid = i.indexrelid
 		 cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n)
@@ -342,11 +343,11 @@ func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([
 	var parts []keyPart
 	for rows.Next() {
 		var p keyPart
-		var notNull bool
-		if err := rows.Scan(&p.index, &p.primary, &p.column, &notNull); err != nil {
+		var usable bool
+		if err := rows.Scan(&p.index, &p.primary, &p.column, &usable); err != nil {
 			return nil, err
 		}
-		p.usable = p.primary || notNull
+		p.usable = p.primary || usable
 		parts = append(parts, p)
 	}
 	if err := rows.Err(); err != nil {

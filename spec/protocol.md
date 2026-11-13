@@ -245,7 +245,8 @@ Paginated, filtered, sorted rows for a single table.
      as `sort`. That key is the primary key, in the constraint's key order.
      With no primary key, it is the unique index with the fewest key
      columns whose key columns are all plain columns (no expression), all
-     `NOT NULL`, and which is not partial; a tie between such indexes is
+     `NOT NULL`, each in its column's own collation, and which is not
+     partial; a tie between such indexes is
      broken the same way on every request. A key with a column the role
      cannot read is skipped.
 

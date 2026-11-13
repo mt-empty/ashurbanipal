@@ -408,11 +408,13 @@ class PgSource(DbSource):
 
     def _unique_keys(self, cur: psycopg.Cursor, oid: int) -> list[UniqueKey]:
         """The primary key and every unique index that can break ties: plain key
-        columns (INCLUDE columns left out), not partial, and all NOT NULL.
+        columns (INCLUDE columns left out), not partial, all NOT NULL, and each in
+        its column's own collation, so the key is unique under the order by.
         pg_index has no privilege filter, unlike information_schema, so a role with
         only SELECT still sees the key."""
         cur.execute(
-            "select c.relname, i.indisprimary, a.attname, a.attnotnull "
+            "select c.relname, i.indisprimary, a.attname, "
+            "a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation "
             "from pg_index i "
             "join pg_class c on c.oid = i.indexrelid "
             "cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n) "
@@ -423,7 +425,7 @@ class PgSource(DbSource):
             (oid,),
         )
         return group_unique_keys(
-            (index, primary, column, primary or not_null) for index, primary, column, not_null in cur.fetchall()
+            (index, primary, column, primary or usable) for index, primary, column, usable in cur.fetchall()
         )
 
     @wrap_driver_errors(psycopg.Error)

@@ -125,7 +125,10 @@ unspecified, so no caller could rely on it, and v1 stands.
 
 A join (§5.11.3) may leave out a joined table's key when its `on` pairs
 bind every key column to a table whose own key already fixes its row. The
-row order is the same, so v1 stands.
+row order is the same, so v1 stands. A unique index whose key column uses
+another collation than the column itself is no longer a tie-break key
+(§5.4): ordering by the column could still tie two rows the index keeps
+apart. That was a bug, and v1 stands.
 
 Column metadata (§5.4.1) must not depend on the role owning the table: a
 role with only `SELECT` sees the same `key` and `references`. A foreign key

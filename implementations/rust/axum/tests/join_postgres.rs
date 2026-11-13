@@ -1,5 +1,6 @@
 //! `spec/protocol.md` §5.11 against Postgres catalog types the conformance
-//! seed cannot vary: enum identity, arrays, and the timeout label.
+//! seed cannot vary: enum identity, arrays, the timeout label, and index
+//! collations.
 
 use ashurbanipal_axum::{DbError, DbSource, JoinOpts, JoinSpec, PgPoolSource, QueryOpts};
 use sqlx::postgres::PgPoolOptions;
@@ -10,6 +11,7 @@ const SCHEMA_TYPES: &str = "ashb_test_join_types";
 const SCHEMA_SLOW: &str = "ashb_test_join_slow";
 const SCHEMA_COLLATION: &str = "ashb_test_join_collation";
 const SCHEMA_SORT: &str = "ashb_test_join_sort";
+const SCHEMA_KEY_COLLATION: &str = "ashb_test_key_collation";
 
 async fn setup(schema: &str, ddl: &str) -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
@@ -257,5 +259,40 @@ async fn sorting_an_unorderable_column_is_a_client_error() {
     let wire = serde_json::to_value(&table.columns).unwrap();
     assert_eq!(wire[3]["class"], "json");
 
+    teardown(&pool, s).await;
+}
+
+// A unique index in another collation than its column does not make the
+// column's order total, so it is no tie-break key (§5.4): `code` sorts
+// case-insensitively, but its index holds 'x' and 'X' apart.
+#[tokio::test]
+async fn a_unique_index_in_another_collation_is_no_tie_break_key() {
+    let s = SCHEMA_KEY_COLLATION;
+    let pool = setup(
+        s,
+        &format!(
+            "create collation {s}.ci (provider = icu, locale = 'und-u-ks-level2', deterministic = false); \
+             create table {s}.t (a int not null, b int not null, code text collate {s}.ci not null, \
+                                 unique (a, b)); \
+             create unique index t_code_c on {s}.t (code collate \"C\"); \
+             insert into {s}.t values (2, 2, 'a'), (1, 1, 'b');"
+        ),
+    )
+    .await;
+    let source = PgPoolSource::new(pool.clone());
+    let data = source
+        .query_table(Some(s), "t", table_opts())
+        .await
+        .unwrap();
+    let codes: Vec<_> = data
+        .rows
+        .iter()
+        .map(|r| r["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        codes,
+        ["b", "a"],
+        "ordered by (a, b), not by the C-collated code index"
+    );
     teardown(&pool, s).await;
 }

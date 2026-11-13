@@ -345,12 +345,14 @@ export class PostgresSource implements DbSource {
   }
 
   // The primary key and every unique index that can break ties: plain key
-  // columns (INCLUDE columns left out), not partial, and all NOT NULL.
+  // columns (INCLUDE columns left out), not partial, all NOT NULL, and each in
+  // its column's own collation, so the key is unique under the order by.
   // pg_index has no privilege filter, unlike information_schema, so a role
   // with only SELECT still sees the key.
   private async uniqueKeys(client: PoolClient, oid: number): Promise<UniqueKey[]> {
-    const { rows } = await client.query<{ index: string; primary: boolean; column: string; not_null: boolean }>(
-      `select c.relname as index, i.indisprimary as primary, a.attname as column, a.attnotnull as not_null
+    const { rows } = await client.query<{ index: string; primary: boolean; column: string; usable: boolean }>(
+      `select c.relname as index, i.indisprimary as primary, a.attname as column,
+              a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation as usable
        from pg_index i
        join pg_class c on c.oid = i.indexrelid
        cross join lateral unnest(i.indkey::int2[]) with ordinality k(attnum, n)
@@ -360,7 +362,7 @@ export class PostgresSource implements DbSource {
        order by c.relname, k.n`,
       [oid],
     );
-    return groupUniqueKeys(rows.map((r) => ({ ...r, usable: r.primary || r.not_null })));
+    return groupUniqueKeys(rows.map((r) => ({ ...r, usable: r.primary || r.usable })));
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
