@@ -245,7 +245,8 @@ Paginated, filtered, sorted rows for a single table.
      as `sort`. That key is the primary key, in the constraint's key order.
      With no primary key, it is the unique index with the fewest key
      columns whose key columns are all plain columns (no expression), all
-     `NOT NULL`, and which is not partial; a tie between such indexes is
+     `NOT NULL`, each in its column's own collation, and which is not
+     partial; a tie between such indexes is
      broken the same way on every request. A key with a column the role
      cannot read is skipped.
 
@@ -895,6 +896,12 @@ comparison uses the columns' native types, not the text cast of §5.4.2.
   in the `order` direction (ascending with no `sort`). A key equal to
   `sort` is not repeated. A table with no tie-break key adds nothing, so a
   join that includes one MAY repeat or skip rows across pages.
+- A server MAY leave out a joined table's key when it cannot change the
+  order: every key column is the right side of one of that table's `on`
+  pairs, at the same type and collation as its left side, the key is
+  unique under that comparison, and that left side's table has a
+  tie-break key (whether or not it was itself left out). The order is then
+  the same as with the key.
 
 #### 5.11.4 Response
 

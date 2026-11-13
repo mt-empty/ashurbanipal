@@ -718,6 +718,33 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
     })
 }
 
+/// Each table's tie-break key as `(position, column)`, in position order. A
+/// key whose every column an `on` pair binds, at the same type and collation,
+/// to a table already fixed by earlier keys is left out: it cannot change the
+/// order (`spec/protocol.md` §5.11.3).
+fn join_order_keys(
+    tables: &[TableMeta],
+    ons: &[Vec<(usize, usize, usize)>],
+) -> Vec<(usize, usize)> {
+    let mut fixed = Vec::with_capacity(tables.len());
+    let mut keys = Vec::new();
+    for (p, t) in tables.iter().enumerate() {
+        let bound = p > 0
+            && !t.order_keys.is_empty()
+            && t.order_keys.iter().all(|&k| {
+                ons[p - 1].iter().any(|&(lp, lc, rc)| {
+                    let (l, r) = (&tables[lp].columns[lc], &t.columns[rc]);
+                    rc == k && fixed[lp] && l.type_name == r.type_name && l.collation == r.collation
+                })
+            });
+        if !bound {
+            keys.extend(t.order_keys.iter().map(|&c| (p, c)));
+        }
+        fixed.push(!t.order_keys.is_empty());
+    }
+    keys
+}
+
 /// How a backend spells the pieces that differ between engines.
 pub struct Dialect {
     pub quote: fn(&Ident) -> String,
@@ -766,6 +793,7 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
         let position = i + 1;
         let on = plan.ons[i]
             .iter()
+            // Right column first: SQLite compares with the left operand's collation, which key pruning (join_order_keys) relies on.
             .map(|&(lp, lc, rc)| format!("{} = {}", alias(position, rc), alias(lp, lc)))
             .collect::<Vec<_>>()
             .join(" and ");
@@ -819,14 +847,9 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
         sql.push_str(&format!(" where {clause}"));
     }
 
-    let keys = plan
-        .tables
-        .iter()
-        .enumerate()
-        .flat_map(|(p, t)| t.order_keys.iter().map(move |&c| (p, c)));
     sql.push_str(&order_by_clause(
         plan.sort,
-        keys,
+        join_order_keys(&plan.tables, &plan.ons),
         plan.descending,
         |(p, c)| alias(p, c),
     ));
@@ -1147,9 +1170,7 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.ends_with(
-                " order by t1.\"email\" asc, t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2"
-            ),
+            sql.ends_with(" order by t1.\"email\" asc, t0.\"id\" asc limit $1 offset $2"),
             "{sql}"
         );
         assert_eq!(values, ["a@b.c"]);
@@ -1226,5 +1247,98 @@ mod tests {
             plan(&spec, vec![orders(), users()], &o),
             Err(DbError::NotAllowed(_))
         ));
+    }
+
+    fn keyed(name: &str, cols: &[(&str, &str)], key: Vec<usize>) -> TableMeta {
+        TableMeta {
+            schema: None,
+            name: Ident::for_test(name),
+            columns: cols
+                .iter()
+                .map(|&(n, t)| col(n, t, ColumnClass::Number))
+                .collect(),
+            order_keys: key,
+        }
+    }
+
+    #[test]
+    fn a_key_fully_bound_to_a_fixed_table_is_left_out() {
+        let t0 = keyed("a", &[("id", "int4"), ("b_id", "int4")], vec![0]);
+        let t1 = keyed("b", &[("id", "int4")], vec![0]);
+        assert_eq!(join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]), [(0, 0)]);
+    }
+
+    #[test]
+    fn a_partly_bound_key_is_kept() {
+        let t0 = keyed("a", &[("id", "int4"), ("x", "int4")], vec![0]);
+        let t1 = keyed("b", &[("x", "int4"), ("y", "int4")], vec![0, 1]);
+        assert_eq!(
+            join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]),
+            [(0, 0), (1, 0), (1, 1)]
+        );
+    }
+
+    #[test]
+    fn a_composite_key_bound_column_by_column_is_left_out() {
+        let t0 = keyed(
+            "a",
+            &[("id", "int4"), ("x", "int4"), ("y", "int4")],
+            vec![0],
+        );
+        let t1 = keyed("b", &[("x", "int4"), ("y", "int4")], vec![0, 1]);
+        assert_eq!(
+            join_order_keys(&[t0, t1], &[vec![(0, 2, 1), (0, 1, 0)]]),
+            [(0, 0)]
+        );
+    }
+
+    #[test]
+    fn a_key_bound_across_types_or_collations_is_kept() {
+        let t0 = keyed("a", &[("id", "int4"), ("b_id", "int8")], vec![0]);
+        let t1 = keyed("b", &[("id", "int4")], vec![0]);
+        assert_eq!(
+            join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]),
+            [(0, 0), (1, 0)]
+        );
+
+        let mut t0 = keyed("a", &[("id", "int4"), ("b_code", "text")], vec![0]);
+        t0.columns[1].collation = Some("C".into());
+        let t1 = keyed("b", &[("code", "text")], vec![0]);
+        assert_eq!(
+            join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]),
+            [(0, 0), (1, 0)]
+        );
+    }
+
+    #[test]
+    fn a_key_bound_to_a_keyless_table_is_kept() {
+        let t0 = keyed("v", &[("b_id", "int4")], vec![]);
+        let t1 = keyed("b", &[("id", "int4")], vec![0]);
+        assert_eq!(join_order_keys(&[t0, t1], &[vec![(0, 0, 0)]]), [(1, 0)]);
+    }
+
+    #[test]
+    fn a_left_out_key_still_fixes_its_table_for_later_joins() {
+        let t0 = keyed("a", &[("id", "int4"), ("b_id", "int4")], vec![0]);
+        let t1 = keyed("b", &[("id", "int4"), ("c_id", "int4")], vec![0]);
+        let t2 = keyed("c", &[("id", "int4")], vec![0]);
+        assert_eq!(
+            join_order_keys(&[t0, t1, t2], &[vec![(0, 1, 0)], vec![(1, 1, 0)]]),
+            [(0, 0)]
+        );
+    }
+
+    #[test]
+    fn one_binding_from_a_fixed_table_is_enough() {
+        let t0 = keyed("v", &[("b_id", "int4")], vec![]);
+        let t1 = keyed("a", &[("id", "int4"), ("b_id", "int4")], vec![0]);
+        let t2 = keyed("b", &[("id", "int4")], vec![0]);
+        assert_eq!(
+            join_order_keys(
+                &[t0, t1, t2],
+                &[vec![(0, 0, 1)], vec![(0, 0, 0), (1, 1, 0)]]
+            ),
+            [(1, 0)]
+        );
     }
 }

@@ -740,6 +740,7 @@ func buildJoinSelect(p *joinPlan, d joinDialect) (string, []string) {
 		}
 		conds := make([]string, len(p.ons[i]))
 		for k, on := range p.ons[i] {
+			// Right column first: SQLite compares with the left operand's collation, which key pruning (joinOrderKeys) relies on.
 			conds[k] = fmt.Sprintf("%s = %s", alias(position, on.rightCol), alias(on.leftPos, on.leftCol))
 		}
 		sb.WriteString(fmt.Sprintf(" %s %s on %s", kind, fromItem(position), strings.Join(conds, " and ")))
@@ -793,19 +794,46 @@ func buildJoinSelect(p *joinPlan, d joinDialect) (string, []string) {
 	if clause.Len() > 0 {
 		sb.WriteString(" where " + clause.String())
 	}
-	var keys [][2]int
-	for pos, t := range p.tables {
-		for _, c := range t.orderKeys {
-			keys = append(keys, [2]int{pos, c})
-		}
-	}
-	sb.WriteString(orderByClause(p.sort, keys, p.descending, func(k [2]int) string { return alias(k[0], k[1]) }))
+	sb.WriteString(orderByClause(p.sort, joinOrderKeys(p.tables, p.ons), p.descending, func(k [2]int) string { return alias(k[0], k[1]) }))
 	if d.numbered {
 		sb.WriteString(" limit $1 offset $2")
 	} else {
 		sb.WriteString(" limit ? offset ?")
 	}
 	return sb.String(), values
+}
+
+// joinOrderKeys returns each table's tie-break key as {position, column},
+// in position order. A key whose every column an on pair binds, at the same
+// type and collation, to a table already fixed by earlier keys is left out:
+// it cannot change the order (spec/protocol.md §5.11.3).
+func joinOrderKeys(tables []tableMeta, ons [][]joinOn) [][2]int {
+	fixed := make([]bool, len(tables))
+	var keys [][2]int
+	for p, t := range tables {
+		bound := p > 0 && len(t.orderKeys) > 0
+		for _, k := range t.orderKeys {
+			if !bound {
+				break
+			}
+			bound = slices.ContainsFunc(ons[p-1], func(on joinOn) bool {
+				l, r := tables[on.leftPos].columns[on.leftCol], t.columns[on.rightCol]
+				return on.rightCol == k && fixed[on.leftPos] &&
+					l.typeName == r.typeName && sameCollation(l.collation, r.collation)
+			})
+		}
+		if !bound {
+			for _, c := range t.orderKeys {
+				keys = append(keys, [2]int{p, c})
+			}
+		}
+		fixed[p] = len(t.orderKeys) > 0
+	}
+	return keys
+}
+
+func sameCollation(a, b *string) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 // columnInfos reports a column's schema only when its table is outside

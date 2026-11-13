@@ -226,7 +226,7 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 		`t0."id"::text as c0, `,
 		` from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"`,
 		` where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))`,
-		` order by t1."email" asc, t0."id" asc, t1."id" asc limit $1 offset $2`,
+		` order by t1."email" asc, t0."id" asc limit $1 offset $2`,
 	} {
 		if !strings.Contains(sqlText, want) {
 			t.Errorf("sql missing %q:\n%s", want, sqlText)
@@ -370,6 +370,49 @@ func TestATableInAnotherSchemaIsSplicedAndReportedUnderIt(t *testing.T) {
 		}
 		if c.Schema != want {
 			t.Errorf("%s.%s schema = %q, want %q", c.Table, c.Column, c.Schema, want)
+		}
+	}
+}
+
+func keyedTable(name string, cols []string, types []string, key ...int) tableMeta {
+	t := tableMeta{name: name, orderKeys: key}
+	for i, c := range cols {
+		t.columns = append(t.columns, colMeta{name: c, typeName: types[i], class: classNumber})
+	}
+	return t
+}
+
+func TestJoinOrderKeysLeaveOutAKeyBoundToAFixedTable(t *testing.T) {
+	ints := func(n int) []string { return slices.Repeat([]string{"int4"}, n) }
+	collated := keyedTable("a", []string{"id", "b_code"}, []string{"int4", "text"}, 0)
+	c := "C"
+	collated.columns[1].collation = &c
+	cases := []struct {
+		name   string
+		tables []tableMeta
+		ons    [][]joinOn
+		want   [][2]int
+	}{
+		{"fully bound", []tableMeta{keyedTable("a", []string{"id", "b_id"}, ints(2), 0), keyedTable("b", []string{"id"}, ints(1), 0)},
+			[][]joinOn{{{0, 1, 0}}}, [][2]int{{0, 0}}},
+		{"partly bound", []tableMeta{keyedTable("a", []string{"id", "x"}, ints(2), 0), keyedTable("b", []string{"x", "y"}, ints(2), 0, 1)},
+			[][]joinOn{{{0, 1, 0}}}, [][2]int{{0, 0}, {1, 0}, {1, 1}}},
+		{"composite, column by column", []tableMeta{keyedTable("a", []string{"id", "x", "y"}, ints(3), 0), keyedTable("b", []string{"x", "y"}, ints(2), 0, 1)},
+			[][]joinOn{{{0, 2, 1}, {0, 1, 0}}}, [][2]int{{0, 0}}},
+		{"type mismatch", []tableMeta{keyedTable("a", []string{"id", "b_id"}, []string{"int4", "int8"}, 0), keyedTable("b", []string{"id"}, ints(1), 0)},
+			[][]joinOn{{{0, 1, 0}}}, [][2]int{{0, 0}, {1, 0}}},
+		{"collation mismatch", []tableMeta{collated, keyedTable("b", []string{"code"}, []string{"text"}, 0)},
+			[][]joinOn{{{0, 1, 0}}}, [][2]int{{0, 0}, {1, 0}}},
+		{"bound to a keyless table", []tableMeta{keyedTable("v", []string{"b_id"}, ints(1)), keyedTable("b", []string{"id"}, ints(1), 0)},
+			[][]joinOn{{{0, 0, 0}}}, [][2]int{{1, 0}}},
+		{"a left-out key still fixes its table", []tableMeta{keyedTable("a", []string{"id", "b_id"}, ints(2), 0), keyedTable("b", []string{"id", "c_id"}, ints(2), 0), keyedTable("c", []string{"id"}, ints(1), 0)},
+			[][]joinOn{{{0, 1, 0}}, {{1, 1, 0}}}, [][2]int{{0, 0}}},
+		{"one binding from a fixed table is enough", []tableMeta{keyedTable("v", []string{"b_id"}, ints(1)), keyedTable("a", []string{"id", "b_id"}, ints(2), 0), keyedTable("b", []string{"id"}, ints(1), 0)},
+			[][]joinOn{{{0, 0, 1}}, {{0, 0, 0}, {1, 1, 0}}}, [][2]int{{1, 0}}},
+	}
+	for _, tc := range cases {
+		if got := joinOrderKeys(tc.tables, tc.ons); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
