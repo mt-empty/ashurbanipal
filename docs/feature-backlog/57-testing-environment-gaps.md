@@ -98,9 +98,9 @@ engine in the browser). Record as accepted unless someone asks.
 
 **D3. The synthetic demo has its own filter, sort and paging, and nothing
 checks it against a port.** `frontend/src/demo/synthetic/serve.ts`
-re-implements `/tables/data` in JS. It differs from the protocol on purpose:
-range filters compare by native type, not the §5.4.2 text cast
-(`serve.ts:37-48`). It also hard-codes a page cap of 100
+re-implements `/tables/data` in JS. Its typed comparison approximates
+§5.4.2 (numbers and dates by value), but it skips the value check, so a
+bad value matches nothing instead of a 400. It also hard-codes a page cap of 100
 (`serve.ts:147`) and always rejects joins (`serve.ts:167`). The live-backend
 conformance job tests node-express's handlers on PGlite, not `serve.ts`
 (`frontend/src/demo/build/conformance-server.ts:17`). *Why it matters:* the

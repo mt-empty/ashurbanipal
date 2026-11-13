@@ -1,6 +1,6 @@
 # Spec-hardening review: wire-contract and doc red flags
 
-> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B1, B3, S3, D1, D2, D3 done; B2, B4, B5, B6, S1, S2, S4 open
+> **Status:** PARTIAL · **Area:** spec, ports, frontend, docs · **Ref:** B1, B3, S1, S3, D1, D2, D3 done; B2, B4, B5, B6, S2, S4 open
 
 **Ask:** a review pass on 2026-09-08, done while planning
 [[14-incoming-fk-references]], turned up a set of best-practice concerns
@@ -181,6 +181,14 @@ consider an optional access-log hook and a config-level table allowlist.
 §5.4.2: `>`/`<`/`>=`/`<=` compare the column's text cast, so `"10" < "9"`
 and date ranges misbehave. Deliberate v1, but users hit it on the first
 numeric column. Adjacent to [[21-filter-operators-in-notin-between]].
+
+**Actioned** with story 21. Every op, not just the ranges, compared the
+text cast on every port and both routes, so `amount = 1` also missed
+`1.00`. Now a `number`, `float`, `temporal` or `time` column compares in
+its own type for every op but `LIKE`/`ILIKE`, and each port checks such a
+value's form first, since MySQL reads `'abc'` as `0` and SQLite compares
+it silently (`spec/protocol.md` §5.4.2; per-engine casts in
+`docs/adapter-decisions.md`).
 
 ### S2 — No filter grouping
 
