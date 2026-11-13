@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { pgColumnClass, pgTypedCompare } from "../src/db/postgres.js";
 import { FilterError, NotAllowedError, quoteIdent } from "../src/errors.js";
 import { parseFilter } from "../src/filter.js";
-import { type ColMeta, type JoinDialect, tableWhereClause } from "../src/join.js";
+import { type ColMeta, type JoinDialect, type TableMeta, tableWhereClause } from "../src/join.js";
 
 // Consumes spec/fixtures/filter-builder-tests.json directly from the repo
 // root (schema: spec/fixtures/README.md) — the same file the Rust
@@ -32,15 +32,19 @@ interface FixtureFile {
 
 // The fixture's tables map stands in for the live catalog lookup
 // (spec/fixtures/README.md).
-function seedColumns(table: string): ColMeta[] {
+function seedTable(table: string): TableMeta {
   const columns = fixture.tables[table];
   if (!columns) throw new Error(`fixture references unmapped table "${table}"`);
-  return Object.entries(columns).map(([name, c]): ColMeta => {
-    const col: ColMeta = { name, type: c.type, class: pgColumnClass(c.type, "", "", false) };
-    const compare = pgTypedCompare(c.type);
-    if (compare) col.compare = compare;
-    return col;
-  });
+  return {
+    name: table,
+    orderKeys: [],
+    columns: Object.entries(columns).map(([name, c]): ColMeta => {
+      const col: ColMeta = { name, type: c.type, class: pgColumnClass(c.type, "", "", false) };
+      const compare = pgTypedCompare(c.type);
+      if (compare) col.compare = compare;
+      return col;
+    }),
+  };
 }
 
 const pg: JoinDialect = {
@@ -75,7 +79,7 @@ describe("filter-builder-tests.json fixtures", () => {
 
       if (testCase.expect !== undefined) {
         const conditions = parseFilter(raw);
-        const { where, values } = tableWhereClause(conditions, seedColumns(testCase.table), pg);
+        const { where, values } = tableWhereClause(conditions, seedTable(testCase.table), pg);
         const expectedWhere = testCase.expect.where ? ` where ${shiftPlaceholders(testCase.expect.where, 2)}` : "";
         expect(where).toBe(expectedWhere);
         expect(values).toEqual(testCase.expect.values);
@@ -84,7 +88,7 @@ describe("filter-builder-tests.json fixtures", () => {
 
       if (testCase.expect_error === "unknown_column" || testCase.expect_error === "invalid_value") {
         const conditions = parseFilter(raw);
-        expect(() => tableWhereClause(conditions, seedColumns(testCase.table), pg)).toThrow(
+        expect(() => tableWhereClause(conditions, seedTable(testCase.table), pg)).toThrow(
           testCase.expect_error === "unknown_column" ? NotAllowedError : FilterError,
         );
         return;

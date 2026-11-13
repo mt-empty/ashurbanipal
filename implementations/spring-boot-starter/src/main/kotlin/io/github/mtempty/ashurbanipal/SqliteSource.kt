@@ -129,12 +129,13 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         val columns = query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
             rs.getString(2) to (rs.getString(3) ?: "")
         }.map { (col, declared) ->
+            val columnClass = sqliteColumnClass(declared)
             ColMeta(
                 name = col,
                 // A declared type can be empty (""); a stable label beats emitting "".
                 type = declared.ifEmpty { "unknown" },
-                columnClass = sqliteColumnClass(declared),
-                compare = sqliteTypedCompare(sqliteColumnClass(declared)),
+                columnClass = columnClass,
+                compare = sqliteTypedCompare(columnClass),
                 key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
                 references = fkColumns[col],
             )
@@ -260,7 +261,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { tableWhereClause(it, meta.columns, JOIN_DIALECT) } ?: WhereClause("", emptyList())
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta, JOIN_DIALECT) } ?: WhereClause("", emptyList())
         val quotedTable = quoteIdent(realTable)
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }

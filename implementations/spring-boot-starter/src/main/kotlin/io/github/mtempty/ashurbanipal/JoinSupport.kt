@@ -228,11 +228,7 @@ data class TypedCompare(
 ) {
     /** The cast target for one bound value. */
     fun castFor(value: String): String? =
-        if (intCast != null && INT_RE.matches(value) && value.toLongOrNull() != null) intCast else cast
-
-    private companion object {
-        val INT_RE = Regex("[+-]?[0-9]+")
-    }
+        if (intCast != null && value.toLongOrNull() != null) intCast else cast
 }
 
 /** One column as the live catalog reports it. [collation] is set where two text collations can clash (§5.4.1). */
@@ -495,10 +491,9 @@ private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, Lis
  * each condition's column checked against the live catalog's columns
  * (`spec/protocol.md` §5.4.2).
  */
-internal fun tableWhereClause(conditions: List<Condition>, columns: List<ColMeta>, d: JoinDialect): WhereClause {
+internal fun tableWhereClause(conditions: List<Condition>, table: TableMeta, d: JoinDialect): WhereClause {
     val terms = conditions.mapIndexed { i, cond ->
-        val col = columns.find { it.name == cond.column }
-            ?: throw NotAllowedException("not allowed: column ${cond.column}", NotAllowedKind.COLUMN)
+        val col = table.columns[table.index(cond.column)]
         // Defends the SQL boundary when a caller bypasses FilterValidator.parse.
         if (cond.op !in VALID_OPS) throw FilterException("condition $i has invalid op ${cond.op}")
         checkValueShape(cond, i)

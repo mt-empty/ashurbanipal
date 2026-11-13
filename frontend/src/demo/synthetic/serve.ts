@@ -3,6 +3,7 @@
 // /tables/data filters, sorts, and pages the snapshot rows in JS.
 import snapshotData from "virtual:demo-snapshot";
 import type { ClassedColumn, FilterCondition, FilterOp } from "../../core/types.js";
+import { FILTER_OPERATORS } from "../../lib/filter-tokens.js";
 import { columnTypeClass } from "../../lib/format.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
 import { DEMO_ENGINE } from "../sources.js";
@@ -46,20 +47,7 @@ function typedCompare(col: ClassedColumn, a: Cell, b: Cell): number {
   if (typeClass === "date") return new Date(a).getTime() - new Date(b).getTime();
   return a < b ? -1 : a > b ? 1 : 0;
 }
-const VALID_OPS = new Set<FilterOp>([
-  "=",
-  "!=",
-  ">",
-  "<",
-  ">=",
-  "<=",
-  "LIKE",
-  "ILIKE",
-  "IN",
-  "BETWEEN",
-  "IS NULL",
-  "IS NOT NULL",
-]);
+const VALID_OPS = new Set<FilterOp>(FILTER_OPERATORS);
 function likeToRegExp(pattern: string, ci: boolean): RegExp {
   const escaped = pattern
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")

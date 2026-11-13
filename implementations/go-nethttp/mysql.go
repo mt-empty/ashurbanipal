@@ -706,7 +706,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta.columns, mysqlJoinDialect)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta, mysqlJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}

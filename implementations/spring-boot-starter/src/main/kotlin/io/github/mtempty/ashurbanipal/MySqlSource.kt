@@ -403,7 +403,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { tableWhereClause(it, meta.columns, JOIN_DIALECT) } ?: WhereClause("", emptyList())
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta, JOIN_DIALECT) } ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
         val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdentMysql)

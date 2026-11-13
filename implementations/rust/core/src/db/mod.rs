@@ -476,8 +476,7 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
         FilterOp::Le => "<=",
         FilterOp::Like => "LIKE",
         FilterOp::Ilike => "ILIKE",
-        FilterOp::In => "IN",
-        FilterOp::Between => "BETWEEN",
+        FilterOp::In | FilterOp::Between => unreachable!("filter_sql spells list ops itself"),
         FilterOp::IsNull => "IS NULL",
         FilterOp::IsNotNull => "IS NOT NULL",
     }

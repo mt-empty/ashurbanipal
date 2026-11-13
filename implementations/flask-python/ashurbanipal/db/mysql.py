@@ -379,7 +379,7 @@ class MySqlSource(DbSource):
                         raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
-                where_clause, filter_values = table_where_clause(opts.filter or [], meta.columns, _JOIN_DIALECT)
+                where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
                 select_list = ", ".join(f"CAST({_quote_ident(c.name)} AS CHAR)" for c in columns)
                 order_clause = table_order_clause(meta, sort, opts.descending, _quote_ident)

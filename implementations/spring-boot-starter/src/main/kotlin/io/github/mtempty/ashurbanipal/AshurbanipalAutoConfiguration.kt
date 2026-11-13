@@ -40,7 +40,6 @@ class AshurbanipalAutoConfiguration {
     fun ashurbanipalDbSources(
         properties: AshurbanipalProperties,
         applicationContext: ApplicationContext,
-        filterValidator: FilterValidator,
     ): Map<String, DbSource> {
         val queryTimeoutSecs = properties.limits.queryTimeoutSecs
         val result = LinkedHashMap<String, DbSource>()
@@ -49,7 +48,7 @@ class AshurbanipalAutoConfiguration {
                 ?.let { applicationContext.getBean(it, DataSource::class.java) }
                 ?: applicationContext.getBean(DataSource::class.java)
             result[source.name] = when (source.backend.lowercase()) {
-                "postgres" -> PostgresSource(dataSource, queryTimeoutSecs, filterValidator)
+                "postgres" -> PostgresSource(dataSource, queryTimeoutSecs)
                 "mysql" -> MySqlSource(dataSource, queryTimeoutSecs)
                 "sqlite" -> SqliteSource(dataSource, queryTimeoutSecs)
                 else -> error("unreachable: AshurbanipalProperties validates backend at construction")

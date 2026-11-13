@@ -555,7 +555,7 @@ export class MySqlSource implements DbSource {
         }
       }
 
-      const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta.columns, JOIN_DIALECT);
+      const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
 
       // Alias CAST results to the column names expected by cellToJson.
       const selectList = columns

@@ -658,7 +658,7 @@ impl DbSource for PgPoolSource {
             .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => join::table_where_clause(filter, &meta.columns, &DIALECT)?,
+            Some(filter) => join::table_where_clause(filter, &meta, &DIALECT)?,
             None => (String::new(), Vec::new()),
         };
 
@@ -1005,6 +1005,8 @@ mod tests {
 
     #[derive(serde::Deserialize)]
     struct FixtureFile {
+        tables:
+            std::collections::BTreeMap<String, std::collections::BTreeMap<String, FixtureColumn>>,
         cases: Vec<FixtureCase>,
     }
 
@@ -1033,22 +1035,26 @@ mod tests {
 
     /// The fixture's `tables` map in place of the live catalog lookup
     /// (`spec/fixtures/README.md`).
-    fn seed_columns(file: &serde_json::Value, table: &str) -> Vec<ColMeta> {
-        let columns: std::collections::BTreeMap<String, FixtureColumn> =
-            serde_json::from_value(file["tables"][table].clone()).unwrap();
-        columns
-            .into_iter()
+    fn seed_table(file: &FixtureFile, table: &str) -> TableMeta {
+        let columns = file.tables[table]
+            .iter()
             .map(|(name, c)| ColMeta {
-                name: Ident::for_test(&name),
+                name: Ident::for_test(name),
                 compare: typed_compare(&c.data_type),
                 class: column_class(&c.data_type, "", "", false),
-                type_name: c.data_type,
+                type_name: c.data_type.clone(),
                 collation: None,
                 key: None,
                 references: None,
                 comment: None,
             })
-            .collect()
+            .collect();
+        TableMeta {
+            schema: None,
+            name: Ident::for_test(table),
+            columns,
+            order_keys: Vec::new(),
+        }
     }
 
     /// The fixture numbers placeholders from `$1`; this backend binds limit
@@ -1071,7 +1077,6 @@ mod tests {
     #[test]
     fn filter_builder_fixtures() {
         let file: FixtureFile = serde_json::from_str(FIXTURES).unwrap();
-        let raw_file: serde_json::Value = serde_json::from_str(FIXTURES).unwrap();
         assert!(!file.cases.is_empty());
         for case in &file.cases {
             let name = &case.name;
@@ -1081,9 +1086,9 @@ mod tests {
                 (None, None) => panic!("case {name}: neither raw nor conditions"),
             };
             let parsed = filter::parse(&raw);
-            let columns = seed_columns(&raw_file, &case.table);
+            let table = seed_table(&file, &case.table);
             let build = |conditions: &[filter::Condition]| {
-                join::table_where_clause(conditions, &columns, &DIALECT)
+                join::table_where_clause(conditions, &table, &DIALECT)
             };
             match (&case.expect, case.expect_error.as_deref()) {
                 (Some(expected), None) => {

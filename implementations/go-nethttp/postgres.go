@@ -638,7 +638,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta.columns, pgJoinDialect)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta, pgJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}

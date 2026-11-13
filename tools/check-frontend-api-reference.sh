@@ -7,7 +7,8 @@ set -eu
 #   - frontend/src/core/types.ts   — the FilterOp union
 #   - frontend/src/features/api-reference.ts — the in-app API reference dialog
 #   - frontend/src/lib/filter-dsl.ts    — FILTER_MAX_CONDITIONS
-#   - frontend/src/demo/synthetic/serve.ts — VALID_OPS (synthetic demo backend)
+#   - frontend/src/lib/filter-tokens.ts — FILTER_OPERATORS (filter suggestions
+#     and the synthetic demo backend's op check)
 # spec/openapi.yaml is the source of truth for the operator set and the
 # condition cap. max_json_bytes has no normative home (spec/protocol.md
 # §5.4.2 describes only the Rust port's bound), so it is checked only for
@@ -40,21 +41,21 @@ const openapi = read("spec/openapi.yaml");
 const types = read("frontend/src/core/types.ts");
 const apiRef = read("frontend/src/features/api-reference.ts");
 const dsl = read("frontend/src/lib/filter-dsl.ts");
-const demoServe = read("frontend/src/demo/synthetic/serve.ts");
+const tokens = read("frontend/src/lib/filter-tokens.ts");
 
-// ---- operator set: spec is canonical, three frontend copies must match ----
+// ---- operator set: spec is canonical, the frontend copies must match ----
 const specOps = quoted(cap(/enum:\s*(\[[^\]]*"IS NOT NULL"[^\]]*\])/, openapi));
 const typeOps = quoted(cap(/export type FilterOp\s*=\s*([^;]+);/, types));
 const refOps = quoted(cap(/operators:\s*(\[[^\]]*\])/, apiRef));
-const demoOps = quoted(cap(/VALID_OPS\s*=\s*new Set<FilterOp>\(\s*(\[[^\]]*\])/, demoServe));
+const tokenOps = quoted(cap(/FILTER_OPERATORS[^=]*=\s*(\[[^\]]*\])/, tokens));
 
 if (specOps.length !== 12) fail("could not read the op enum from spec/openapi.yaml");
 if (!sameSet(typeOps, specOps))
   fail(`types.ts FilterOp ${JSON.stringify(sortU(typeOps))} != spec/openapi.yaml op enum ${JSON.stringify(sortU(specOps))}`);
 if (!sameSet(refOps, specOps))
   fail(`api-reference.ts operators ${JSON.stringify(sortU(refOps))} != spec/openapi.yaml op enum`);
-if (!sameSet(demoOps, specOps))
-  fail(`synthetic/serve.ts VALID_OPS ${JSON.stringify(sortU(demoOps))} != spec/openapi.yaml op enum`);
+if (!sameSet(tokenOps, specOps))
+  fail(`filter-tokens.ts FILTER_OPERATORS ${JSON.stringify(sortU(tokenOps))} != spec/openapi.yaml op enum`);
 
 // ---- condition cap: spec maxItems is canonical ----
 // Anchored to the filter array schema: its maxItems must sit within 200

@@ -1,11 +1,4 @@
-import {
-  type ColumnClassName,
-  type ColumnInfo,
-  type ColumnRef,
-  type KeyKind,
-  opSql,
-  opTakesValue,
-} from "./db/types.js";
+import type { ColumnClassName, ColumnInfo, ColumnRef, KeyKind } from "./db/types.js";
 import { FilterError, NotAllowedError } from "./errors.js";
 import {
   type Condition,
@@ -13,6 +6,8 @@ import {
   describeForm,
   formAccepts,
   opIsPattern,
+  opSql,
+  opTakesValue,
   VALID_OPS,
   type ValueForm,
   valueItems,
@@ -579,12 +574,11 @@ function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; value
  */
 export function tableWhereClause(
   conditions: Condition[],
-  columns: ColMeta[],
+  table: TableMeta,
   d: JoinDialect,
 ): { where: string; values: string[] } {
   const terms = conditions.map((cond, i): FilterTerm => {
-    const col = columns.find((c) => c.name === cond.column);
-    if (!col) throw new NotAllowedError(`column "${cond.column}"`, "column");
+    const col = table.columns[columnIndex(table, cond.column)];
     // Defends the SQL boundary when a caller bypasses parseFilter.
     if (!VALID_OPS.has(cond.op)) throw new FilterError(`condition ${i} has invalid op "${cond.op}"`);
     checkValueShape(cond, i);

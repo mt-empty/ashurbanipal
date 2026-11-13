@@ -456,7 +456,7 @@ export class PostgresSource implements DbSource {
         }
       }
 
-      const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta.columns, JOIN_DIALECT);
+      const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
 
       const selectList = columns.map((col) => `${quoteIdent(col.name)}::text`).join(", ");
 

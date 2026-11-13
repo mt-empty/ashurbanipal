@@ -11,7 +11,7 @@ import { constants, gzipSync } from "node:zlib";
 // frontend/dbviewer.html release artifact; here it pins this repo's own
 // copy since there is no separate tagged release to vendor from yet
 // (same caveat the go-nethttp port documents).
-const PINNED_FRONTEND_SHA256 = "2b6a8c0803f82e620def0affc060578d54ac436a9d29acb2ae92dafae0b04957";
+const PINNED_FRONTEND_SHA256 = "df7a16c37f481a4a6b3b0079a68be8f1a223c8c1e99bc0ebb6e3bde990cc1d37";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // From dist/ (built) or src/ (tsx dev run) the frontend dir is one level up, at the package root.

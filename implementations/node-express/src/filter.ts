@@ -25,8 +25,39 @@ export const VALID_OPS = new Set([
   "IS NOT NULL",
 ]);
 
-function opTakesValue(op: string): boolean {
+export function opTakesValue(op: string): boolean {
   return op !== "IS NULL" && op !== "IS NOT NULL";
+}
+
+// The hardcoded operator -> SQL-keyword table (spec/protocol.md §5.4.2) —
+// wire text never becomes an operator except through this match. join.ts's
+// filterSql wraps the keyword in each engine's cast and placeholder syntax,
+// and spells IN, BETWEEN and ILIKE itself.
+export function opSql(op: string): string {
+  switch (op) {
+    case "=":
+      return "=";
+    case "!=":
+      return "!=";
+    case ">":
+      return ">";
+    case "<":
+      return "<";
+    case ">=":
+      return ">=";
+    case "<=":
+      return "<=";
+    case "LIKE":
+      return "LIKE";
+    case "ILIKE":
+      return "ILIKE";
+    case "IS NULL":
+      return "IS NULL";
+    case "IS NOT NULL":
+      return "IS NOT NULL";
+    default:
+      throw new Error(`opSql called with an op the caller should have validated: ${op}`);
+  }
 }
 
 /** LIKE/ILIKE always compare the text cast, whatever the column's class. */

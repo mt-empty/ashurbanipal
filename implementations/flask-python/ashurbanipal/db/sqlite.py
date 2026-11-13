@@ -128,12 +128,9 @@ _JOIN_DIALECT = Dialect(
 def _execute_filtered(cur: sqlite3.Cursor, sql: str, params: tuple[object, ...]) -> None:
     """`cur.execute` for a filtered query. A system SQLite before 3.32 allows
     only 999 bound values, so a long `IN` list is a filter error there."""
-    try:
-        cur.execute(sql, params)
-    except sqlite3.OperationalError as e:
-        if "too many SQL variables" in str(e):
-            raise FilterParseError(f"filter binds {len(params)} values, more than this SQLite allows") from e
-        raise
+    if len(params) > cur.connection.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER):
+        raise FilterParseError(f"filter binds {len(params)} values, more than this SQLite allows")
+    cur.execute(sql, params)
 
 
 def typed_compare(cls: ColumnClass) -> TypedCompare | None:
@@ -218,8 +215,8 @@ class SqliteSource(DbSource):
                 name=col,
                 # A declared type can be empty (""); a stable label beats emitting "".
                 type_name=declared or "unknown",
-                column_class=column_class(declared or ""),
-                compare=typed_compare(column_class(declared or "")),
+                column_class=(cls := column_class(declared or "")),
+                compare=typed_compare(cls),
                 key=(KeyKind.PK if col in pk_columns else (KeyKind.FK if col in fk_columns else None)),
                 references=fk_columns.get(col),
             )
@@ -337,7 +334,7 @@ class SqliteSource(DbSource):
                         raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
-                where_clause, filter_values = table_where_clause(opts.filter or [], meta.columns, _JOIN_DIALECT)
+                where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
                 quoted_table = quote_ident(table)
             finally:

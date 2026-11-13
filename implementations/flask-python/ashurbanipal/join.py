@@ -637,16 +637,13 @@ def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tupl
     return clause, values
 
 
-def table_where_clause(conditions: list[Condition], columns: list[ColMeta], d: Dialect) -> tuple[str, list[str]]:
+def table_where_clause(conditions: list[Condition], table: TableMeta, d: Dialect) -> tuple[str, list[str]]:
     """The data route's ` where …` ("" without conditions) and its values, with
     each condition's column checked against the live catalog's columns
     (`spec/protocol.md` §5.4.2)."""
-    by_name = {c.name: c for c in columns}
     terms = []
     for i, cond in enumerate(conditions):
-        col = by_name.get(cond.column)
-        if col is None:
-            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
+        col = table.columns[table.index(cond.column)]
         if i > 0 and cond.logic not in ("AND", "OR"):
             raise _FilterParseError(f"condition {i} is missing logic")
         _check_typed_values(col, cond)

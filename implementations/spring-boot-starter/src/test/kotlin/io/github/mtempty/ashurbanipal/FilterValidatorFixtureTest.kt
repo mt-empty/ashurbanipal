@@ -18,12 +18,12 @@ class FilterValidatorFixtureTest {
     }
 
     /** The fixture's `tables` map in place of the live catalog lookup (spec/fixtures/README.md). */
-    private fun seedColumns(root: JsonNode, table: String): List<ColMeta> {
+    private fun seedTable(root: JsonNode, table: String): TableMeta {
         val columns = root["tables"][table] ?: error("fixture references unmapped table $table")
-        return columns.properties().map { (name, c) ->
+        return TableMeta(table, columns.properties().map { (name, c) ->
             val type = c["type"].asText()
             ColMeta(name = name, type = type, columnClass = pgColumnClass(type, "", "", false), compare = pgTypedCompare(type))
-        }
+        })
     }
 
     /** The fixture's `$n` placeholders are Postgres-numbered; this port binds positional `?` instead, so only order/count matter, not numbering. */
@@ -47,7 +47,7 @@ class FilterValidatorFixtureTest {
                 expect != null -> {
                     val conditions = runCatching { validator.parse(raw) }
                         .getOrElse { throw AssertionError("case $name: parse failed: ${it.message}", it) }
-                    val whereClause = runCatching { tableWhereClause(conditions, seedColumns(root, table), PG_DIALECT) }
+                    val whereClause = runCatching { tableWhereClause(conditions, seedTable(root, table), PG_DIALECT) }
                         .getOrElse { throw AssertionError("case $name: build failed: ${it.message}", it) }
 
                     val expectedWhereRaw = expect["where"].asText()
@@ -60,13 +60,13 @@ class FilterValidatorFixtureTest {
                 expectError == "unknown_column" -> {
                     val conditions = runCatching { validator.parse(raw) }
                         .getOrElse { throw AssertionError("case $name: should parse (rejection is builder-stage): ${it.message}", it) }
-                    val thrown = assertThrows(NotAllowedException::class.java, { tableWhereClause(conditions, seedColumns(root, table), PG_DIALECT) }, "case $name")
+                    val thrown = assertThrows(NotAllowedException::class.java, { tableWhereClause(conditions, seedTable(root, table), PG_DIALECT) }, "case $name")
                     assertEquals(NotAllowedKind.COLUMN, thrown.kind, "case $name")
                 }
                 expectError == "invalid_value" -> {
                     val conditions = runCatching { validator.parse(raw) }
                         .getOrElse { throw AssertionError("case $name: should parse (rejection is builder-stage): ${it.message}", it) }
-                    assertThrows(FilterException::class.java, { tableWhereClause(conditions, seedColumns(root, table), PG_DIALECT) }, "case $name")
+                    assertThrows(FilterException::class.java, { tableWhereClause(conditions, seedTable(root, table), PG_DIALECT) }, "case $name")
                 }
                 expectError != null -> {
                     assertThrows(FilterException::class.java, { validator.parse(raw) }, "case $name: expected structural rejection ($expectError)")

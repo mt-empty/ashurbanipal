@@ -184,9 +184,9 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
                 raise FilterError(f"op {op!r} requires a string value")
             conditions.append(Comparison(column=column, op=op, logic=logic, not_=not_, join=join, value=value))
         elif _is_list_op(op):
-            why = list_shape_error(op, value)
-            if why is not None or not isinstance(value, list):
-                raise FilterError(f"condition {i}: {why or f'op {op!r} needs an array of strings'}")
+            if (why := list_shape_error(op, value)) is not None:
+                raise FilterError(f"condition {i}: {why}")
+            assert isinstance(value, list)
             conditions.append(
                 ListComparison(column=column, op=op, logic=logic, not_=not_, join=join, value=tuple(value))
             )

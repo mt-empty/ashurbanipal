@@ -1622,9 +1622,9 @@ function parseFilterDsl(input2, aliases) {
   };
   const parseColumn = () => {
     const start = pos;
-    const quoted = aliases !== void 0 && peek() === '"';
-    const first = quoted ? parseQuotedQualifier() : parseName();
-    if (!quoted && peek() !== ".") return { column: first, ...aliases ? { join: 0 } : {} };
+    const quoted2 = aliases !== void 0 && peek() === '"';
+    const first = quoted2 ? parseQuotedQualifier() : parseName();
+    if (!quoted2 && peek() !== ".") return { column: first, ...aliases ? { join: 0 } : {} };
     if (!aliases) throw err("qualified column names are only allowed in a join view", start);
     if (peek() !== ".") throw err("expected . after the table alias", pos);
     pos += 1;
@@ -1654,15 +1654,14 @@ function parseFilterDsl(input2, aliases) {
     }
     return value;
   };
-  const parseBareValue = () => {
+  const parseBareValue = (stop2 = "") => {
     const start = pos;
-    let value = "";
     let c = peek();
-    while (c !== null && !isWs(c) && c !== "'") {
-      value += c;
+    while (c !== null && !isWs(c) && c !== "'" && !stop2.includes(c)) {
       pos += c.length;
       c = peek();
     }
+    const value = input2.slice(start, pos);
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
@@ -1672,15 +1671,7 @@ function parseFilterDsl(input2, aliases) {
   const parseListItem = () => {
     if (peek() === "'") return parseQuotedValue();
     const start = pos;
-    let c = peek();
-    while (c !== null && !isWs(c) && c !== "'" && c !== "," && c !== "(" && c !== ")") {
-      pos += c.length;
-      c = peek();
-    }
-    const value = input2.slice(start, pos);
-    if (value === "") throw err("expected value", start);
-    if (RESERVED_WORD_RE.test(value))
-      throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
+    const value = parseBareValue(",()");
     if (/^NULL$/i.test(value)) throw err("NULL cannot be in a list; use IS NULL", start);
     return value;
   };
@@ -1791,12 +1782,13 @@ function tryParseFilterDsl(input2, aliases) {
     return null;
   }
 }
+var quoted = (value) => `'${value.replace(/'/g, "''")}'`;
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return `'${value.replace(/'/g, "''")}'`;
+  return quoted(value);
 }
 function quoteListItem(value) {
-  return /[,()]/.test(value) || /^NULL$/i.test(value) ? `'${value.replace(/'/g, "''")}'` : quoteFilterValue(value);
+  return /[,()]/.test(value) || /^NULL$/i.test(value) ? quoted(value) : quoteFilterValue(value);
 }
 function filterClause(column, op, value) {
   return value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
@@ -3379,6 +3371,7 @@ function tokenizeFilterDsl(text) {
     i = end;
   };
   const isSpace = (c) => /\s/.test(c);
+  const isListStop = (c) => c === "," || c === "(" || c === ")";
   while (i < text.length) {
     const s = i;
     if (isSpace(text[i])) {
@@ -3445,7 +3438,7 @@ function tokenizeFilterDsl(text) {
     } else if (expect === "boundAnd" && keywordAt(text, i, "AND")) {
       push("keyword", s, i + 3, "value");
       continue;
-    } else if (expectsValue(expect) && !(expect === "listItem" && /[,()]/.test(text[i]))) {
+    } else if (expectsValue(expect) && !(expect === "listItem" && isListStop(text[i]))) {
       const inList = expect === "listItem";
       let j2 = i;
       if (text[i] === "'") {
@@ -3459,7 +3452,7 @@ function tokenizeFilterDsl(text) {
           }
         }
       } else {
-        while (j2 < text.length && !isSpace(text[j2]) && text[j2] !== "'" && !(inList && /[,()]/.test(text[j2]))) j2++;
+        while (j2 < text.length && !isSpace(text[j2]) && text[j2] !== "'" && !(inList && isListStop(text[j2]))) j2++;
       }
       push("value", s, j2, inList ? "listNext" : expect === "lowBound" ? "boundAnd" : "joiner");
       continue;

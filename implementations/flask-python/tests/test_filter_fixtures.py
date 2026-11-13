@@ -14,15 +14,15 @@ import pytest
 from ashurbanipal import filter as filter_module
 from ashurbanipal.db import FilterParseError, NotAllowed
 from ashurbanipal.db.postgres import _JOIN_DIALECT, column_class, typed_compare
-from ashurbanipal.join import ColMeta, table_where_clause
+from ashurbanipal.join import ColMeta, TableMeta, table_where_clause
 
 FIXTURES_PATH = Path(__file__).resolve().parents[3] / "spec" / "fixtures" / "filter-builder-tests.json"
 FIXTURES = json.loads(FIXTURES_PATH.read_text())
 
 
-def _seed_columns(table: str) -> list[ColMeta]:
+def _seed_table(table: str) -> TableMeta:
     """The fixture's tables map in place of the live catalog lookup (spec/fixtures/README.md)."""
-    return [
+    columns = [
         ColMeta(
             name=name,
             type_name=c["type"],
@@ -31,6 +31,7 @@ def _seed_columns(table: str) -> list[ColMeta]:
         )
         for name, c in FIXTURES["tables"][table].items()
     ]
+    return TableMeta(name=table, columns=columns)
 
 
 _PLACEHOLDER_RE = re.compile(r"\$\d+")
@@ -53,14 +54,14 @@ def test_filter_builder_fixture(case: dict) -> None:
 
     if expect is not None:
         conditions = filter_module.parse(raw)
-        where_clause, values = table_where_clause(conditions, _seed_columns(case["table"]), _JOIN_DIALECT)
+        where_clause, values = table_where_clause(conditions, _seed_table(case["table"]), _JOIN_DIALECT)
         expected_where = f" where {_normalize(expect['where'])}" if expect["where"] else ""
         assert where_clause == expected_where, f"case {name}: WHERE mismatch"
         assert values == expect["values"], f"case {name}: bind values mismatch"
     elif expect_error in ("unknown_column", "invalid_value"):
         conditions = filter_module.parse(raw)
         with pytest.raises(NotAllowed if expect_error == "unknown_column" else FilterParseError):
-            table_where_clause(conditions, _seed_columns(case["table"]), _JOIN_DIALECT)
+            table_where_clause(conditions, _seed_table(case["table"]), _JOIN_DIALECT)
     else:
         with pytest.raises(filter_module.FilterError):
             filter_module.parse(raw)

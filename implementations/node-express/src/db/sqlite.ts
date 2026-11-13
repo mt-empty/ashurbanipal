@@ -350,7 +350,7 @@ export class SqliteSource implements DbSource {
       }
     }
 
-    const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta.columns, JOIN_DIALECT);
+    const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
     const quotedTable = quoteIdent(realTable);
 
     // Aliased back to the real column name: an un-aliased CAST(...)

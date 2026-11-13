@@ -65,7 +65,7 @@ var sqliteJoinDialect = joinDialect{
 func sqliteTypedCompare(class columnClass) *typedCompare {
 	switch class {
 	case classNumber, classFloat, classTemporal, classTime:
-		return &typedCompare{unchecked: true}
+		return &typedCompare{form: formNone}
 	}
 	return nil
 }
@@ -464,7 +464,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta.columns, sqliteJoinDialect)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta, sqliteJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}

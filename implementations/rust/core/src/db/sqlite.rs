@@ -386,7 +386,7 @@ impl DbSource for SqliteSource {
             .transpose()?;
 
         let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => join::table_where_clause(filter, &meta.columns, &DIALECT)?,
+            Some(filter) => join::table_where_clause(filter, &meta, &DIALECT)?,
             None => (String::new(), Vec::new()),
         };
 

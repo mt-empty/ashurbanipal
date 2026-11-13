@@ -79,7 +79,7 @@ class TableListingPrivilegesTest {
             }
 
             try {
-                val source = PostgresSource(SetRoleDataSource(jdbcUrl, user, password), 5, FilterValidator())
+                val source = PostgresSource(SetRoleDataSource(jdbcUrl, user, password), 5)
                 val opts = QueryOpts(limit = 10, offset = 0, sort = null, descending = false, filter = null)
 
                 assertEquals(

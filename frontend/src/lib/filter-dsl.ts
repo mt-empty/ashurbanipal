@@ -159,15 +159,14 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
   };
   // AND/OR/NOT are always keywords, never bare values — quote them to use
   // as a literal.
-  const parseBareValue = (): string => {
+  const parseBareValue = (stop = ""): string => {
     const start = pos;
-    let value = "";
     let c = peek();
-    while (c !== null && !isWs(c) && c !== "'") {
-      value += c;
+    while (c !== null && !isWs(c) && c !== "'" && !stop.includes(c)) {
       pos += c.length;
       c = peek();
     }
+    const value = input.slice(start, pos);
     if (value === "") throw err("expected value", start);
     if (RESERVED_WORD_RE.test(value))
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
@@ -178,15 +177,7 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
   const parseListItem = (): string => {
     if (peek() === "'") return parseQuotedValue();
     const start = pos;
-    let c = peek();
-    while (c !== null && !isWs(c) && c !== "'" && c !== "," && c !== "(" && c !== ")") {
-      pos += c.length;
-      c = peek();
-    }
-    const value = input.slice(start, pos);
-    if (value === "") throw err("expected value", start);
-    if (RESERVED_WORD_RE.test(value))
-      throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
+    const value = parseBareValue(",()");
     if (/^NULL$/i.test(value)) throw err("NULL cannot be in a list; use IS NULL", start);
     return value;
   };
@@ -309,17 +300,19 @@ export function tryParseFilterDsl(input: string, aliases?: readonly string[]): F
 }
 
 // ---- click-to-filter: compose "column op value" into #filter and apply ----
-// Every cell value is fetched already cast to text in-query, which is
-// exactly what the filter DSL compares against, so it can be spliced
-// straight into a clause without reshaping.
+// Every cell value is fetched as text, and a typed column's text compares
+// equal to its own value, so it can be spliced straight into a clause
+// without reshaping.
+const quoted = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+
 export function quoteFilterValue(value: string): string {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
-  return `'${value.replace(/'/g, "''")}'`;
+  return quoted(value);
 }
 
 // An IN list item also stops at , ( and ), and a bare NULL is rejected there.
 export function quoteListItem(value: string): string {
-  return /[,()]/.test(value) || /^NULL$/i.test(value) ? `'${value.replace(/'/g, "''")}'` : quoteFilterValue(value);
+  return /[,()]/.test(value) || /^NULL$/i.test(value) ? quoted(value) : quoteFilterValue(value);
 }
 
 // value is omitted for a valueless predicate (IS NULL). quoteFilterValue

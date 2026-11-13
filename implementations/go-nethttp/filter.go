@@ -1,6 +1,7 @@
 package ashurbanipal
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -43,21 +44,18 @@ type FilterValue struct {
 func StringValue(v string) *FilterValue { return &FilterValue{Items: []string{v}} }
 
 func (v *FilterValue) UnmarshalJSON(b []byte) error {
-	trimmed := strings.TrimSpace(string(b))
-	if strings.HasPrefix(trimmed, "[") {
-		// Decoded as raw items first: encoding/json turns a null item into "".
-		var raw []json.RawMessage
+	if t := bytes.TrimLeft(b, " \t\r\n"); len(t) > 0 && t[0] == '[' {
+		// Pointers, so a null item decodes to nil instead of "".
+		var raw []*string
 		if err := json.Unmarshal(b, &raw); err != nil {
 			return err
 		}
 		items := make([]string, len(raw))
 		for i, r := range raw {
-			if !strings.HasPrefix(strings.TrimSpace(string(r)), `"`) {
+			if r == nil {
 				return fmt.Errorf("list item %d is not a string", i)
 			}
-			if err := json.Unmarshal(r, &items[i]); err != nil {
-				return err
-			}
+			items[i] = *r
 		}
 		*v = FilterValue{Items: items, List: true}
 		return nil
@@ -78,24 +76,24 @@ func (v FilterValue) MarshalJSON() ([]byte, error) {
 }
 
 // checkValueShape checks a value against its op (spec/protocol.md §5.4.2).
-func checkValueShape(op string, v *FilterValue) error {
+func checkValueShape(i int, op string, v *FilterValue) error {
 	switch {
 	case !opTakesValue(op) && v != nil:
-		return filterErr("op %q takes no value", op)
+		return filterErr("condition %d: op %q takes no value", i, op)
 	case !opTakesValue(op):
 		return nil
 	case v == nil:
-		return filterErr("op %q requires a value", op)
+		return filterErr("condition %d: op %q requires a value", i, op)
 	case op == "IN":
 		if !v.List || len(v.Items) < 1 || len(v.Items) > MaxInItems {
-			return filterErr("op \"IN\" needs an array of 1 to %d strings", MaxInItems)
+			return filterErr("condition %d: op \"IN\" needs an array of 1 to %d strings", i, MaxInItems)
 		}
 	case op == "BETWEEN":
 		if !v.List || len(v.Items) != 2 {
-			return filterErr("op \"BETWEEN\" needs an array of two strings, [low, high]")
+			return filterErr("condition %d: op \"BETWEEN\" needs an array of two strings, [low, high]", i)
 		}
 	case v.List:
-		return filterErr("op %q needs a string value", op)
+		return filterErr("condition %d: op %q needs a string value", i, op)
 	}
 	return nil
 }
@@ -175,8 +173,8 @@ func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 		if !validOps[cond.Op] {
 			return nil, filterErr("condition %d has invalid op %q", i, cond.Op)
 		}
-		if err := checkValueShape(cond.Op, cond.Value); err != nil {
-			return nil, filterErr("condition %d: %s", i, err.(*FilterError).Reason)
+		if err := checkValueShape(i, cond.Op, cond.Value); err != nil {
+			return nil, err
 		}
 	}
 	return conditions, nil
@@ -201,10 +199,6 @@ func opSQL(op string) string {
 		return "LIKE"
 	case "ILIKE":
 		return "ILIKE"
-	case "IN":
-		return "IN"
-	case "BETWEEN":
-		return "BETWEEN"
 	case "IS NULL":
 		return "IS NULL"
 	case "IS NOT NULL":
@@ -219,7 +213,8 @@ func opSQL(op string) string {
 type valueForm int
 
 const (
-	formNumber valueForm = iota
+	formNone valueForm = iota // not checked: SQLite does not enforce column types
+	formNumber
 	formFloat
 	formDate
 	formTimestamp
@@ -248,6 +243,8 @@ func realDate(s string) bool {
 
 func (f valueForm) accepts(v string) bool {
 	switch f {
+	case formNone:
+		return true
 	case formNumber:
 		return numberRe.MatchString(v)
 	case formFloat:

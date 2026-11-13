@@ -168,8 +168,6 @@ internal fun opSqlKeyword(op: String): String = when (op) {
     "<=" -> "<="
     "LIKE" -> "LIKE"
     "ILIKE" -> "ILIKE"
-    "IN" -> "IN"
-    "BETWEEN" -> "BETWEEN"
     "IS NULL" -> "IS NULL"
     "IS NOT NULL" -> "IS NOT NULL"
     else -> throw FilterException("invalid op $op")

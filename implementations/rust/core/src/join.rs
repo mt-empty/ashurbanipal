@@ -808,12 +808,13 @@ struct FilterTerm<'a> {
     col: &'a ColMeta,
 }
 
-/// The conditions joined by their logic, without `where`. Values are
-/// appended to `values` in placeholder order; numbered placeholders start at
-/// `$3`, after limit and offset.
-fn filter_sql(terms: &[FilterTerm], d: &Dialect, values: &mut Vec<String>) -> String {
+/// The conditions joined by their logic, without `where`, and their values
+/// in placeholder order; numbered placeholders start at `$3`, after limit and
+/// offset.
+fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
     let mut next_param = 3;
     let mut clause = String::new();
+    let mut values = Vec::new();
     for (i, t) in terms.iter().enumerate() {
         let typed = t.col.compare.filter(|_| !t.op.is_pattern());
         let mut placeholder = |value: &str| {
@@ -868,25 +869,20 @@ fn filter_sql(terms: &[FilterTerm], d: &Dialect, values: &mut Vec<String>) -> St
             format!("({inner})")
         });
     }
-    clause
+    (clause, values)
 }
 
 /// The data route's ` where …` (empty without conditions) and its values,
-/// with each condition's column checked against `columns`
+/// with each condition's column checked against `table`
 /// (`spec/protocol.md` §5.4.2).
 pub(crate) fn table_where_clause(
     conditions: &[Condition],
-    columns: &[ColMeta],
+    table: &TableMeta,
     d: &Dialect,
 ) -> Result<(String, Vec<String>), DbError> {
     let mut terms = Vec::with_capacity(conditions.len());
     for (i, c) in conditions.iter().enumerate() {
-        let col = columns
-            .iter()
-            .find(|m| m.name.as_str() == c.column)
-            .ok_or_else(|| {
-                DbError::not_allowed(NotAllowedKind::Column, format!("column {:?}", c.column))
-            })?;
+        let col = &table.columns[column_index(table, &c.column)?];
         // Defends the SQL boundary when a caller bypasses filter::parse.
         check_value_shape(c.op, c.value.as_ref())
             .map_err(|e| DbError::FilterParse(format!("condition {i}: {e}")))?;
@@ -905,8 +901,7 @@ pub(crate) fn table_where_clause(
             col,
         });
     }
-    let mut values = Vec::new();
-    let clause = filter_sql(&terms, d, &mut values);
+    let (clause, values) = filter_sql(&terms, d);
     if clause.is_empty() {
         return Ok((String::new(), values));
     }
@@ -970,8 +965,7 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
             col: &plan.tables[c.pos].columns[c.col],
         })
         .collect();
-    let mut values = Vec::new();
-    let clause = filter_sql(&terms, d, &mut values);
+    let (clause, values) = filter_sql(&terms, d);
     if !clause.is_empty() {
         sql.push_str(&format!(" where {clause}"));
     }

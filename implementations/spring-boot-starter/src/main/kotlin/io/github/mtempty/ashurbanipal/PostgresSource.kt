@@ -56,7 +56,7 @@ internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String,
 }
 
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
-class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val filterValidator: FilterValidator) : DbSource {
+class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     override val engine = Engine.POSTGRES
 
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
@@ -316,19 +316,27 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
                 *bindArgs.toTypedArray(),
             )
         } catch (e: DataAccessException) {
-            val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
-            if (sqlState == "42501") {
-                throw NotAllowedException("not allowed: table ${spec.table}", NotAllowedKind.NOT_READABLE)
-            }
-            if (sqlState?.startsWith("22") == true && values.isNotEmpty()) {
-                throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
-            }
-            // With a sort, an undefined function is the sort column's type having no
-            // ordering operator (json, xml, geometric types).
-            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
-            throw e
+            throw mapSelectError(e, spec.table, opts.sort, values.isNotEmpty())
         }
         plan.joinData(rows, opts.limit, realSchema)
+    }
+
+    /** The protocol error for a failed data or join SELECT, or [e] itself when none applies. */
+    private fun mapSelectError(e: DataAccessException, table: String, sort: String?, filtered: Boolean): Exception {
+        val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
+        return when {
+            // Residual SELECT-denied errors are NotAllowed (spec/protocol.md §2).
+            sqlState == "42501" -> NotAllowedException("not allowed: table $table", NotAllowedKind.NOT_READABLE)
+            // A filter value Postgres rejects (SQLSTATE class 22: a NUL byte, or a
+            // value a typed comparison's cast refuses) is a 400, never a raw 500
+            // (docs/adapter-decisions.md §5.4.2).
+            sqlState?.startsWith("22") == true && filtered ->
+                FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
+            // With a sort, an undefined function is the sort column's type having no
+            // ordering operator (json, xml, geometric types).
+            sqlState == "42883" && sort != null -> UnsortableException(sort)
+            else -> e
+        }
     }
 
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
@@ -345,7 +353,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { tableWhereClause(it, meta.columns, PG_DIALECT) }
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta, PG_DIALECT) }
             ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
@@ -361,22 +369,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         val rows = try {
             jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
         } catch (e: DataAccessException) {
-            // Map residual SELECT-denied errors to NotAllowed (spec/protocol.md §2).
-            val sqlState = (e.mostSpecificCause as? SQLException)?.sqlState
-            if (sqlState == "42501") {
-                throw NotAllowedException("not allowed: table $realTable", NotAllowedKind.NOT_READABLE)
-            }
-            // A filter value Postgres rejects (SQLSTATE class 22: a NUL byte,
-            // or a value a typed comparison's cast refuses) maps to
-            // FilterException, also 400, never a raw 500
-            // (docs/adapter-decisions.md §5.4.2).
-            if (sqlState?.startsWith("22") == true && whereClause.values.isNotEmpty()) {
-                throw FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
-            }
-            // With a sort, an undefined function is the sort column's type having no
-            // ordering operator (json, xml, geometric types).
-            if (sqlState == "42883" && opts.sort != null) throw UnsortableException(opts.sort)
-            throw e
+            throw mapSelectError(e, realTable, opts.sort, whereClause.values.isNotEmpty())
         }
 
         val totalApprox = jdbcTemplate.queryForObject(

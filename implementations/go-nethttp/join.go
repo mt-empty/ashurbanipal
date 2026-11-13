@@ -310,8 +310,6 @@ type typedCompare struct {
 	// integer column keeps its index (Postgres compares int = numeric by
 	// converting the column).
 	intCast string
-	// unchecked skips the value check: SQLite does not enforce column types.
-	unchecked bool
 }
 
 // castFor is the cast target for one bound value.
@@ -691,8 +689,8 @@ func planJoin(spec JoinSpec, tables []tableMeta, opts JoinOpts) (*joinPlan, erro
 		if !validOps[c.Op] {
 			return nil, filterErr("condition %d has invalid op %q", i, c.Op)
 		}
-		if err := checkValueShape(c.Op, c.Value); err != nil {
-			return nil, filterErr("condition %d: %s", i, err.(*FilterError).Reason)
+		if err := checkValueShape(i, c.Op, c.Value); err != nil {
+			return nil, err
 		}
 		col, err := tables[pos].index(c.Column)
 		if err != nil {
@@ -745,7 +743,7 @@ type joinDialect struct {
 // checkTypedValues is the column-typed half of the spec/protocol.md §5.4.2
 // value check.
 func checkTypedValues(col colMeta, c Condition) error {
-	if col.compare == nil || col.compare.unchecked || c.Value == nil || opIsPattern(c.Op) {
+	if col.compare == nil || col.compare.form == formNone || c.Value == nil || opIsPattern(c.Op) {
 		return nil
 	}
 	for _, v := range c.Value.Items {
@@ -842,33 +840,28 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 // tableWhereClause renders the data route's " where …" ("" without
 // conditions) and its values, with each condition's column checked against
 // the live catalog's columns (spec/protocol.md §5.4.2).
-func tableWhereClause(conditions []Condition, columns []colMeta, d joinDialect) (string, []string, error) {
+func tableWhereClause(conditions []Condition, table tableMeta, d joinDialect) (string, []string, error) {
 	terms := make([]filterTerm, 0, len(conditions))
 	for i, c := range conditions {
-		idx := -1
-		for k, col := range columns {
-			if col.name == c.Column {
-				idx = k
-				break
-			}
+		idx, err := table.index(c.Column)
+		if err != nil {
+			return "", nil, err
 		}
-		if idx < 0 {
-			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", c.Column)}
-		}
+		col := table.columns[idx]
 		// Defends the SQL boundary when a caller bypasses ParseFilter.
 		if !validOps[c.Op] {
 			return "", nil, filterErr("condition %d has invalid op %q", i, c.Op)
 		}
-		if err := checkValueShape(c.Op, c.Value); err != nil {
-			return "", nil, filterErr("condition %d: %s", i, err.(*FilterError).Reason)
+		if err := checkValueShape(i, c.Op, c.Value); err != nil {
+			return "", nil, err
 		}
 		if i > 0 && c.Logic == nil {
 			return "", nil, filterErr("condition %d is missing logic", i)
 		}
-		if err := checkTypedValues(columns[idx], c); err != nil {
+		if err := checkTypedValues(col, c); err != nil {
 			return "", nil, err
 		}
-		terms = append(terms, filterTerm{cond: c, expr: d.quote(columns[idx].name), col: columns[idx]})
+		terms = append(terms, filterTerm{cond: c, expr: d.quote(col.name), col: col})
 	}
 	clause, values := filterSQL(terms, d)
 	if clause == "" {

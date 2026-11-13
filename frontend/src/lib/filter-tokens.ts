@@ -69,6 +69,7 @@ export function tokenizeFilterDsl(text: string): Tokenized {
     i = end;
   };
   const isSpace = (c: string): boolean => /\s/.test(c);
+  const isListStop = (c: string): boolean => c === "," || c === "(" || c === ")";
 
   while (i < text.length) {
     const s = i;
@@ -136,7 +137,7 @@ export function tokenizeFilterDsl(text: string): Tokenized {
     } else if (expect === "boundAnd" && keywordAt(text, i, "AND")) {
       push("keyword", s, i + 3, "value");
       continue;
-    } else if (expectsValue(expect) && !(expect === "listItem" && /[,()]/.test(text[i]))) {
+    } else if (expectsValue(expect) && !(expect === "listItem" && isListStop(text[i]))) {
       const inList = expect === "listItem";
       let j = i;
       if (text[i] === "'") {
@@ -150,7 +151,7 @@ export function tokenizeFilterDsl(text: string): Tokenized {
           }
         }
       } else {
-        while (j < text.length && !isSpace(text[j]) && text[j] !== "'" && !(inList && /[,()]/.test(text[j]))) j++;
+        while (j < text.length && !isSpace(text[j]) && text[j] !== "'" && !(inList && isListStop(text[j]))) j++;
       }
       push("value", s, j, inList ? "listNext" : expect === "lowBound" ? "boundAnd" : "joiner");
       continue;
@@ -194,7 +195,7 @@ export function completionAt(text: string): Completion {
   };
 }
 
-const FILTER_OPERATORS: readonly FilterOp[] = [
+export const FILTER_OPERATORS: readonly FilterOp[] = [
   "=",
   "!=",
   ">",

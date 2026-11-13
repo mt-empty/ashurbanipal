@@ -50,7 +50,7 @@ func repoRoot(t *testing.T) string {
 
 // seedColumns substitutes the fixture's tables map for the live catalog
 // (spec/fixtures/README.md).
-func seedColumns(t *testing.T, file fixtureFile, table string) []colMeta {
+func seedTable(t *testing.T, file fixtureFile, table string) tableMeta {
 	t.Helper()
 	columns, ok := file.Tables[table]
 	if !ok {
@@ -63,7 +63,7 @@ func seedColumns(t *testing.T, file fixtureFile, table string) []colMeta {
 			compare: pgTypedCompare(c.Type),
 		})
 	}
-	return out
+	return tableMeta{name: table, columns: out}
 }
 
 var placeholderRe = regexp.MustCompile(`\$(\d+)`)
@@ -116,7 +116,7 @@ func TestFilterBuilderFixtures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("case %s: parse failed: %v", tc.Name, err)
 				}
-				where, values, err := tableWhereClause(conditions, seedColumns(t, file, tc.Table), pgJoinDialect)
+				where, values, err := tableWhereClause(conditions, seedTable(t, file, tc.Table), pgJoinDialect)
 				if err != nil {
 					t.Fatalf("case %s: build failed: %v", tc.Name, err)
 				}
@@ -136,7 +136,7 @@ func TestFilterBuilderFixtures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("case %s: should parse (rejection is builder-stage): %v", tc.Name, err)
 				}
-				_, _, err = tableWhereClause(conditions, seedColumns(t, file, tc.Table), pgJoinDialect)
+				_, _, err = tableWhereClause(conditions, seedTable(t, file, tc.Table), pgJoinDialect)
 				var notAllowed *NotAllowedError
 				var filterError *FilterError
 				switch {
