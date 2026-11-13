@@ -19,7 +19,15 @@ from ashurbanipal.db import BadJoin, BadParam, FilterParseError, NotAllowed, Que
 from ashurbanipal.db.postgres import column_class as pg_column_class
 from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import column_class as sqlite_column_class
-from ashurbanipal.filter import Comparison, FilterError, NullCheck, parse, parse_for_join
+from ashurbanipal.filter import (
+    Comparison,
+    FilterError,
+    ListComparison,
+    NullCheck,
+    form_accepts,
+    parse,
+    parse_for_join,
+)
 from ashurbanipal.join import (
     ARRAY,
     FLOAT,
@@ -33,6 +41,7 @@ from ashurbanipal.join import (
     Dialect,
     JoinOpts,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     assign_labels,
     build_select,
@@ -59,6 +68,7 @@ JOIN = json.dumps(
 _PG = Dialect(
     quote=lambda n: '"' + n.replace('"', '""') + '"',
     cast_text=lambda e: f"{e}::text",
+    cast_param=lambda ph, t: f"{ph}::{t}",
     placeholder="%s",
     ilike="native",
 )
@@ -217,6 +227,82 @@ def test_labels_are_unique_and_stable() -> None:
     assert assign_labels(["id", "id", "email"], [0, 1, 1]) == ["id_0", "id_1", "email"]
 
 
+def test_typed_columns_compare_in_their_own_type() -> None:
+    orders = _orders()
+    orders.columns.append(
+        ColMeta(
+            name="total",
+            type_name="integer",
+            column_class=NUMBER,
+            compare=TypedCompare("number", "numeric", "int8"),
+        )
+    )
+    plan = plan_join(
+        parse_join(JOIN),
+        [orders, _users()],
+        _opts(
+            filter=[
+                ListComparison(column="total", op="BETWEEN", value=("1", "9.5")),
+                ListComparison(column="status", op="IN", value=("a", "b"), logic="AND", not_=True),
+                Comparison(column="total", op="LIKE", value="1%", logic="OR"),
+            ]
+        ),
+    )
+    body, values = build_select(plan, _PG)
+    assert (
+        ' where (t0."total" BETWEEN %s::int8 AND %s::numeric) AND (NOT (t0."status"::text IN (%s, %s)))'
+        ' OR (t0."total"::text LIKE %s)'
+    ) in body
+    assert values == ["1", "9.5", "a", "b", "1%"]
+    with pytest.raises(FilterParseError, match="'x' for column 'total'"):
+        plan_join(
+            parse_join(JOIN),
+            [orders, _users()],
+            _opts(filter=[ListComparison(column="total", op="IN", value=("1", "x"))]),
+        )
+
+
+@pytest.mark.parametrize(
+    ("form", "value", "ok"),
+    [
+        ("number", "-12", True),
+        ("number", "+3.25", True),
+        ("number", ".5", False),
+        ("number", "5.", False),
+        ("number", "1e3", False),
+        ("number", "9" * 35, True),
+        ("number", "9" * 36, False),
+        ("float", "1.5e-3", True),
+        ("float", "NaN", False),
+        ("date", "2016-02-29", True),
+        ("date", "2015-02-29", False),
+        ("date", "0000-01-01", False),
+        ("date", "2016-01-01 10:00", False),
+        ("timestamp", "2016-01-01T10:30:00.123456", True),
+        ("timestamp", "2016-01-01T10:30:00Z", False),
+        ("timestamp", "2016-01-01 ", False),
+        ("time", "23:59:59", True),
+        ("time", "24:00", False),
+        ("time", "9:30", False),
+        ("time", "10:00+02", False),
+        ("timestamptz", "2016-01-01 10:00:00+00", True),
+        ("timestamptz", "2016-01-01T10:00:00.5+05:30", True),
+        ("timestamptz", "1890-01-01 00:00:00+00:53:28", True),
+        ("timestamptz", "2016-01-01 10:00-0300", True),
+        ("timestamptz", "2016-01-01 10:00Z", True),
+        ("timestamptz", "2016-01-01", True),
+        ("timestamptz", "2016-01-01Z", False),
+        ("timestamptz", "2016-01-01 10:00+5", False),
+        ("timestamptz", "2016-01-01 10:00+05:3", False),
+        ("timetz", "10:00:00+02", True),
+        ("timetz", "10:00", True),
+        ("timetz", "10:00+", False),
+    ],
+)
+def test_value_forms(form, value: str, ok: bool) -> None:
+    assert form_accepts(form, value) is ok
+
+
 def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
     plan = plan_join(
         parse_join(JOIN),
@@ -233,7 +319,7 @@ def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
     body, values = build_select(plan, _PG)
     assert body.startswith('t0."id"::text as c0, ')
     assert ' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"' in body
-    assert ' where (t1."email"::text = %s) OR (NOT (t0."status"::text IS NULL))' in body
+    assert ' where (t1."email"::text = %s) OR (NOT (t0."status" IS NULL))' in body
     assert body.endswith(' order by t1."email" asc, t0."id" asc limit %s offset %s')
     assert values == ["a@b.c"]
 

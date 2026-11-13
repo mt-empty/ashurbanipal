@@ -12,48 +12,26 @@ from pathlib import Path
 import pytest
 
 from ashurbanipal import filter as filter_module
-from ashurbanipal.db import NotAllowed
-from ashurbanipal.db.postgres import _build_where_clause
+from ashurbanipal.db import FilterParseError, NotAllowed
+from ashurbanipal.db.postgres import _JOIN_DIALECT, column_class, typed_compare
+from ashurbanipal.join import ColMeta, table_where_clause
 
 FIXTURES_PATH = Path(__file__).resolve().parents[3] / "spec" / "fixtures" / "filter-builder-tests.json"
+FIXTURES = json.loads(FIXTURES_PATH.read_text())
 
-# Static mirror of the seed schema's columns for the tables the fixture
-# references (spec/fixtures/README.md: unit runners substitute this for a
-# live information_schema lookup).
-SEED_COLUMNS = {
-    "users": [
-        "id",
-        "email",
-        "full_name",
-        "age",
-        "is_active",
-        "login_count",
-        "metadata",
-        "last_login_at",
-        "created_at",
-    ],
-    "orders": [
-        "id",
-        "user_id",
-        "status",
-        "total_cents",
-        "discount_pct",
-        "tags",
-        "line_items",
-        "created_at",
-    ],
-    "products": [
-        "id",
-        "sku",
-        "name",
-        "category",
-        "price",
-        "weight_kg",
-        "in_stock",
-        "description",
-        "created_on",
-    ],
-}
+
+def _seed_columns(table: str) -> list[ColMeta]:
+    """The fixture's tables map in place of the live catalog lookup (spec/fixtures/README.md)."""
+    return [
+        ColMeta(
+            name=name,
+            type_name=c["type"],
+            column_class=column_class(c["type"], "", "", False),
+            compare=typed_compare(c["type"]),
+        )
+        for name, c in FIXTURES["tables"][table].items()
+    ]
+
 
 _PLACEHOLDER_RE = re.compile(r"\$\d+")
 
@@ -62,12 +40,7 @@ def _normalize(where_text: str) -> str:
     return _PLACEHOLDER_RE.sub("%s", where_text)
 
 
-def _load_cases() -> list[dict]:
-    data = json.loads(FIXTURES_PATH.read_text())
-    return data["cases"]
-
-
-@pytest.mark.parametrize("case", _load_cases(), ids=lambda c: c["name"])
+@pytest.mark.parametrize("case", FIXTURES["cases"], ids=lambda c: c["name"])
 def test_filter_builder_fixture(case: dict) -> None:
     name = case["name"]
     raw = case.get("raw")
@@ -80,14 +53,14 @@ def test_filter_builder_fixture(case: dict) -> None:
 
     if expect is not None:
         conditions = filter_module.parse(raw)
-        where_clause, values = _build_where_clause(conditions, SEED_COLUMNS[case["table"]])
+        where_clause, values = table_where_clause(conditions, _seed_columns(case["table"]), _JOIN_DIALECT)
         expected_where = f" where {_normalize(expect['where'])}" if expect["where"] else ""
         assert where_clause == expected_where, f"case {name}: WHERE mismatch"
         assert values == expect["values"], f"case {name}: bind values mismatch"
-    elif expect_error == "unknown_column":
+    elif expect_error in ("unknown_column", "invalid_value"):
         conditions = filter_module.parse(raw)
-        with pytest.raises(NotAllowed):
-            _build_where_clause(conditions, SEED_COLUMNS[case["table"]])
+        with pytest.raises(NotAllowed if expect_error == "unknown_column" else FilterParseError):
+            table_where_clause(conditions, _seed_columns(case["table"]), _JOIN_DIALECT)
     else:
         with pytest.raises(filter_module.FilterError):
             filter_module.parse(raw)

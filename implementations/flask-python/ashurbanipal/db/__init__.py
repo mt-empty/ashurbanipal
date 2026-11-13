@@ -334,6 +334,8 @@ OP_SQL: dict[str, str] = {
     ">=": ">=",
     "<=": "<=",
     "LIKE": "LIKE",
+    "IN": "IN",
+    "BETWEEN": "BETWEEN",
     "IS NULL": "IS NULL",
     "IS NOT NULL": "IS NOT NULL",
 }

@@ -8,13 +8,24 @@ emits SQL from catalog names and generated aliases only.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 
 from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
-from .filter import Condition, NullCheck, load_json
+from .filter import (
+    PATTERN_OPS,
+    Comparison,
+    Condition,
+    NullCheck,
+    ValueForm,
+    condition_values,
+    describe_form,
+    form_accepts,
+    load_json,
+)
 
 MAX_JOIN_BYTES = 8192
 MAX_JOIN_TABLES = 4
@@ -204,6 +215,29 @@ def enum_class(identity: str) -> ColumnClass:
     return ColumnClass("enum", identity)
 
 
+@dataclass(frozen=True)
+class TypedCompare:
+    """How a filter compares a column in its own type (`spec/protocol.md`
+    §5.4.2): the form a value must have, and the engine's cast target for the
+    bound value, from a hardcoded per-engine table (None binds it bare)."""
+
+    form: ValueForm | None
+    """None skips the value check: SQLite does not enforce column types."""
+    cast: str | None = None
+    int_cast: str | None = None
+    """The target for a whole number that fits 64 bits, so an integer column
+    keeps its index (Postgres compares int = numeric by converting the column)."""
+
+    def cast_for(self, value: str) -> str | None:
+        """The cast target for one bound value."""
+        if self.int_cast is not None and _INT_RE.fullmatch(value) and -(2**63) <= int(value) < 2**63:
+            return self.int_cast
+        return self.cast
+
+
+_INT_RE = re.compile(r"[+-]?[0-9]+")
+
+
 @dataclass
 class ColMeta:
     """One column as the live catalog reports it."""
@@ -211,6 +245,7 @@ class ColMeta:
     name: str
     type_name: str
     column_class: ColumnClass
+    compare: TypedCompare | None = None  # None: filters compare the column's text cast
     collation: str | None = None  # set where two text collations can clash (`spec/protocol.md` §5.4.1)
     key: KeyKind | None = None
     references: ColumnRef | None = None
@@ -485,7 +520,9 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
         pos = cond.join if cond.join is not None else 0
         if pos < 0 or pos >= len(tables):
             raise _FilterParseError(f"condition {i}: join position {pos} is not in the join")
-        resolved_filter.append(_ResolvedCondition(cond=cond, pos=pos, col=tables[pos].index(cond.column)))
+        col = tables[pos].index(cond.column)
+        _check_typed_values(tables[pos].columns[col], cond)
+        resolved_filter.append(_ResolvedCondition(cond=cond, pos=pos, col=col))
 
     sort = None
     if opts.sort is None and opts.sort_join is not None:
@@ -514,6 +551,8 @@ class Dialect:
 
     quote: Callable[[str], str]
     cast_text: Callable[[str], str]
+    # Converts a bound placeholder to a TypedCompare cast target.
+    cast_param: Callable[[str, str], str]
     placeholder: str  # "%s" (psycopg, pymysql) or "?" (sqlite3)
     ilike: str  # "native", "like" or "lowered-like"
 
@@ -549,6 +588,73 @@ def join_order_keys(
     return keys
 
 
+def _check_typed_values(col: ColMeta, cond: Condition) -> None:
+    """The column-typed half of the `spec/protocol.md` §5.4.2 value check."""
+    form = col.compare.form if col.compare is not None else None
+    if form is None or cond.op in PATTERN_OPS:
+        return
+    for v in condition_values(cond):
+        if not form_accepts(form, v):
+            expected = describe_form(form)
+            raise _FilterParseError(f"value {v!r} for column {col.name!r} must be {expected}")
+
+
+def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tuple[str, list[str]]:
+    """The conditions joined by their logic, without `where`, and the values
+    in placeholder order. Each term is a condition, its column as SQL, and
+    that column's metadata."""
+    values: list[str] = []
+    clause = ""
+    for i, (cond, expr, col) in enumerate(terms):
+        typed = None if cond.op in PATTERN_OPS else col.compare
+
+        def ph_for(value: str, typed: TypedCompare | None = typed) -> str:
+            target = typed.cast_for(value) if typed is not None else None
+            return d.placeholder if target is None else d.cast_param(d.placeholder, target)
+
+        lhs = expr if typed is not None else d.cast_text(expr)
+        if isinstance(cond, NullCheck):
+            inner = f"{expr} {OP_SQL[cond.op]}"
+        elif isinstance(cond, Comparison):
+            ph = ph_for(cond.value)
+            if cond.op == "ILIKE":
+                if d.ilike == "native":
+                    inner = f"{lhs} ILIKE {ph}"
+                elif d.ilike == "like":
+                    inner = f"{lhs} LIKE {ph}"
+                else:
+                    inner = f"LOWER({lhs}) LIKE LOWER({ph})"
+            else:
+                inner = f"{lhs} {OP_SQL[cond.op]} {ph}"
+        elif cond.op == "IN":
+            inner = f"{lhs} IN ({', '.join(ph_for(v) for v in cond.value)})"
+        else:
+            inner = f"{lhs} BETWEEN {ph_for(cond.value[0])} AND {ph_for(cond.value[1])}"
+        values.extend(condition_values(cond))
+        if i > 0:
+            clause += " OR " if cond.logic == "OR" else " AND "
+        clause += f"(NOT ({inner}))" if cond.not_ else f"({inner})"
+    return clause, values
+
+
+def table_where_clause(conditions: list[Condition], columns: list[ColMeta], d: Dialect) -> tuple[str, list[str]]:
+    """The data route's ` where …` ("" without conditions) and its values, with
+    each condition's column checked against the live catalog's columns
+    (`spec/protocol.md` §5.4.2)."""
+    by_name = {c.name: c for c in columns}
+    terms = []
+    for i, cond in enumerate(conditions):
+        col = by_name.get(cond.column)
+        if col is None:
+            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
+        if i > 0 and cond.logic not in ("AND", "OR"):
+            raise _FilterParseError(f"condition {i} is missing logic")
+        _check_typed_values(col, cond)
+        terms.append((cond, d.quote(col.name), col))
+    clause, values = _filter_sql(terms, d)
+    return (f" where {clause}" if clause else ""), values
+
+
 def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
     """Renders `<select list> from … limit … offset …` (no leading `select`,
     so MySQL can wrap it in its timeout hint) and the filter values in
@@ -573,28 +679,10 @@ def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
         on = " and ".join(f"{alias(position, rc)} = {alias(lp, lc)}" for lp, lc, rc in plan.ons[i])
         sql += f" {'left join' if is_left else 'inner join'} {from_item(position)} on {on}"
 
-    values: list[str] = []
-    clause = ""
+    clause, values = _filter_sql(
+        [(rc.cond, alias(rc.pos, rc.col), plan.tables[rc.pos].columns[rc.col]) for rc in plan.filter], d
+    )
     ph = d.placeholder
-    for i, rc_cond in enumerate(plan.filter):
-        cond = rc_cond.cond
-        cast = d.cast_text(alias(rc_cond.pos, rc_cond.col))
-        if isinstance(cond, NullCheck):
-            inner = f"{cast} {OP_SQL[cond.op]}"
-        elif cond.op == "ILIKE":
-            values.append(cond.value)
-            if d.ilike == "native":
-                inner = f"{cast} ILIKE {ph}"
-            elif d.ilike == "like":
-                inner = f"{cast} LIKE {ph}"
-            else:
-                inner = f"LOWER({cast}) LIKE LOWER({ph})"
-        else:
-            values.append(cond.value)
-            inner = f"{cast} {OP_SQL[cond.op]} {ph}"
-        if i > 0:
-            clause += " OR " if cond.logic == "OR" else " AND "
-        clause += f"(NOT ({inner}))" if cond.not_ else f"({inner})"
     if clause:
         sql += f" where {clause}"
     sql += order_by_clause(plan.sort, join_order_keys(plan.tables, plan.ons), plan.descending, lambda k: alias(*k))

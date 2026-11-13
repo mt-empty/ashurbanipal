@@ -6,7 +6,6 @@ import psycopg
 from psycopg.abc import Buffer
 from psycopg.types.string import TextLoader
 
-from ..filter import Condition, NullCheck
 from ..join import (
     ARRAY,
     BINARY,
@@ -26,6 +25,7 @@ from ..join import (
     JoinOpts,
     JoinSpec,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     build_select,
     enum_class,
@@ -33,6 +33,7 @@ from ..join import (
     plan_join,
     table_order_clause,
     table_schemas,
+    table_where_clause,
     tie_break_keys,
     unknown_join_table,
 )
@@ -78,39 +79,35 @@ class _LenientTextLoader(TextLoader):
             return "<undecodable>"
 
 
-def _build_where_clause(conditions: list[Condition], column_names: list[str]) -> tuple[str, list[str]]:
-    """Validate filter columns before SQL interpolation (`spec/protocol.md` §5.4.2)."""
-    if not conditions:
-        return "", []
-
-    values: list[str] = []
-    clause_parts: list[str] = []
-    for i, cond in enumerate(conditions):
-        if cond.column not in column_names:
-            raise NotAllowed(f"column {cond.column!r}", kind=NotAllowedKind.COLUMN)
-        quoted = quote_ident(cond.column)
-        if isinstance(cond, NullCheck):
-            inner = f"{quoted}::text {cond.op}"
-        else:
-            inner = f"{quoted}::text {cond.op} %s"
-            values.append(cond.value)
-        wrapped = f"(NOT ({inner}))" if cond.not_ else f"({inner})"
-
-        if i > 0:
-            if cond.logic not in ("AND", "OR"):
-                raise FilterParseError(f"condition {i} is missing logic")
-            clause_parts.append(" AND " if cond.logic == "AND" else " OR ")
-        clause_parts.append(wrapped)
-
-    return " where " + "".join(clause_parts), values
-
-
 _JOIN_DIALECT = Dialect(
     quote=quote_ident,
     cast_text=lambda expr: f"{expr}::text",
+    cast_param=lambda ph, target: f"{ph}::{target}",
     placeholder="%s",
     ilike="native",
 )
+
+
+def typed_compare(data_type: str) -> TypedCompare | None:
+    """The typed filter comparison for an `information_schema.columns.data_type`
+    (`spec/protocol.md` §5.4.2); the cast target matches the column's own type
+    so `real` compares as `real`."""
+    return _PG_TYPED.get(data_type)
+
+
+_PG_TYPED: dict[str, TypedCompare] = {
+    "smallint": TypedCompare("number", "numeric", "int8"),
+    "integer": TypedCompare("number", "numeric", "int8"),
+    "bigint": TypedCompare("number", "numeric", "int8"),
+    "numeric": TypedCompare("number", "numeric"),
+    "real": TypedCompare("float", "real"),
+    "double precision": TypedCompare("float", "float8"),
+    "date": TypedCompare("date", "date"),
+    "timestamp without time zone": TypedCompare("timestamp", "timestamp"),
+    "timestamp with time zone": TypedCompare("timestamptz", "timestamptz"),
+    "time without time zone": TypedCompare("time", "time"),
+    "time with time zone": TypedCompare("timetz", "timetz"),
+}
 
 
 def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass:
@@ -312,7 +309,7 @@ class PgSource(DbSource):
                         raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
                     sort = opts.sort
 
-                where_clause, filter_values = _build_where_clause(opts.filter or [], column_names)
+                where_clause, filter_values = table_where_clause(opts.filter or [], meta.columns, _JOIN_DIALECT)
 
                 select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
                 order_clause = table_order_clause(meta, sort, opts.descending, quote_ident)
@@ -392,6 +389,7 @@ class PgSource(DbSource):
                 name=name,
                 type_name=full_type,
                 column_class=column_class(data_type, udt_schema, udt_name, is_enum),
+                compare=typed_compare(data_type),
                 key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
                 references=fk_columns.get(name),
                 collation=collation,
