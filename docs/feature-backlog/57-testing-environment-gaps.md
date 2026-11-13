@@ -1,6 +1,6 @@
 # Testing-environment gaps: seeds, demos, conformance, e2e and CI
 
-> **Status:** OPEN · **Area:** conformance, ports, frontend, infra, docs, e2e
+> **Status:** OPEN · **Area:** conformance, ports, frontend, infra, docs, e2e, performance
 
 An inventory of what the test setup cannot catch today. It starts with the
 seed data, because every other layer can only test what a seed holds. Each
@@ -396,6 +396,58 @@ Rust's SQLite and MySQL tests pass. No CI job runs
 `frontend:test-e2e-coverage` either. *Size:* S to document; the split may
 be on purpose because these need services.
 
+### Q — Query performance
+
+Nothing checks how much work a backend query does. A change that made a
+route ten times slower would pass every test. `mise run frontend:perf`
+(`tools/e2e-tests/perf/README.md`) times page start-up through a delay
+proxy, by hand, not each query. Wall-clock limits in CI would flake on
+shared runners, so Q1–Q4 check the shape of the work instead.
+
+Q1–Q3 can be port-neutral on Postgres: load `pg_stat_statements` in the
+conformance database, reset it, call a route, then read the statements any
+port sent. The devcontainer image has the extension, but
+`shared_preload_libraries` is empty, so it must be set on the CI service
+and in `.devcontainer/docker-compose.yml`.
+
+**Q1. Nothing checks that catalog-only routes stay catalog-only.**
+`/api/table-counts` must use the catalog estimate, never `COUNT(*)`
+(`spec/protocol.md:199-202`). `/tables/common-values` reads planner
+statistics (`spec/protocol.md:499`), and `/tables/structure` is catalog-only
+(`spec/protocol.md:745`). A port that ran `COUNT(*)` on `audit_log` (30,000
+rows) would return the right answer and pass. *Size:* S once
+`pg_stat_statements` is set up: assert that no captured statement reads a
+seeded table.
+
+**Q2. Nothing checks how many queries a request sends.** A loop that sends
+one query per table or per column returns the right body and passes.
+Ports differ in setup statements (Rust's `set local statement_timeout`,
+`core/src/db/postgres.rs:103`), so assert an upper bound per route, not an
+exact count. *Size:* M.
+
+**Q3. Nothing checks the query plan for paging.** With no `sort`, rows come
+in key order (`spec/protocol.md:246`), so paging `audit_log` should use its
+primary key index, not a full scan and sort. A filter on a `number`,
+`float`, `temporal` or `time` column compares in the column's own type
+(`spec/protocol.md:397-402`), so an index on it can serve the filter and
+the plan check should assert that. Every other class is compared through
+a text cast (`spec/protocol.md:403-406`) and scans by design; the check
+must accept that and not count it as a regression. Deep `OFFSET`
+pages also cost more by design (story 33, line 94). *Size:* M (plan of the
+captured statement, or `auto_explain`).
+
+**Q4. The seed is too small to show catalog cost.** The devcontainer
+database has 30 base tables. Catalog queries grow with table and column
+count, not row count, so a slow listing or structure query can't show
+here. A generated schema of about 2,000 tables, opt-in and outside the
+conformance seed to avoid C6, with a loose time limit, would catch the
+worst cases. *Size:* M.
+
+**Q5. No tool times backend routes.** There is no backend equivalent of
+`frontend:perf`: one that times each route per port against Q4's fixture
+and compares two runs, like `perf/compare.mjs`. It would stay out of CI,
+for before-and-after checks on a change. *Size:* M.
+
 ### H — Stale docs found while checking
 
 - `conformance/seed/seed.mysql.sql:8-11` and `seed.sqlite.sql:11-12` say
@@ -422,14 +474,16 @@ be on purpose because these need services.
    smoke. Small and safe.
 2. **P1** and **P2**: stop silent skips and schema leaks, so the later
    additions are trusted.
-3. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
+3. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
+   routes and per-route query counts. Neither depends on timing.
+4. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
    **S6** on Postgres, in a new schema where possible to avoid C6's churn.
    These unblock stories 25, 51 and 55. Add **S7a** once story 33 B1
    settles the paging rule.
-4. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
-5. **E5**, then **E1**: a database client for e2e, then a chosen subset of
+5. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
+6. **E5**, then **E1**: a database client for e2e, then a chosen subset of
    specs on SQLite and MySQL.
-6. **C1**, **V2**, **V1**: actix on other engines, pinned engine versions,
-   one older Postgres.
-7. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**: the larger
-   fixture and contract work, alongside story 35.
+7. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
+   versions, one older Postgres, and the paging plan check.
+8. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
+   **Q5**: the larger fixture and contract work, alongside story 35.
