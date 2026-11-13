@@ -45,23 +45,23 @@ var pgJoinDialect = joinDialect{
 func pgTypedCompare(dataType string) *typedCompare {
 	switch dataType {
 	case "smallint", "integer", "bigint":
-		return &typedCompare{form: formNumber, cast: "numeric", intCast: "int8"}
+		return &typedCompare{form: formPgNumeric, cast: "numeric", intCast: "int8"}
 	case "numeric":
-		return &typedCompare{form: formNumber, cast: "numeric"}
+		return &typedCompare{form: formPgNumeric, cast: "numeric"}
 	case "real":
-		return &typedCompare{form: formFloat, cast: "real"}
+		return &typedCompare{form: formPgFloat, cast: "real"}
 	case "double precision":
-		return &typedCompare{form: formFloat, cast: "float8"}
+		return &typedCompare{form: formPgFloat, cast: "float8"}
 	case "date":
-		return &typedCompare{form: formDate, cast: "date"}
+		return &typedCompare{form: formPgDate, cast: "date"}
 	case "timestamp without time zone":
-		return &typedCompare{form: formTimestamp, cast: "timestamp"}
+		return &typedCompare{form: formPgTimestamp, cast: "timestamp"}
 	case "timestamp with time zone":
-		return &typedCompare{form: formTimestampTz, cast: "timestamptz"}
+		return &typedCompare{form: formPgTimestampTz, cast: "timestamptz"}
 	case "time without time zone":
-		return &typedCompare{form: formTime, cast: "time"}
+		return &typedCompare{form: formPgTime, cast: "time"}
 	case "time with time zone":
-		return &typedCompare{form: formTimeTz, cast: "timetz"}
+		return &typedCompare{form: formPgTimeTz, cast: "timetz"}
 	}
 	return nil
 }
@@ -69,9 +69,10 @@ func pgTypedCompare(dataType string) *typedCompare {
 // pgColumnClass maps information_schema types to spec/protocol.md §5.11.2
 // classes (docs/adapter-decisions.md §5.11).
 func pgColumnClass(dataType, udtSchema, udtName string, isEnum bool) columnClass {
+	if c, ok := typedClass(pgTypedCompare(dataType)); ok {
+		return c
+	}
 	switch dataType {
-	case "smallint", "integer", "bigint", "numeric":
-		return classNumber
 	case "character varying", "character", "text":
 		return classText
 	case "uuid":
@@ -80,12 +81,6 @@ func pgColumnClass(dataType, udtSchema, udtName string, isEnum bool) columnClass
 		return classBoolean
 	case "bytea":
 		return classBinary
-	case "date", "timestamp without time zone", "timestamp with time zone":
-		return classTemporal
-	case "time without time zone", "time with time zone":
-		return classTime
-	case "real", "double precision":
-		return classFloat
 	case "json", "jsonb":
 		return classJSON
 	case "ARRAY":
@@ -384,10 +379,24 @@ func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([
 	return groupUniqueKeys(parts), nil
 }
 
+// beginRead opens the read-only transaction every operation runs on. Typed
+// filters read values in ISO form, and a cell's text must be one.
+func (c *PostgresSource) beginRead(ctx context.Context) (*sql.Tx, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "set local datestyle = 'ISO'"); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	return tx, nil
+}
+
 // QueryJoin serves GET /api/tables/join (spec/protocol.md §5.11): every
 // lookup and the select run on one read-only transaction.
 func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec JoinSpec, opts JoinOpts) (JoinData, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return JoinData{}, err
 	}
@@ -457,7 +466,7 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 func (c *PostgresSource) Engine() Engine { return EnginePostgres }
 
 func (c *PostgresSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return SchemaListing{}, err
 	}
@@ -474,7 +483,7 @@ func (c *PostgresSource) ListSchemas(ctx context.Context) (SchemaListing, error)
 }
 
 func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]TableInfo, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +533,7 @@ func (c *PostgresSource) ListTables(ctx context.Context, schema *string) ([]Tabl
 
 // TableCounts serves GET /api/table-counts.
 func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]CountEntry, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +581,7 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 // mapSelectDenied turns a residual "permission denied" (SQLSTATE 42501) at
 // the row fetch into a NotAllowedError (400) — the allow-list already
 // rejects tables the role can't SELECT, so this only catches the edge. It
-// also maps a filter value Postgres rejects (SQLSTATE class 22, only when
+// also maps a filter value Postgres rejects (a bad-value SQLSTATE, only when
 // values were bound: a NUL byte, or a value a typed comparison's cast
 // refuses) to a FilterError, also 400, never a raw 500
 // (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale). When the
@@ -589,7 +598,7 @@ func mapSelectDenied(err error, table string, sort *string, filtered bool) error
 		case "42501":
 			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
 		}
-		if filtered && strings.HasPrefix(pgErr.Code, "22") {
+		if filtered && isBadValueSQLState(pgErr.Code) {
 			return filterErr("value invalid for this backend: %s", pgErr.Message)
 		}
 	}
@@ -600,7 +609,7 @@ func mapSelectDenied(err error, table string, sort *string, filtered bool) error
 // filter columns against the live schema, then runs one parameterized
 // SELECT.
 func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table string, opts QueryOpts) (TableData, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -720,7 +729,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 
 // CommonValues serves GET /api/tables/common-values.
 func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table, column string) ([]CommonValueEntry, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +814,7 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 
 // ReferencedBy serves GET /api/tables/referenced-by (spec/protocol.md §5.9).
 func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table string) ([]ReferencedByEntry, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -901,7 +910,7 @@ func fkActionPG(code string) string {
 
 // Structure serves GET /api/tables/structure (spec/protocol.md §5.10).
 func (c *PostgresSource) Structure(ctx context.Context, schema *string, table string) (Structure, error) {
-	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := c.beginRead(ctx)
 	if err != nil {
 		return Structure{}, err
 	}

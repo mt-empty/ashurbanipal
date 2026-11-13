@@ -20,6 +20,7 @@ import {
   tableSchemas,
   tableWhereClause,
   tieBreakKeys,
+  typedClass,
   type UniqueKey,
   unknownJoinTable,
 } from "../join.js";
@@ -42,7 +43,7 @@ import {
   type TableInfo,
 } from "./types.js";
 
-const JOIN_DIALECT: JoinDialect = {
+export const JOIN_DIALECT: JoinDialect = {
   quote: quoteIdent,
   castText: (expr) => `${expr}::text`,
   castParam: (p, target) => `${p}::${target}`,
@@ -60,23 +61,23 @@ export function pgTypedCompare(dataType: string): TypedCompare | undefined {
     case "smallint":
     case "integer":
     case "bigint":
-      return { form: "number", cast: "numeric", intCast: "int8" };
+      return { form: "pg-numeric", cast: "numeric", intCast: "int8" };
     case "numeric":
-      return { form: "number", cast: "numeric" };
+      return { form: "pg-numeric", cast: "numeric" };
     case "real":
-      return { form: "float", cast: "real" };
+      return { form: "pg-float", cast: "real" };
     case "double precision":
-      return { form: "float", cast: "float8" };
+      return { form: "pg-float", cast: "float8" };
     case "date":
-      return { form: "date", cast: "date" };
+      return { form: "pg-date", cast: "date" };
     case "timestamp without time zone":
-      return { form: "timestamp", cast: "timestamp" };
+      return { form: "pg-timestamp", cast: "timestamp" };
     case "timestamp with time zone":
-      return { form: "timestamptz", cast: "timestamptz" };
+      return { form: "pg-timestamptz", cast: "timestamptz" };
     case "time without time zone":
-      return { form: "time", cast: "time" };
+      return { form: "pg-time", cast: "time" };
     case "time with time zone":
-      return { form: "timetz", cast: "timetz" };
+      return { form: "pg-timetz", cast: "timetz" };
     default:
       return undefined;
   }
@@ -84,12 +85,9 @@ export function pgTypedCompare(dataType: string): TypedCompare | undefined {
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 export function pgColumnClass(dataType: string, udtSchema: string, udtName: string, isEnum: boolean): ColumnClass {
+  const typed = typedClass(pgTypedCompare(dataType));
+  if (typed) return typed;
   switch (dataType) {
-    case "smallint":
-    case "integer":
-    case "bigint":
-    case "numeric":
-      return { kind: "number" };
     case "character varying":
     case "character":
     case "text":
@@ -100,16 +98,6 @@ export function pgColumnClass(dataType: string, udtSchema: string, udtName: stri
       return { kind: "boolean" };
     case "bytea":
       return { kind: "binary" };
-    case "date":
-    case "timestamp without time zone":
-    case "timestamp with time zone":
-      return { kind: "temporal" };
-    case "time without time zone":
-    case "time with time zone":
-      return { kind: "time" };
-    case "real":
-    case "double precision":
-      return { kind: "float" };
     case "json":
     case "jsonb":
       return { kind: "json" };
@@ -136,6 +124,8 @@ export class PostgresSource implements DbSource {
     try {
       await client.query("BEGIN");
       await client.query(`SET LOCAL statement_timeout = ${timeoutMs}`);
+      // Typed filters read values in ISO form, and a cell's text must be one.
+      await client.query("SET LOCAL datestyle = 'ISO'");
       const result = await fn(client);
       await client.query("COMMIT");
       return result;

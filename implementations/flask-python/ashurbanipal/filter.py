@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
 from typing import Any, Literal, TypeGuard, get_args
 
 MAX_FILTER_BYTES = 8192
@@ -197,54 +197,121 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
 
 
 # The form a value compared in its column's own type must have (spec/protocol.md §5.4.2).
-type ValueForm = Literal["number", "float", "date", "timestamp", "timestamptz", "time", "timetz"]
+type ValueForm = Literal[
+    "mysql-decimal",
+    "mysql-float",
+    "mysql-date",
+    "mysql-datetime",
+    "mysql-time",
+    "pg-numeric",
+    "pg-float",
+    "pg-date",
+    "pg-timestamp",
+    "pg-timestamptz",
+    "pg-time",
+    "pg-timetz",
+]
 
-_NUMBER_RE = re.compile(r"[+-]?[0-9]{1,35}(\.[0-9]{1,30})?")
-_FLOAT_RE = re.compile(r"[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?")
-_TIME_RE = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?")
-_TIME_TZ_RE = re.compile(
-    r"([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?"
-)
-_DATE_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
-_TIMESTAMP_RE = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})(?:[ T](.*))?", re.DOTALL)
+# Each form is the common one widened to every value its engine stores and
+# renders (spec/protocol.md §5.4.2), so a cell's own text always filters back
+# to its row.
+_CLOCK_TAIL = r":[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?"
+_PG_CLOCK = rf"(([01][0-9]|2[0-3]){_CLOCK_TAIL}|24:00(:00(\.0{{1,6}})?)?)"
+_TZ_OFFSET = r"(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?"
+_MYSQL_DECIMAL_RE = re.compile(r"[+-]?[0-9]{1,35}(\.[0-9]{1,30})?")
+_MYSQL_FLOAT_RE = re.compile(r"[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?")
+_MYSQL_TIME_RE = re.compile(rf"-?([0-9]{{2,3}}){_CLOCK_TAIL}")
+_PG_NUMERIC_RE = re.compile(r"[+-]?[0-9]+(\.[0-9]+)?")
+_PG_FLOAT_RE = re.compile(r"[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,3})?")
+_PG_SPECIAL_NUMBER_RE = re.compile(r"nan|[+-]?infinity", re.IGNORECASE)
+_PG_INFINITY_RE = re.compile(r"-?infinity", re.IGNORECASE)
+_TIME_RE = re.compile(rf"([01][0-9]|2[0-3]){_CLOCK_TAIL}")
+_PG_TIME_RE = re.compile(_PG_CLOCK)
+_PG_TIME_TZ_RE = re.compile(_PG_CLOCK + _TZ_OFFSET)
+_DATE_RE = re.compile(r"([0-9]{4,7})-([0-9]{2})-([0-9]{2})")
 
 
-def _real_date(s: str) -> bool:
-    """A YYYY-MM-DD string naming a real day in years 0001-9999."""
+def _calendar_date(s: str, wide_years: bool, bc: bool) -> bool:
+    """A real YYYY-MM-DD date from year 0001; `wide_years` allows up to 7 year
+    digits. A `bc` year counts back from 1 BC, which is a leap year."""
     m = _DATE_RE.fullmatch(s)
-    if m is None:
+    if m is None or (not wide_years and len(m[1]) != 4):
         return False
-    try:
-        date(int(m[1]), int(m[2]), int(m[3]))
-    except ValueError:
+    y, month, day = int(m[1]), int(m[2]), int(m[3])
+    if y < 1 or not 1 <= month <= 12:
         return False
-    return True
+    ly = y - 1 if bc else y
+    leap = ly % 4 == 0 and (ly % 100 != 0 or ly % 400 == 0)
+    days = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+    return 1 <= day <= days
+
+
+def _mysql_date(s: str) -> bool:
+    return s == "0000-00-00" or _calendar_date(s, False, False)
+
+
+def _timestamp_of(v: str, date_ok: Callable[[str], bool], time_ok: Callable[[str], bool]) -> bool:
+    """A date accepted by `date_ok`, optionally followed by a space or `T` and
+    a time accepted by `time_ok`."""
+    m = re.search(r"[ T]", v)
+    return date_ok(v) if m is None else date_ok(v[: m.start()]) and time_ok(v[m.start() + 1 :])
+
+
+def _pg_timestamp(v: str, time_re: re.Pattern[str]) -> bool:
+    if _PG_INFINITY_RE.fullmatch(v):
+        return True
+    bc = v.endswith(" BC")
+    rest = v[:-3] if bc else v
+    return _timestamp_of(rest, lambda d: _calendar_date(d, True, bc), lambda t: time_re.fullmatch(t) is not None)
 
 
 def form_accepts(form: ValueForm, v: str) -> bool:
-    if form == "number":
-        return _NUMBER_RE.fullmatch(v) is not None
-    if form == "float":
-        return _FLOAT_RE.fullmatch(v) is not None
-    if form == "date":
-        return _real_date(v)
-    if form in ("timestamp", "timestamptz"):
-        time_re = _TIME_TZ_RE if form == "timestamptz" else _TIME_RE
-        m = _TIMESTAMP_RE.fullmatch(v)
-        return m is not None and _real_date(m[1]) and (m[2] is None or time_re.fullmatch(m[2]) is not None)
-    return (_TIME_TZ_RE if form == "timetz" else _TIME_RE).fullmatch(v) is not None
+    match form:
+        case "mysql-decimal":
+            return _MYSQL_DECIMAL_RE.fullmatch(v) is not None
+        case "mysql-float":
+            return _MYSQL_FLOAT_RE.fullmatch(v) is not None
+        case "mysql-date":
+            return _mysql_date(v)
+        case "mysql-datetime":
+            return _timestamp_of(v, _mysql_date, lambda t: _TIME_RE.fullmatch(t) is not None)
+        case "mysql-time":
+            m = _MYSQL_TIME_RE.fullmatch(v)
+            return m is not None and int(m[1]) <= 838
+        case "pg-numeric":
+            return _PG_SPECIAL_NUMBER_RE.fullmatch(v) is not None or _PG_NUMERIC_RE.fullmatch(v) is not None
+        case "pg-float":
+            return _PG_SPECIAL_NUMBER_RE.fullmatch(v) is not None or _PG_FLOAT_RE.fullmatch(v) is not None
+        case "pg-date":
+            if _PG_INFINITY_RE.fullmatch(v):
+                return True
+            return _calendar_date(v[:-3], True, True) if v.endswith(" BC") else _calendar_date(v, True, False)
+        case "pg-timestamp":
+            return _pg_timestamp(v, _PG_TIME_RE)
+        case "pg-timestamptz":
+            return _pg_timestamp(v, _PG_TIME_TZ_RE)
+        case "pg-time":
+            return _PG_TIME_RE.fullmatch(v) is not None
+        case "pg-timetz":
+            return _PG_TIME_TZ_RE.fullmatch(v) is not None
+
+
+_TIMESTAMP_FORM = "a date such as 2016-01-31, optionally with a time such as 10:30:00"
 
 
 def describe_form(form: ValueForm) -> str:
     """Names the expected form in an error title."""
     return {
-        "number": "a decimal number such as -12 or 0.5",
-        "float": "a number such as 0.5 or 1.5e-3",
-        "date": "a date such as 2016-01-31",
-        "timestamp": "a date such as 2016-01-31, optionally with a time such as 10:30:00",
-        "timestamptz": (
-            "a date such as 2016-01-31, optionally with a time such as 10:30:00 and an offset such as +02:00"
-        ),
-        "time": "a time such as 10:30 or 10:30:00.5",
-        "timetz": "a time such as 10:30, optionally with an offset such as +02:00",
+        "mysql-decimal": "a decimal number such as -12 or 0.5",
+        "mysql-float": "a number such as 0.5 or 1.5e-3",
+        "mysql-date": "a date such as 2016-01-31",
+        "mysql-datetime": _TIMESTAMP_FORM,
+        "mysql-time": "a time such as 10:30 or -100:00:00",
+        "pg-numeric": "a decimal number such as -12, 0.5 or NaN",
+        "pg-float": "a number such as 0.5, 1.5e-3 or Infinity",
+        "pg-date": "a date such as 2016-01-31, 0044-03-15 BC or infinity",
+        "pg-timestamp": _TIMESTAMP_FORM,
+        "pg-timestamptz": f"{_TIMESTAMP_FORM} and an offset such as +02:00",
+        "pg-time": "a time such as 10:30 or 10:30:00.5",
+        "pg-timetz": "a time such as 10:30, optionally with an offset such as +02:00",
     }[form]

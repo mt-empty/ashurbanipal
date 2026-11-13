@@ -23,37 +23,34 @@ internal val PG_DIALECT = JoinDialect(
  * so `real` compares as `real`.
  */
 internal fun pgTypedCompare(dataType: String): TypedCompare? = when (dataType) {
-    "smallint", "integer", "bigint" -> TypedCompare(ValueForm.NUMBER, "numeric", intCast = "int8")
-    "numeric" -> TypedCompare(ValueForm.NUMBER, "numeric")
-    "real" -> TypedCompare(ValueForm.FLOAT, "real")
-    "double precision" -> TypedCompare(ValueForm.FLOAT, "float8")
-    "date" -> TypedCompare(ValueForm.DATE, "date")
-    "timestamp without time zone" -> TypedCompare(ValueForm.TIMESTAMP, "timestamp")
-    "timestamp with time zone" -> TypedCompare(ValueForm.TIMESTAMP_TZ, "timestamptz")
-    "time without time zone" -> TypedCompare(ValueForm.TIME, "time")
-    "time with time zone" -> TypedCompare(ValueForm.TIME_TZ, "timetz")
+    "smallint", "integer", "bigint" -> TypedCompare(ValueForm.PG_NUMERIC, "numeric", intCast = "int8")
+    "numeric" -> TypedCompare(ValueForm.PG_NUMERIC, "numeric")
+    "real" -> TypedCompare(ValueForm.PG_FLOAT, "real")
+    "double precision" -> TypedCompare(ValueForm.PG_FLOAT, "float8")
+    "date" -> TypedCompare(ValueForm.PG_DATE, "date")
+    "timestamp without time zone" -> TypedCompare(ValueForm.PG_TIMESTAMP, "timestamp")
+    "timestamp with time zone" -> TypedCompare(ValueForm.PG_TIMESTAMP_TZ, "timestamptz")
+    "time without time zone" -> TypedCompare(ValueForm.PG_TIME, "time")
+    "time with time zone" -> TypedCompare(ValueForm.PG_TIME_TZ, "timetz")
     else -> null
 }
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass = when (dataType) {
-    "smallint", "integer", "bigint", "numeric" -> ColumnClass.NUMBER
-    "character varying", "character", "text" -> ColumnClass.TEXT
-    "uuid" -> ColumnClass.UUID
-    "boolean" -> ColumnClass.BOOLEAN
-    "bytea" -> ColumnClass.BINARY
-    "date", "timestamp without time zone", "timestamp with time zone" -> ColumnClass.TEMPORAL
-    "time without time zone", "time with time zone" -> ColumnClass.TIME
-    "USER-DEFINED" -> when {
-        isEnum -> ColumnClass.enum("$udtSchema.$udtName")
-        udtName == "citext" -> ColumnClass.TEXT
+internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String, isEnum: Boolean): ColumnClass =
+    typedClass(pgTypedCompare(dataType)) ?: when (dataType) {
+        "character varying", "character", "text" -> ColumnClass.TEXT
+        "uuid" -> ColumnClass.UUID
+        "boolean" -> ColumnClass.BOOLEAN
+        "bytea" -> ColumnClass.BINARY
+        "USER-DEFINED" -> when {
+            isEnum -> ColumnClass.enum("$udtSchema.$udtName")
+            udtName == "citext" -> ColumnClass.TEXT
+            else -> ColumnClass.OTHER
+        }
+        "json", "jsonb" -> ColumnClass.JSON
+        "ARRAY" -> ColumnClass.ARRAY
         else -> ColumnClass.OTHER
     }
-    "real", "double precision" -> ColumnClass.FLOAT
-    "json", "jsonb" -> ColumnClass.JSON
-    "ARRAY" -> ColumnClass.ARRAY
-    else -> ColumnClass.OTHER
-}
 
 /** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
@@ -67,7 +64,11 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     }
 
     private fun <T> inReadOnlyTransaction(action: () -> T): T =
-        transactionTemplate.execute { action() }
+        transactionTemplate.execute {
+            // Typed filters read values in ISO form, and a cell's text must be one.
+            jdbcTemplate.execute("set local datestyle = 'ISO'")
+            action()
+        }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
 
     override fun listSchemas(): SchemaListing =
@@ -327,10 +328,10 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         return when {
             // Residual SELECT-denied errors are NotAllowed (spec/protocol.md §2).
             sqlState == "42501" -> NotAllowedException("not allowed: table $table", NotAllowedKind.NOT_READABLE)
-            // A filter value Postgres rejects (SQLSTATE class 22: a NUL byte, or a
+            // A filter value Postgres rejects (a bad-value SQLSTATE: a NUL byte, or a
             // value a typed comparison's cast refuses) is a 400, never a raw 500
             // (docs/adapter-decisions.md §5.4.2).
-            sqlState?.startsWith("22") == true && filtered ->
+            sqlState in BAD_VALUE_SQLSTATES && filtered ->
                 FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             // With a sort, an undefined function is the sort column's type having no
             // ordering operator (json, xml, geometric types).

@@ -77,19 +77,16 @@ private val JOIN_DIALECT = JoinDialect(
 
 /**
  * The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
- * (`spec/protocol.md` §5.4.2). A bare DECIMAL cast is DECIMAL(10,0) and
- * rounds; a temporal value is bound bare because MySQL 8.4 compares a TIME
- * column unequal to an equal CAST(? AS TIME), and coerces a string to the
- * column's own temporal type.
+ * (`spec/protocol.md` §5.4.2); the casts are in `docs/adapter-decisions.md` §5.4.2.
  */
 internal fun mysqlTypedCompare(dataType: String): TypedCompare? = when (dataType.lowercase()) {
     "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" ->
-        TypedCompare(ValueForm.NUMBER, "DECIMAL(65,30)")
-    "float" -> TypedCompare(ValueForm.FLOAT, "FLOAT")
-    "double" -> TypedCompare(ValueForm.FLOAT, "DOUBLE")
-    "date" -> TypedCompare(ValueForm.DATE)
-    "datetime", "timestamp" -> TypedCompare(ValueForm.TIMESTAMP)
-    "time" -> TypedCompare(ValueForm.TIME)
+        TypedCompare(ValueForm.MYSQL_DECIMAL, "DECIMAL(65,30)")
+    "float" -> TypedCompare(ValueForm.MYSQL_FLOAT, "FLOAT")
+    "double" -> TypedCompare(ValueForm.MYSQL_FLOAT, "DOUBLE")
+    "date" -> TypedCompare(ValueForm.MYSQL_DATE)
+    "datetime", "timestamp" -> TypedCompare(ValueForm.MYSQL_DATETIME)
+    "time" -> TypedCompare(ValueForm.MYSQL_TIME)
     else -> null
 }
 
@@ -100,18 +97,15 @@ private const val MARIADB_JSON_COLUMNS_SQL =
         "and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')"
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
-internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass = when (dataType.lowercase()) {
-    "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric" -> ColumnClass.NUMBER
-    "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> ColumnClass.TEXT
-    "date", "datetime", "timestamp" -> ColumnClass.TEMPORAL
-    "time" -> ColumnClass.TIME
-    "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> ColumnClass.BINARY
-    "uuid" -> ColumnClass.UUID
-    "enum" -> ColumnClass.enum(columnType)
-    "float", "double" -> ColumnClass.FLOAT
-    "json" -> ColumnClass.JSON
-    else -> ColumnClass.OTHER
-}
+internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass =
+    typedClass(mysqlTypedCompare(dataType)) ?: when (dataType.lowercase()) {
+        "char", "varchar", "tinytext", "text", "mediumtext", "longtext" -> ColumnClass.TEXT
+        "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob" -> ColumnClass.BINARY
+        "uuid" -> ColumnClass.UUID
+        "enum" -> ColumnClass.enum(columnType)
+        "json" -> ColumnClass.JSON
+        else -> ColumnClass.OTHER
+    }
 
 /** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
 class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
@@ -380,13 +374,19 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
                 List(plan.labels.size) { i -> readCell(rs, i + 1) }
             }
         } catch (e: SQLException) {
-            // MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
-            if (e.errorCode == 1142) {
-                throw NotAllowedException("not allowed: table ${spec.table}", NotAllowedKind.NOT_READABLE)
-            }
-            throw e
+            throw mapSelectError(e, spec.table, values.isNotEmpty())
         }
         plan.joinData(rows, opts.limit, realSchema)
+    }
+
+    /**
+     * MySQL has no SELECT privilege gate, so a residual 1142 is NotAllowed; a bad
+     * value in a filtered query (a cast out of range) is a filter error.
+     */
+    private fun mapSelectError(e: SQLException, table: String, filtered: Boolean): Exception = when {
+        e.errorCode == 1142 -> NotAllowedException("not allowed: table $table", NotAllowedKind.NOT_READABLE)
+        filtered && e.sqlState in BAD_VALUE_SQLSTATES -> FilterException("value invalid for this backend: ${e.message}")
+        else -> e
     }
 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData = inReadOnlyTransaction {
@@ -422,11 +422,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
         val rows = try {
             query(dataSource, sql, bindArgs) { rs -> rowToJson(rs, columns) }
         } catch (e: SQLException) {
-            // MySQL has no SELECT privilege gate; map residual 1142 to NotAllowed.
-            if (e.errorCode == 1142) {
-                throw NotAllowedException("not allowed: table $realTable", NotAllowedKind.NOT_READABLE)
-            }
-            throw e
+            throw mapSelectError(e, realTable, whereClause.values.isNotEmpty())
         }
 
         val totalApprox = query(

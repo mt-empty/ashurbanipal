@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, TypeGuard
+from typing import Any, TypeGuard, assert_never
 
 from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
 from .db import FilterParseError as _FilterParseError
@@ -236,6 +236,24 @@ class TypedCompare:
 
 
 _INT_RE = re.compile(r"[+-]?[0-9]+")
+
+
+def typed_class(t: TypedCompare | None) -> ColumnClass | None:
+    """The class of a typed column, read from its value form so a backend's
+    class and typed comparison can't disagree."""
+    if t is None or t.form is None:
+        return None
+    match t.form:
+        case "mysql-decimal" | "pg-numeric":
+            return NUMBER
+        case "mysql-float" | "pg-float":
+            return FLOAT
+        case "mysql-date" | "mysql-datetime" | "pg-date" | "pg-timestamp" | "pg-timestamptz":
+            return TEMPORAL
+        case "mysql-time" | "pg-time" | "pg-timetz":
+            return TIME
+        case _:
+            assert_never(t.form)
 
 
 @dataclass
@@ -614,7 +632,7 @@ def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tupl
 
         lhs = expr if typed is not None else d.cast_text(expr)
         if isinstance(cond, NullCheck):
-            inner = f"{expr} {OP_SQL[cond.op]}"
+            inner = f"{lhs} {OP_SQL[cond.op]}"
         elif isinstance(cond, Comparison):
             ph = ph_for(cond.value)
             if cond.op == "ILIKE":

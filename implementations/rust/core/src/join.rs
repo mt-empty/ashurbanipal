@@ -225,6 +225,21 @@ impl ColumnClass {
             _ => None,
         }
     }
+
+    /// The class of a typed column, read from its value form so a backend's
+    /// class and typed comparison can't disagree.
+    pub(crate) fn of_form(form: ValueForm) -> Self {
+        match form {
+            ValueForm::MysqlDecimal | ValueForm::PgNumeric => ColumnClass::Number,
+            ValueForm::MysqlFloat | ValueForm::PgFloat => ColumnClass::Float,
+            ValueForm::MysqlDate
+            | ValueForm::MysqlDatetime
+            | ValueForm::PgDate
+            | ValueForm::PgTimestamp
+            | ValueForm::PgTimestampTz => ColumnClass::Temporal,
+            ValueForm::MysqlTime | ValueForm::PgTime | ValueForm::PgTimeTz => ColumnClass::Time,
+        }
+    }
 }
 
 impl Serialize for ColumnClass {
@@ -837,7 +852,7 @@ fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
         let items = t.value.map(FilterValue::items).unwrap_or_default();
         let inner = match t.op {
             FilterOp::IsNull | FilterOp::IsNotNull => {
-                format!("{} {}", t.expr, crate::db::op_sql(t.op))
+                format!("{lhs} {}", crate::db::op_sql(t.op))
             }
             FilterOp::In => {
                 let list = items.iter().map(|v| placeholder(v)).collect::<Vec<_>>();
@@ -1012,7 +1027,7 @@ mod tests {
                 col("tags", "ARRAY", ColumnClass::Array),
                 ColMeta {
                     compare: Some(TypedCompare {
-                        form: Some(ValueForm::Number),
+                        form: Some(ValueForm::PgNumeric),
                         cast: Some("numeric"),
                         int_cast: Some("int8"),
                     }),
@@ -1299,7 +1314,7 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.contains(" where (t1.\"email\"::text = $3) OR (NOT (t0.\"status\" IS NULL))"),
+            sql.contains(" where (t1.\"email\"::text = $3) OR (NOT (t0.\"status\"::text IS NULL))"),
             "{sql}"
         );
         assert!(

@@ -193,6 +193,83 @@
       }
     },
     {
+      "name": "is-null-on-a-text-compared-column-tests-its-text",
+      "table": "users",
+      "conditions": [
+        {
+          "column": "metadata",
+          "op": "IS NULL"
+        }
+      ],
+      "expect": {
+        "where": "(\"metadata\"::text IS NULL)",
+        "values": []
+      }
+    },
+    {
+      "name": "pg-date-infinity",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "<",
+          "value": "infinity"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" < $1::date)",
+        "values": [
+          "infinity"
+        ]
+      }
+    },
+    {
+      "name": "pg-date-bc",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "=",
+          "value": "0044-03-15 BC"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" = $1::date)",
+        "values": [
+          "0044-03-15 BC"
+        ]
+      }
+    },
+    {
+      "name": "pg-date-year-above-9999",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
+      "table": "products",
+      "conditions": [
+        {
+          "column": "created_on",
+          "op": "=",
+          "value": "12000-01-01"
+        }
+      ],
+      "expect": {
+        "where": "(\"created_on\" = $1::date)",
+        "values": [
+          "12000-01-01"
+        ]
+      }
+    },
+    {
       "name": "like",
       "table": "users",
       "conditions": [
@@ -698,7 +775,11 @@
       "expect_error": "invalid_value"
     },
     {
-      "name": "invalid-number-too-many-digits",
+      "name": "pg-numeric-has-no-digit-cap",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
       "table": "orders",
       "conditions": [
         {
@@ -707,10 +788,19 @@
           "value": "111111111111111111111111111111111111"
         }
       ],
-      "expect_error": "invalid_value"
+      "expect": {
+        "where": "(\"discount_pct\" = $1::numeric)",
+        "values": [
+          "111111111111111111111111111111111111"
+        ]
+      }
     },
     {
-      "name": "invalid-float-nan",
+      "name": "pg-float-nan",
+      "engines": [
+        "postgres",
+        "sqlite"
+      ],
       "table": "products",
       "conditions": [
         {
@@ -719,7 +809,12 @@
           "value": "NaN"
         }
       ],
-      "expect_error": "invalid_value"
+      "expect": {
+        "where": "(\"weight_kg\" = $1::real)",
+        "values": [
+          "NaN"
+        ]
+      }
     },
     {
       "name": "invalid-date",

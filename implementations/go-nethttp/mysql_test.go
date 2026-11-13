@@ -495,6 +495,9 @@ func TestMySQLColumnClass(t *testing.T) {
 		{"bigint", "bigint", classNumber}, {"VARCHAR", "varchar(20)", classText}, {"datetime", "datetime", classTemporal},
 		{"enum", "enum('a','b')", classEnum("enum('a','b')")}, {"json", "json", classJSON}, {"double", "double", classFloat},
 		{"uuid", "uuid", classUUID}, {"set", "set('a','b')", classOther},
+		{"TINYINT", "tinyint(1)", classNumber}, {"decimal", "decimal(10,2)", classNumber}, {"date", "date", classTemporal},
+		{"timestamp", "timestamp(6)", classTemporal}, {"time", "time", classTime}, {"float", "float", classFloat},
+		{"year", "year", classOther},
 	} {
 		if got := mysqlColumnClass(c.dataType, c.columnType); got != c.want {
 			t.Errorf("%s: got %v want %v", c.dataType, got, c.want)

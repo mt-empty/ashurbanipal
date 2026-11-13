@@ -463,6 +463,15 @@ pub(crate) fn quote_ident(ident: &Ident) -> String {
     format!("\"{}\"", ident.as_str().replace('"', "\"\""))
 }
 
+/// Whether an engine's SQLSTATE reports a bad value, which in a filtered
+/// query is the filter's (`spec/protocol.md` §5.4.2).
+pub(crate) fn is_bad_value_sqlstate(code: &str) -> bool {
+    matches!(
+        code,
+        "22P02" | "22003" | "22007" | "22008" | "22021" | "22P05"
+    )
+}
+
 /// The hardcoded operator→SQL-keyword table — wire text never becomes an
 /// operator except through this match. `join::filter_sql` wraps the keyword
 /// in each engine's cast/placeholder syntax, and spells `Ilike` per engine.
@@ -476,7 +485,8 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
         FilterOp::Le => "<=",
         FilterOp::Like => "LIKE",
         FilterOp::Ilike => "ILIKE",
-        FilterOp::In | FilterOp::Between => unreachable!("filter_sql spells list ops itself"),
+        FilterOp::In => "IN",
+        FilterOp::Between => "BETWEEN",
         FilterOp::IsNull => "IS NULL",
         FilterOp::IsNotNull => "IS NOT NULL",
     }

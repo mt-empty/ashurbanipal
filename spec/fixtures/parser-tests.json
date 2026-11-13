@@ -764,6 +764,13 @@
       "expect_error": {}
     },
     {
+      "name": "R37",
+      "input": "total BETWEEN NULL AND 5",
+      "expect_error": {
+        "position": 14
+      }
+    },
+    {
       "name": "A1",
       "input": "status = '''; DROP TABLE users; --'",
       "expect": [

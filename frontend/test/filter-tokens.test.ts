@@ -140,6 +140,11 @@ test("IN lists and BETWEEN bounds: operators, punctuation and values", () => {
   assert.deepEqual(kinds("id IN ()"), ["column:id", "op:IN", "op:(", "plain:)"]);
 });
 
+test("a condition that starts with NOT cannot also negate its operator (R29, R34)", () => {
+  assert.deepEqual(kinds("NOT id NOT IN (1)").slice(0, 3), ["keyword:NOT", "column:id", "plain:NOT"]);
+  assert.deepEqual(kinds("NOT a = 1 AND b NOT IN (1)").slice(4, 7), ["keyword:AND", "column:b", "keyword:NOT"]);
+});
+
 test("completion inside IN lists and BETWEEN", () => {
   assert.equal(at("id IN (").expect, "listItem");
   assert.deepEqual(at("id IN (1, 2"), { expect: "listItem", partial: "2", head: "id IN (1, ", column: "id" });

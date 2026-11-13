@@ -273,6 +273,19 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       expect(mysqlColumnClass("VARCHAR", "varchar(20)")).toEqual({ kind: "text" });
       expect(mysqlColumnClass("enum", "enum('a','b')")).toEqual({ kind: "enum", enumType: "enum('a','b')" });
       expect(mysqlColumnClass("json", "json")).toEqual({ kind: "json" });
+      for (const [t, kind] of [
+        ["TINYINT", "number"],
+        ["decimal", "number"],
+        ["date", "temporal"],
+        ["datetime", "temporal"],
+        ["timestamp", "temporal"],
+        ["time", "time"],
+        ["float", "float"],
+        ["double", "float"],
+        ["year", "other"],
+      ] as const) {
+        expect(mysqlColumnClass(t, t), t).toEqual({ kind });
+      }
       expect(mysqlColumnClass("double", "double")).toEqual({ kind: "float" });
       expect(mysqlColumnClass("set", "set('a','b')")).toEqual({ kind: "other" });
     });

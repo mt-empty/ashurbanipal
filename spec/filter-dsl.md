@@ -99,7 +99,8 @@ Notes:
   quoted `'NULL'` is the four-letter string, as anywhere else.
 - **`BETWEEN lo AND hi`**: the `AND` is part of the condition, not a
   logic token. Both bounds are values; since a bare `AND` is never a value,
-  the next `AND`/`OR` after `hi` starts the next condition.
+  the next `AND`/`OR` after `hi` starts the next condition. A bare `NULL`
+  bound is a parse error, as in a list.
 - **Values**: a bare value runs to the next whitespace. Values containing
   spaces, quotes, or the words `AND`/`OR`/`NOT` must be single-quoted; a
   literal `'` inside a quoted value is escaped by doubling (`''`), as in
@@ -147,9 +148,9 @@ Notes:
   case-insensitive `LIKE`; same passthrough, case-insensitive at the
   database level.
 - `NOT` doesn't invert the operator: the parser emits the same `op` with
-  `not: true`, and the server negates at the SQL-fragment level
-  (`NOT (column::text = $n)` — `spec/protocol.md` §5.4.2), so `NOT` never
-  needs its own operator mapping to keep in sync.
+  `not: true`, and the server wraps the condition's mapped fragment in
+  `NOT (…)` (`spec/protocol.md` §5.4.2), so `NOT` never needs its own
+  operator mapping to keep in sync.
 - Duplicate/contradictory conditions (`status = 'a' AND status = 'b'`) are
   legal and simply return zero rows — the parser doesn't do satisfiability
   analysis.
@@ -264,6 +265,7 @@ fixtures, not this table.)
 | R34 | `NOT total NOT BETWEEN 1 AND 2` | double negation |
 | R35 | `id IN ((1))` | `(` cannot start a bare list item |
 | R36 | `idIN (1)` | `IN` needs whitespace before it |
+| R37 | `total BETWEEN NULL AND 5` | a bare `NULL` bound, as in a list; use `IS NULL` |
 
 ### Adversarial (must parse *or* reject safely — never reach SQL text)
 

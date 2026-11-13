@@ -213,6 +213,33 @@ export interface TypedCompare {
   intCast?: string;
 }
 
+/**
+ * The class of a typed column, read from its value form so a backend's class
+ * and typed comparison can't disagree.
+ */
+export function typedClass(t: TypedCompare | undefined): ColumnClass | undefined {
+  switch (t?.form) {
+    case "mysql-decimal":
+    case "pg-numeric":
+      return { kind: "number" };
+    case "mysql-float":
+    case "pg-float":
+      return { kind: "float" };
+    case "mysql-date":
+    case "mysql-datetime":
+    case "pg-date":
+    case "pg-timestamp":
+    case "pg-timestamptz":
+      return { kind: "temporal" };
+    case "mysql-time":
+    case "pg-time":
+    case "pg-timetz":
+      return { kind: "time" };
+    default:
+      return undefined;
+  }
+}
+
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
 
@@ -544,7 +571,7 @@ function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; value
     const items = valueItems(cond);
     let inner: string;
     if (!opTakesValue(cond.op)) {
-      inner = `${expr} ${opSql(cond.op)}`;
+      inner = `${lhs} ${opSql(cond.op)}`;
     } else if (cond.op === "IN") {
       inner = `${lhs} IN (${items.map((v) => placeholder(v)).join(", ")})`;
     } else if (cond.op === "BETWEEN") {

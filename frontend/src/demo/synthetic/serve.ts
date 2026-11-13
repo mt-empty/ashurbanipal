@@ -56,6 +56,8 @@ function likeToRegExp(pattern: string, ci: boolean): RegExp {
   return new RegExp(`^${escaped}$`, ci ? "i" : "");
 }
 function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean {
+  // As in SQL, a comparison with NULL is unknown, so neither it nor its NOT matches.
+  if (cell === null && cond.op !== "IS NULL" && cond.op !== "IS NOT NULL") return false;
   const items = cond.value === undefined ? [] : Array.isArray(cond.value) ? cond.value : [cond.value];
   const bucket = columnTypeClass(col);
   const typed = bucket === "number" || bucket === "date";
@@ -72,7 +74,7 @@ function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean
       result = equal(items[0]);
       break;
     case "!=":
-      result = cell === null || !equal(items[0]);
+      result = !equal(items[0]);
       break;
     case "IN":
       result = items.some(equal);

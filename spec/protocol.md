@@ -404,7 +404,9 @@ Evaluation rules:
     column is cast to text in the query itself (Postgres:
     `column::text OP $n`), so one filter works uniformly across `uuid`,
     `jsonb`, enums, etc., and compares as strings.
-  - `IS NULL`/`IS NOT NULL` test the column itself, with no cast.
+  - `IS NULL`/`IS NOT NULL` test the column the same way: a typed
+    column itself, any other column through its text cast. (A Postgres
+    composite whose fields are all NULL is itself NULL, yet has text.)
 - Before binding, every value compared typed MUST match its class's form
   below; otherwise → 400 `invalid_filter`, whose `title` names the column
   and the expected form. The check makes engines agree: some would
@@ -431,9 +433,21 @@ Evaluation rules:
     always filters back to its row. Anywhere else an offset → 400.
     Without one, the value is read in the connection's session time
     zone.
-- An engine error that reports a bad value in a filtered query (Postgres
-  SQLSTATE class 22 — e.g. `22P02`, `22003`, `22007`, `22008`) MUST be
-  reported as 400 `invalid_filter`, not a 5xx.
+  - Each form also accepts every other value its engine stores and
+    renders for that type, so a cell's own text always filters back to
+    its row. Postgres: any number of digits, `NaN` and `±Infinity` for
+    `number` and `float`; years above 9999, ` BC` dates and `±infinity`
+    for `temporal`; `24:00` for `time`. MySQL/MariaDB: `TIME` hours up
+    to ±838, and the zero date `0000-00-00`. The per-engine forms are in
+    `docs/adapter-decisions.md`.
+  - A Postgres port MUST render and read dates in ISO form for the
+    operation (`DateStyle` ISO), whatever the server's default, so a
+    cell's text has one of these forms.
+- An engine error that reports a bad value in a filtered query (SQLSTATE
+  `22P02`, `22003`, `22007`, `22008`, `22021` or `22P05`, such as a
+  MySQL cast out of range) MUST be reported as 400 `invalid_filter`, not
+  a 5xx. Any other error is not the filter's: a division by zero in a
+  view stays a 5xx.
 - `IN` matches when the column equals any listed value, compared as
   above. `BETWEEN` matches `lo <= column AND column <= hi`; a lower bound
   above the upper one is legal and matches nothing.

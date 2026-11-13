@@ -1039,23 +1039,6 @@ components:
     FilterCondition:
       type: object
       required: [column, op]
-      # No maxItems on IN's 1000-item cap: a generator would build a URL
-      # that the HTTP layer rejects (414) before the cap is ever checked.
-      allOf:
-        - if:
-            properties: {op: {const: BETWEEN}}
-            required: [op]
-          then:
-            properties:
-              value: {type: array, minItems: 2, maxItems: 2}
-            required: [value]
-        - if:
-            properties: {op: {const: IN}}
-            required: [op]
-          then:
-            properties:
-              value: {type: array}
-            required: [value]
       properties:
         logic:
           type: string
@@ -1092,6 +1075,37 @@ components:
             in its own type (except LIKE / ILIKE), after the value is
             checked against that class's form; every other column
             compares as text (spec/protocol.md §5.4.2).
+      # Listed after `properties` so the op enum above stays the first one
+      # tools/check-frontend-api-reference.sh finds. No maxItems on IN's
+      # 1000-item cap: a generator would build a URL that the HTTP layer
+      # rejects (414) before the cap is ever checked.
+      allOf:
+        - if:
+            properties: {op: {const: BETWEEN}}
+            required: [op]
+          then:
+            properties:
+              value: {type: array, minItems: 2, maxItems: 2}
+            required: [value]
+        - if:
+            properties: {op: {const: IN}}
+            required: [op]
+          then:
+            properties:
+              value: {type: array}
+            required: [value]
+        - if:
+            properties: {op: {enum: ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE"]}}
+            required: [op]
+          then:
+            properties:
+              value: {type: string}
+            required: [value]
+        - if:
+            properties: {op: {enum: ["IS NULL", "IS NOT NULL"]}}
+            required: [op]
+          then:
+            not: {required: [value]}
 
     JoinColumnRef:
       type: object

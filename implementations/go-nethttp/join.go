@@ -299,6 +299,30 @@ func (c columnClass) joinable() bool {
 
 func classEnum(enumType string) columnClass { return columnClass{kind: "enum", enumType: enumType} }
 
+// classOfForm is the class of a typed column, read from its value form so a
+// backend's class and typed comparison can't disagree.
+func classOfForm(f valueForm) (columnClass, bool) {
+	switch f {
+	case formMysqlDecimal, formPgNumeric:
+		return classNumber, true
+	case formMysqlFloat, formPgFloat:
+		return classFloat, true
+	case formMysqlDate, formMysqlDatetime, formPgDate, formPgTimestamp, formPgTimestampTz:
+		return classTemporal, true
+	case formMysqlTime, formPgTime, formPgTimeTz:
+		return classTime, true
+	}
+	return columnClass{}, false
+}
+
+// typedClass is the class typed comparison implies, if any.
+func typedClass(t *typedCompare) (columnClass, bool) {
+	if t == nil {
+		return columnClass{}, false
+	}
+	return classOfForm(t.form)
+}
+
 // typedCompare is how a filter compares a column in its own type
 // (spec/protocol.md §5.4.2): the form a value must have, and the engine's cast
 // target for the bound value, from a hardcoded per-engine table ("" binds it
@@ -798,7 +822,7 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 		var inner string
 		switch c.Op {
 		case "IS NULL", "IS NOT NULL":
-			inner = fmt.Sprintf("%s %s", t.expr, opSQL(c.Op))
+			inner = fmt.Sprintf("%s %s", lhs, opSQL(c.Op))
 		case "IN":
 			list := make([]string, len(items))
 			for k, v := range items {

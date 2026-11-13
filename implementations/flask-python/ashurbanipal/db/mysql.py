@@ -10,13 +10,9 @@ from pymysql.cursors import Cursor
 
 from ..join import (
     BINARY,
-    FLOAT,
     JSON,
-    NUMBER,
     OTHER,
-    TEMPORAL,
     TEXT,
-    TIME,
     UUID,
     ColMeta,
     ColumnClass,
@@ -35,6 +31,7 @@ from ..join import (
     table_schemas,
     table_where_clause,
     tie_break_keys,
+    typed_class,
 )
 from . import (
     BadJoin,
@@ -46,6 +43,7 @@ from . import (
     ConstraintUnique,
     DbSource,
     Engine,
+    FilterParseError,
     IndexInfo,
     KeyKind,
     NotAllowed,
@@ -123,44 +121,47 @@ _JOIN_DIALECT = Dialect(
 )
 
 
+# The errors MySQL reports with SQLSTATE 22003, 22007 or 22008; pymysql
+# exposes only the error number.
+_BAD_VALUE_ERRNOS = frozenset({1264, 1292, 1367, 1441, 1690})
+
+
+def _raise_if_bad_value(exc: pymysql.Error, filtered: bool) -> None:
+    """A bad value in a filtered query (a cast out of range) is the filter's
+    (`spec/protocol.md` §5.4.2)."""
+    if filtered and exc.args and exc.args[0] in _BAD_VALUE_ERRNOS:
+        raise FilterParseError(f"value invalid for this backend: {exc.args[-1]}") from exc
+
+
 def typed_compare(data_type: str) -> TypedCompare | None:
     """The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
-    (`spec/protocol.md` §5.4.2). A bare DECIMAL cast is DECIMAL(10,0) and
-    rounds; a temporal value is bound bare because MySQL 8.4 compares a TIME
-    column unequal to an equal CAST(? AS TIME), and coerces a string to the
-    column's own temporal type."""
+    (`spec/protocol.md` §5.4.2); the casts are in `docs/adapter-decisions.md` §5.4.2."""
     t = data_type.lower()
     if t in ("tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric"):
-        return TypedCompare("number", "DECIMAL(65,30)")
+        return TypedCompare("mysql-decimal", "DECIMAL(65,30)")
     return {
-        "float": TypedCompare("float", "FLOAT"),
-        "double": TypedCompare("float", "DOUBLE"),
-        "date": TypedCompare("date"),
-        "datetime": TypedCompare("timestamp"),
-        "timestamp": TypedCompare("timestamp"),
-        "time": TypedCompare("time"),
+        "float": TypedCompare("mysql-float", "FLOAT"),
+        "double": TypedCompare("mysql-float", "DOUBLE"),
+        "date": TypedCompare("mysql-date"),
+        "datetime": TypedCompare("mysql-datetime"),
+        "timestamp": TypedCompare("mysql-datetime"),
+        "time": TypedCompare("mysql-time"),
     }.get(t)
 
 
 def column_class(data_type: str, column_type: str) -> ColumnClass:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
+    if (typed := typed_class(typed_compare(data_type))) is not None:
+        return typed
     t = data_type.lower()
-    if t in ("tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric"):
-        return NUMBER
     if t in ("char", "varchar", "tinytext", "text", "mediumtext", "longtext"):
         return TEXT
-    if t in ("date", "datetime", "timestamp"):
-        return TEMPORAL
-    if t == "time":
-        return TIME
     if t in ("binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob"):
         return BINARY
     if t == "uuid":
         return UUID
     if t == "enum":
         return enum_class(column_type)
-    if t in ("float", "double"):
-        return FLOAT
     if t == "json":
         return JSON
     return OTHER
@@ -398,6 +399,7 @@ class MySqlSource(DbSource):
                     # to NotAllowed(NOT_READABLE).
                     if exc.args and exc.args[0] == 1142:
                         raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                    _raise_if_bad_value(exc, bool(filter_values))
                     raise
                 finally:
                     conn.use_unicode = True
@@ -515,6 +517,7 @@ class MySqlSource(DbSource):
                 except pymysql.Error as exc:
                     if exc.args and exc.args[0] == 1142:
                         raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+                    _raise_if_bad_value(exc, bool(values))
                     raise
                 finally:
                     conn.use_unicode = True

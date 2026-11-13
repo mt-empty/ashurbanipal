@@ -47,14 +47,14 @@ const DIALECT: Dialect = Dialect {
 fn typed_compare(data_type: &str) -> Option<TypedCompare> {
     let int_cast = matches!(data_type, "smallint" | "integer" | "bigint").then_some("int8");
     let (form, cast) = match data_type {
-        "smallint" | "integer" | "bigint" | "numeric" => (ValueForm::Number, "numeric"),
-        "real" => (ValueForm::Float, "real"),
-        "double precision" => (ValueForm::Float, "float8"),
-        "date" => (ValueForm::Date, "date"),
-        "timestamp without time zone" => (ValueForm::Timestamp, "timestamp"),
-        "timestamp with time zone" => (ValueForm::TimestampTz, "timestamptz"),
-        "time without time zone" => (ValueForm::Time, "time"),
-        "time with time zone" => (ValueForm::TimeTz, "timetz"),
+        "smallint" | "integer" | "bigint" | "numeric" => (ValueForm::PgNumeric, "numeric"),
+        "real" => (ValueForm::PgFloat, "real"),
+        "double precision" => (ValueForm::PgFloat, "float8"),
+        "date" => (ValueForm::PgDate, "date"),
+        "timestamp without time zone" => (ValueForm::PgTimestamp, "timestamp"),
+        "timestamp with time zone" => (ValueForm::PgTimestampTz, "timestamptz"),
+        "time without time zone" => (ValueForm::PgTime, "time"),
+        "time with time zone" => (ValueForm::PgTimeTz, "timetz"),
         _ => return None,
     };
     Some(TypedCompare {
@@ -66,17 +66,14 @@ fn typed_compare(data_type: &str) -> Option<TypedCompare> {
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
 fn column_class(data_type: &str, udt_schema: &str, udt_name: &str, is_enum: bool) -> ColumnClass {
+    if let Some(form) = typed_compare(data_type).and_then(|c| c.form) {
+        return ColumnClass::of_form(form);
+    }
     match data_type {
-        "smallint" | "integer" | "bigint" | "numeric" => ColumnClass::Number,
         "character varying" | "character" | "text" => ColumnClass::Text,
         "uuid" => ColumnClass::Uuid,
         "boolean" => ColumnClass::Boolean,
         "bytea" => ColumnClass::Binary,
-        "date" | "timestamp without time zone" | "timestamp with time zone" => {
-            ColumnClass::Temporal
-        }
-        "time without time zone" | "time with time zone" => ColumnClass::Time,
-        "real" | "double precision" => ColumnClass::Float,
         "json" | "jsonb" => ColumnClass::Json,
         "ARRAY" => ColumnClass::Array,
         "USER-DEFINED" if is_enum => ColumnClass::Enum(format!("{udt_schema}.{udt_name}")),
@@ -107,6 +104,10 @@ impl PgPoolSource {
         )))
         .execute(&mut *tx)
         .await?;
+        // Typed filters read values in ISO form, and a cell's text must be one.
+        sqlx::query("set local datestyle = 'ISO'")
+            .execute(&mut *tx)
+            .await?;
         Ok(tx)
     }
 
@@ -527,7 +528,7 @@ impl PgPoolSource {
 /// Maps residual SELECT-denied errors to `NotAllowed(NotReadable)`, a
 /// canceled statement (SQLSTATE 57014 — the timeout set by `bounded_tx`
 /// firing) to `QueryTimeout`, and a filter value Postgres's text encoding
-/// or a typed comparison's cast rejects (SQLSTATE class 22, only when values
+/// or a typed comparison's cast rejects (a bad-value SQLSTATE, only when values
 /// were bound) to `FilterParse` — all → a defined
 /// `spec/protocol.md` §2 code, never a raw 500 (`docs/adapter-decisions.md`
 /// §5.4.2 has the cross-backend filter-value rationale). When the request
@@ -548,7 +549,7 @@ fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>, filtered: 
                     return DbError::Unsortable(column.to_string());
                 }
             }
-            Some(code) if filtered && code.starts_with("22") => {
+            Some(code) if filtered && super::is_bad_value_sqlstate(code) => {
                 return DbError::FilterParse(format!(
                     "value invalid for this backend: {}",
                     db.message()
@@ -965,7 +966,12 @@ mod tests {
         for (data_type, expected) in [
             ("integer", Number),
             ("numeric", Number),
+            ("smallint", Number),
+            ("date", Temporal),
+            ("timestamp without time zone", Temporal),
             ("timestamp with time zone", Temporal),
+            ("time without time zone", Time),
+            ("time with time zone", Time),
             ("real", Float),
             ("double precision", Float),
             ("json", Json),

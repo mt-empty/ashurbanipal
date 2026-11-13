@@ -74,24 +74,22 @@ var mysqlJoinDialect = joinDialect{
 }
 
 // mysqlTypedCompare is the typed filter comparison for an
-// information_schema.COLUMNS.DATA_TYPE (spec/protocol.md §5.4.2). A bare
-// DECIMAL cast is DECIMAL(10,0) and rounds; a temporal value is bound bare
-// because MySQL 8.4 compares a TIME column unequal to an equal
-// CAST(? AS TIME), and coerces a string to the column's own temporal type.
+// information_schema.COLUMNS.DATA_TYPE (spec/protocol.md §5.4.2); the casts
+// are in docs/adapter-decisions.md §5.4.2.
 func mysqlTypedCompare(dataType string) *typedCompare {
 	switch strings.ToLower(dataType) {
 	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
-		return &typedCompare{form: formNumber, cast: "DECIMAL(65,30)"}
+		return &typedCompare{form: formMysqlDecimal, cast: "DECIMAL(65,30)"}
 	case "float":
-		return &typedCompare{form: formFloat, cast: "FLOAT"}
+		return &typedCompare{form: formMysqlFloat, cast: "FLOAT"}
 	case "double":
-		return &typedCompare{form: formFloat, cast: "DOUBLE"}
+		return &typedCompare{form: formMysqlFloat, cast: "DOUBLE"}
 	case "date":
-		return &typedCompare{form: formDate, cast: ""}
+		return &typedCompare{form: formMysqlDate, cast: ""}
 	case "datetime", "timestamp":
-		return &typedCompare{form: formTimestamp, cast: ""}
+		return &typedCompare{form: formMysqlDatetime, cast: ""}
 	case "time":
-		return &typedCompare{form: formTime, cast: ""}
+		return &typedCompare{form: formMysqlTime, cast: ""}
 	}
 	return nil
 }
@@ -99,23 +97,18 @@ func mysqlTypedCompare(dataType string) *typedCompare {
 // mysqlColumnClass maps information_schema types to spec/protocol.md
 // §5.11.2 classes (docs/adapter-decisions.md §5.11).
 func mysqlColumnClass(dataType, columnType string) columnClass {
+	if c, ok := typedClass(mysqlTypedCompare(dataType)); ok {
+		return c
+	}
 	switch strings.ToLower(dataType) {
-	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
-		return classNumber
 	case "char", "varchar", "tinytext", "text", "mediumtext", "longtext":
 		return classText
-	case "date", "datetime", "timestamp":
-		return classTemporal
-	case "time":
-		return classTime
 	case "binary", "varbinary", "tinyblob", "blob", "mediumblob", "longblob":
 		return classBinary
 	case "uuid":
 		return classUUID
 	case "enum":
 		return classEnum(columnType)
-	case "float", "double":
-		return classFloat
 	case "json":
 		return classJSON
 	}
@@ -513,12 +506,12 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, timedSelect(variant, c.timeoutSec, body), args...)
 	if err != nil {
-		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table)
+		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table, len(values) > 0)
 	}
 	defer rows.Close()
 	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
 	if err != nil {
-		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table)
+		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table, len(values) > 0)
 	}
 	rows.Close()
 	if err := tx.Commit(); err != nil {
@@ -653,11 +646,17 @@ func (c *MySQLSource) TableCounts(ctx context.Context, schema *string) ([]CountE
 }
 
 // mapSelectDeniedMySQL maps residual error 1142 to NotAllowed: MySQL has no
-// SELECT privilege gate (`spec/protocol.md` §2).
-func mapSelectDeniedMySQL(err error, table string) error {
+// SELECT privilege gate (`spec/protocol.md` §2). A bad value in a filtered
+// query (a cast out of range) is a FilterError.
+func mapSelectDeniedMySQL(err error, table string, filtered bool) error {
 	var myErr *mysql.MySQLError
-	if errors.As(err, &myErr) && myErr.Number == 1142 {
-		return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
+	if errors.As(err, &myErr) {
+		if myErr.Number == 1142 {
+			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
+		}
+		if filtered && isBadValueSQLState(string(myErr.SQLState[:])) {
+			return filterErr("value invalid for this backend: %s", myErr.Message)
+		}
 	}
 	return err
 }
@@ -743,7 +742,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, mapSelectDeniedMySQL(err, realTable)
+		return TableData{}, mapSelectDeniedMySQL(err, realTable, len(filterValues) > 0)
 	}
 	defer rows.Close()
 
@@ -764,7 +763,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return TableData{}, err
+		return TableData{}, mapSelectDeniedMySQL(err, realTable, len(filterValues) > 0)
 	}
 	if out == nil {
 		out = []map[string]*string{}

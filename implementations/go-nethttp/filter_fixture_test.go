@@ -48,7 +48,7 @@ func repoRoot(t *testing.T) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
-// seedColumns substitutes the fixture's tables map for the live catalog
+// seedTable substitutes the fixture's tables map for the live catalog
 // (spec/fixtures/README.md).
 func seedTable(t *testing.T, file fixtureFile, table string) tableMeta {
 	t.Helper()

@@ -325,6 +325,10 @@ class DbSource(abc.ABC):
         ...
 
 
+# SQLSTATEs that name a bad value, which in a filtered query is the filter's
+# (`spec/protocol.md` §5.4.2).
+BAD_VALUE_SQLSTATES = frozenset({"22P02", "22003", "22007", "22008", "22021", "22P05"})
+
 # Maps allow-listed wire operators to SQL keywords (`spec/protocol.md` §5.4.2).
 OP_SQL: dict[str, str] = {
     "=": "=",
@@ -334,6 +338,8 @@ OP_SQL: dict[str, str] = {
     ">=": ">=",
     "<=": "<=",
     "LIKE": "LIKE",
+    "IN": "IN",
+    "BETWEEN": "BETWEEN",
     "IS NULL": "IS NULL",
     "IS NOT NULL": "IS NOT NULL",
 }

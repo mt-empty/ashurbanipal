@@ -204,6 +204,7 @@
     return new RegExp(`^${escaped}$`, ci ? "i" : "");
   }
   function matches(col, cell, cond) {
+    if (cell === null && cond.op !== "IS NULL" && cond.op !== "IS NOT NULL") return false;
     const items = cond.value === void 0 ? [] : Array.isArray(cond.value) ? cond.value : [cond.value];
     const bucket = columnTypeClass(col);
     const typed = bucket === "number" || bucket === "date";
@@ -220,7 +221,7 @@
         result = equal(items[0]);
         break;
       case "!=":
-        result = cell === null || !equal(items[0]);
+        result = !equal(items[0]);
         break;
       case "IN":
         result = items.some(equal);
@@ -1853,7 +1854,7 @@ function buildApiReference() {
         '`logic` ("AND" | "OR") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence \u2014 no parentheses/nesting exist).',
         "`not: true` negates its single condition; optional, defaults to false.",
         "`value` is a JSON string, except: IN takes an array of 1 to 1000 strings, BETWEEN takes [low, high] (inclusive), and IS NULL / IS NOT NULL take none. There is no NOT IN op \u2014 use `not: true` with IN.",
-        "a column whose `class` is number, float, temporal or time compares in its own type for every operator except LIKE/ILIKE, so age > 9 includes 10 and price = 1 matches 1.00. Its value must look like one: a decimal number (no exponent; float also allows one), YYYY-MM-DD for a date, an optional HH:MM[:SS[.ffffff]] after it for a timestamp, HH:MM[:SS[.ffffff]] for a time. A value is read in the database session's time zone; an offset (+02:00, Z) is allowed only on a column whose type has a time zone (Postgres timestamptz/timetz), which renders its own values with one \u2014 anything else is a 400 invalid_filter.",
+        "a column whose `class` is number, float, temporal or time compares in its own type for every operator except LIKE/ILIKE, so age > 9 includes 10 and price = 1 matches 1.00. Its value must look like one: a decimal number (no exponent; float also allows one), YYYY-MM-DD for a date, an optional HH:MM[:SS[.ffffff]] after it for a timestamp, HH:MM[:SS[.ffffff]] for a time. A value is read in the database session's time zone; an offset (+02:00, Z) is allowed only on a column whose type has a time zone (Postgres timestamptz/timetz), which renders its own values with one \u2014 anything else is a 400 invalid_filter. Every value the database itself shows for such a column is also accepted (Postgres NaN, infinity, BC dates, 24:00; MySQL TIME beyond 24 hours, the zero date), so a cell's own text always filters back to its row.",
         "every other column (text, uuid, json, enum, boolean, ...) and every LIKE/ILIKE compares as text: the column's text rendering, so a boolean is true/false on Postgres but 1/0 on MySQL and SQLite.",
         "an empty condition array is treated identically to an absent `filter` param.",
         "on GET /tables/join a condition may carry `join` (the table position, default 0); on GET /tables/data any `join` is a 400.",
@@ -2017,13 +2018,15 @@ function parseFilterDsl(input2, aliases) {
     return value;
   };
   const parseValue = () => peek() === "'" ? parseQuotedValue() : parseBareValue();
-  const parseListItem = () => {
+  const parseNonNullValue = (stop2, nullMessage) => {
     if (peek() === "'") return parseQuotedValue();
     const start = pos;
-    const value = parseBareValue(",()");
-    if (/^NULL$/i.test(value)) throw err("NULL cannot be in a list; use IS NULL", start);
+    const value = parseBareValue(stop2);
+    if (/^NULL$/i.test(value)) throw err(nullMessage, start);
     return value;
   };
+  const parseListItem = () => parseNonNullValue(",()", "NULL cannot be in a list; use IS NULL");
+  const parseBound = () => parseNonNullValue("", "NULL cannot be a BETWEEN bound; use IS NULL");
   const parseList = () => {
     skipWsOptional();
     if (peek() !== "(") throw err("expected ( to start the list", pos);
@@ -2074,11 +2077,11 @@ function parseFilterDsl(input2, aliases) {
         if (consumeKeyword("IN")) return { column, join, op: "IN", value: parseList() };
         if (!consumeKeyword("BETWEEN")) return null;
         skipWsRequired();
-        const lo = parseValue();
+        const lo = parseBound();
         skipWsRequired();
         if (!consumeKeyword("AND")) throw err("expected AND between the BETWEEN bounds", pos);
         skipWsRequired();
-        return { column, join, op: "BETWEEN", value: [lo, parseValue()] };
+        return { column, join, op: "BETWEEN", value: [lo, parseBound()] };
       };
       const simple = wordOp();
       if (simple) return negated ? { ...simple, not: true } : simple;
@@ -3713,6 +3716,7 @@ function tokenizeFilterDsl(text) {
   const tokens = [];
   let expect = "column";
   let column = null;
+  let negated = false;
   let i = 0;
   const push = (kind, start, end, next) => {
     tokens.push({ kind, start, end, expect, column });
@@ -3732,6 +3736,7 @@ function tokenizeFilterDsl(text) {
     }
     if (expect === "column") {
       if (keywordAt(text, i, "NOT")) {
+        negated = true;
         push("keyword", s, i + 3, "column");
         continue;
       }
@@ -3748,7 +3753,7 @@ function tokenizeFilterDsl(text) {
         push("keyword", s, i + 2, "isTail");
         continue;
       }
-      if (expect === "operator" && keywordAt(text, i, "NOT")) {
+      if (expect === "operator" && !negated && keywordAt(text, i, "NOT")) {
         push("keyword", s, i + 3, "notTail");
         continue;
       }
@@ -3810,6 +3815,7 @@ function tokenizeFilterDsl(text) {
       if (word) {
         push("keyword", s, i + word.length, "column");
         column = null;
+        negated = false;
         continue;
       }
     }

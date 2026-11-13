@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import psycopg
 from psycopg.abc import Buffer
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.types.string import TextLoader
 
 from ..join import (
     ARRAY,
     BINARY,
     BOOLEAN,
-    FLOAT,
     JSON,
-    NUMBER,
     OTHER,
-    TEMPORAL,
     TEXT,
-    TIME,
     UUID,
     ColMeta,
     ColumnClass,
@@ -35,9 +32,11 @@ from ..join import (
     table_schemas,
     table_where_clause,
     tie_break_keys,
+    typed_class,
     unknown_join_table,
 )
 from . import (
+    BAD_VALUE_SQLSTATES,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -96,24 +95,24 @@ def typed_compare(data_type: str) -> TypedCompare | None:
 
 
 _PG_TYPED: dict[str, TypedCompare] = {
-    "smallint": TypedCompare("number", "numeric", "int8"),
-    "integer": TypedCompare("number", "numeric", "int8"),
-    "bigint": TypedCompare("number", "numeric", "int8"),
-    "numeric": TypedCompare("number", "numeric"),
-    "real": TypedCompare("float", "real"),
-    "double precision": TypedCompare("float", "float8"),
-    "date": TypedCompare("date", "date"),
-    "timestamp without time zone": TypedCompare("timestamp", "timestamp"),
-    "timestamp with time zone": TypedCompare("timestamptz", "timestamptz"),
-    "time without time zone": TypedCompare("time", "time"),
-    "time with time zone": TypedCompare("timetz", "timetz"),
+    "smallint": TypedCompare("pg-numeric", "numeric", "int8"),
+    "integer": TypedCompare("pg-numeric", "numeric", "int8"),
+    "bigint": TypedCompare("pg-numeric", "numeric", "int8"),
+    "numeric": TypedCompare("pg-numeric", "numeric"),
+    "real": TypedCompare("pg-float", "real"),
+    "double precision": TypedCompare("pg-float", "float8"),
+    "date": TypedCompare("pg-date", "date"),
+    "timestamp without time zone": TypedCompare("pg-timestamp", "timestamp"),
+    "timestamp with time zone": TypedCompare("pg-timestamptz", "timestamptz"),
+    "time without time zone": TypedCompare("pg-time", "time"),
+    "time with time zone": TypedCompare("pg-timetz", "timetz"),
 }
 
 
 def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) -> ColumnClass:
     """`spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11."""
-    if data_type in ("smallint", "integer", "bigint", "numeric"):
-        return NUMBER
+    if (typed := typed_class(typed_compare(data_type))) is not None:
+        return typed
     if data_type in ("character varying", "character", "text"):
         return TEXT
     if data_type == "uuid":
@@ -122,12 +121,6 @@ def column_class(data_type: str, udt_schema: str, udt_name: str, is_enum: bool) 
         return BOOLEAN
     if data_type == "bytea":
         return BINARY
-    if data_type in ("date", "timestamp without time zone", "timestamp with time zone"):
-        return TEMPORAL
-    if data_type in ("time without time zone", "time with time zone"):
-        return TIME
-    if data_type in ("real", "double precision"):
-        return FLOAT
     if data_type in ("json", "jsonb"):
         return JSON
     if data_type == "ARRAY":
@@ -144,7 +137,11 @@ class PgSource(DbSource):
     engine: Engine = "postgres"
 
     def __init__(self, dsn: str):
-        self._dsn = dsn
+        # Typed filters read values in ISO form, and a cell's text must be
+        # one; appended so a DSN's own `options` (a search_path) still apply.
+        params = conninfo_to_dict(dsn)
+        params["options"] = f"{params.get('options', '')} -c datestyle=ISO".strip()
+        self._dsn = make_conninfo("", **params)
 
     def _connect(self) -> psycopg.Connection:
         return psycopg.connect(self._dsn)
@@ -336,6 +333,8 @@ class PgSource(DbSource):
                     # SQLSTATE, unlike other drivers' server-side rejection);
                     # mapped to FilterParseError, also 400, never a raw 500
                     # (docs/adapter-decisions.md §5.4.2).
+                    if not filter_values or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
+                        raise
                     raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 pg_rows = cur.fetchall()
                 rows = [
@@ -460,6 +459,8 @@ class PgSource(DbSource):
                         raise
                     raise Unsortable(opts.sort) from exc
                 except psycopg.DataError as exc:
+                    if not values or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
+                        raise
                     raise FilterParseError(f"value invalid for this backend: {exc}") from exc
                 rows, has_more = plan.rows_from(
                     cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)

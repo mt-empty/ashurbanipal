@@ -69,19 +69,16 @@ const MARIADB_JSON_COLUMNS_SQL: &str = "constraint_name from information_schema.
        and check_clause = concat('json_valid(`', replace(constraint_name, '`', '``'), '`)')";
 
 /// The typed filter comparison for an `information_schema.COLUMNS.DATA_TYPE`
-/// (`spec/protocol.md` §5.4.2). A bare `DECIMAL` cast is `DECIMAL(10,0)` and
-/// rounds; a temporal value is bound bare because MySQL 8.4 compares a TIME
-/// column unequal to an equal `CAST(? AS TIME)`, and coerces a string to the
-/// column's own temporal type.
+/// (`spec/protocol.md` §5.4.2); the casts are in `docs/adapter-decisions.md` §5.4.2.
 fn typed_compare(data_type: &str) -> Option<TypedCompare> {
     let (form, cast) = match data_type.to_ascii_lowercase().as_str() {
         "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
-        | "numeric" => (ValueForm::Number, Some("DECIMAL(65,30)")),
-        "float" => (ValueForm::Float, Some("FLOAT")),
-        "double" => (ValueForm::Float, Some("DOUBLE")),
-        "date" => (ValueForm::Date, None),
-        "datetime" | "timestamp" => (ValueForm::Timestamp, None),
-        "time" => (ValueForm::Time, None),
+        | "numeric" => (ValueForm::MysqlDecimal, Some("DECIMAL(65,30)")),
+        "float" => (ValueForm::MysqlFloat, Some("FLOAT")),
+        "double" => (ValueForm::MysqlFloat, Some("DOUBLE")),
+        "date" => (ValueForm::MysqlDate, None),
+        "datetime" | "timestamp" => (ValueForm::MysqlDatetime, None),
+        "time" => (ValueForm::MysqlTime, None),
         _ => return None,
     };
     Some(TypedCompare {
@@ -93,18 +90,16 @@ fn typed_compare(data_type: &str) -> Option<TypedCompare> {
 
 /// `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11.
 fn column_class(data_type: &str, column_type: &str) -> ColumnClass {
+    if let Some(form) = typed_compare(data_type).and_then(|c| c.form) {
+        return ColumnClass::of_form(form);
+    }
     match data_type.to_ascii_lowercase().as_str() {
-        "tinyint" | "smallint" | "mediumint" | "int" | "integer" | "bigint" | "decimal"
-        | "numeric" => ColumnClass::Number,
         "char" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" => ColumnClass::Text,
-        "date" | "datetime" | "timestamp" => ColumnClass::Temporal,
-        "time" => ColumnClass::Time,
         "binary" | "varbinary" | "tinyblob" | "blob" | "mediumblob" | "longblob" => {
             ColumnClass::Binary
         }
         "uuid" => ColumnClass::Uuid,
         "enum" => ColumnClass::Enum(column_type.to_string()),
-        "float" | "double" => ColumnClass::Float,
         "json" => ColumnClass::Json,
         _ => ColumnClass::Other,
     }
@@ -442,8 +437,9 @@ impl MySqlSource {
 }
 
 /// MySQL has no SELECT privilege gate; map residual error 1142 to `NotAllowed`
-/// (`spec/protocol.md` §2).
-fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
+/// (`spec/protocol.md` §2), and a bad value in a filtered query (a cast out of
+/// range) to a filter error.
+fn map_select_denied(e: sqlx::Error, table: &str, filtered: bool) -> DbError {
     match &e {
         sqlx::Error::Database(db)
             if db
@@ -451,6 +447,11 @@ fn map_select_denied(e: sqlx::Error, table: &str) -> DbError {
                 .is_some_and(|m| m.number() == 1142) =>
         {
             DbError::not_allowed(NotAllowedKind::NotReadable, format!("table {table:?}"))
+        }
+        sqlx::Error::Database(db)
+            if filtered && db.code().is_some_and(|c| super::is_bad_value_sqlstate(&c)) =>
+        {
+            DbError::FilterParse(format!("value invalid for this backend: {}", db.message()))
         }
         _ => DbError::from(e),
     }
@@ -610,7 +611,7 @@ impl DbSource for MySqlSource {
         let mysql_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, table.as_str()))?;
+            .map_err(|e| map_select_denied(e, table.as_str(), !filter_values.is_empty()))?;
         let rows = mysql_rows
             .iter()
             .map(|r| row_to_json(r, columns.iter().map(|c| c.name.as_str())))
@@ -690,7 +691,7 @@ impl DbSource for MySqlSource {
         let mut mysql_rows = query
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| map_select_denied(e, &spec.table))?;
+            .map_err(|e| map_select_denied(e, &spec.table, !values.is_empty()))?;
         tx.commit().await?;
 
         let has_more = mysql_rows.len() > opts.limit as usize;
@@ -1508,7 +1509,14 @@ mod tests {
         use ColumnClass::*;
         assert_eq!(column_class("bigint", "bigint"), Number);
         assert_eq!(column_class("VARCHAR", "varchar(20)"), Text);
+        assert_eq!(column_class("TINYINT", "tinyint(1)"), Number);
+        assert_eq!(column_class("decimal", "decimal(10,2)"), Number);
+        assert_eq!(column_class("date", "date"), Temporal);
         assert_eq!(column_class("datetime", "datetime"), Temporal);
+        assert_eq!(column_class("timestamp", "timestamp(6)"), Temporal);
+        assert_eq!(column_class("time", "time"), Time);
+        assert_eq!(column_class("float", "float"), Float);
+        assert_eq!(column_class("year", "year"), Other);
         assert_eq!(
             column_class("enum", "enum('a','b')"),
             Enum("enum('a','b')".into())

@@ -62,53 +62,106 @@ internal fun checkValueShape(condition: Condition, i: Int) {
     }
 }
 
-/** The form a value compared in its column's own type must have (`spec/protocol.md` §5.4.2). */
+/**
+ * The common form widened to every value its engine stores and renders
+ * (`spec/protocol.md` §5.4.2), so a cell's own text always filters back to
+ * its row.
+ */
 enum class ValueForm(val description: String) {
-    NUMBER("a decimal number such as -12 or 0.5"),
-    FLOAT("a number such as 0.5 or 1.5e-3"),
-    DATE("a date such as 2016-01-31"),
-    TIMESTAMP("a date such as 2016-01-31, optionally with a time such as 10:30:00"),
+    /** At most 35 integer and 30 fraction digits: the `DECIMAL(65,30)` cast's bound. */
+    MYSQL_DECIMAL("a decimal number such as -12 or 0.5"),
+    MYSQL_FLOAT("a number such as 0.5 or 1.5e-3"),
 
-    /** May end in a time-zone offset (Postgres `timestamptz`). */
-    TIMESTAMP_TZ("a date such as 2016-01-31, optionally with a time such as 10:30:00 and an offset such as +02:00"),
-    TIME("a time such as 10:30 or 10:30:00.5"),
+    /** Years 0001-9999, or the zero date `0000-00-00`. */
+    MYSQL_DATE("a date such as 2016-01-31"),
+    MYSQL_DATETIME(TIMESTAMP_DESCRIPTION),
 
-    /** May end in a time-zone offset (Postgres `timetz`). */
-    TIME_TZ("a time such as 10:30, optionally with an offset such as +02:00"),
+    /** Hours up to ±838. */
+    MYSQL_TIME("a time such as 10:30 or -100:00:00"),
+
+    /** Any number of digits, `NaN` or `±Infinity`. */
+    PG_NUMERIC("a decimal number such as -12, 0.5 or NaN"),
+    PG_FLOAT("a number such as 0.5, 1.5e-3 or Infinity"),
+
+    /** Years from 0001 with an optional ` BC`, above 9999, or `±infinity`. */
+    PG_DATE("a date such as 2016-01-31, 0044-03-15 BC or infinity"),
+    PG_TIMESTAMP(TIMESTAMP_DESCRIPTION),
+
+    /** May carry a time-zone offset. */
+    PG_TIMESTAMP_TZ("$TIMESTAMP_DESCRIPTION and an offset such as +02:00"),
+
+    /** Hours 00-23, or exactly `24:00`. */
+    PG_TIME("a time such as 10:30 or 10:30:00.5"),
+    PG_TIME_TZ("a time such as 10:30, optionally with an offset such as +02:00"),
     ;
 
     fun accepts(v: String): Boolean = when (this) {
-        NUMBER -> NUMBER_RE.matches(v)
-        FLOAT -> FLOAT_RE.matches(v)
-        DATE -> realDate(v)
-        TIMESTAMP, TIMESTAMP_TZ -> TIMESTAMP_RE.matchEntire(v)?.let { m ->
-            val time = if (this == TIMESTAMP_TZ) TIME_TZ_RE else TIME_RE
-            realDate(m.groupValues[1]) && (m.groups[2] == null || time.matches(m.groupValues[2]))
-        } ?: false
-        TIME -> TIME_RE.matches(v)
-        TIME_TZ -> TIME_TZ_RE.matches(v)
+        MYSQL_DECIMAL -> MYSQL_DECIMAL_RE.matches(v)
+        MYSQL_FLOAT -> MYSQL_FLOAT_RE.matches(v)
+        MYSQL_DATE -> mysqlDate(v)
+        MYSQL_DATETIME -> timestampOf(v, ::mysqlDate) { TIME_RE.matches(it) }
+        MYSQL_TIME -> MYSQL_TIME_RE.matchEntire(v)?.let { it.groupValues[1].toInt() <= 838 } ?: false
+        PG_NUMERIC -> PG_SPECIAL_NUMBER_RE.matches(v) || PG_NUMERIC_RE.matches(v)
+        PG_FLOAT -> PG_SPECIAL_NUMBER_RE.matches(v) || PG_FLOAT_RE.matches(v)
+        PG_DATE -> PG_INFINITY_RE.matches(v) || pgDateBc(v) { d, bc -> calendarDate(d, wideYears = true, bc = bc) }
+        PG_TIMESTAMP -> pgTimestamp(v, PG_TIME_RE)
+        PG_TIMESTAMP_TZ -> pgTimestamp(v, PG_TIME_TZ_RE)
+        PG_TIME -> PG_TIME_RE.matches(v)
+        PG_TIME_TZ -> PG_TIME_TZ_RE.matches(v)
     }
 }
 
-private val NUMBER_RE = Regex("[+-]?[0-9]{1,35}(\\.[0-9]{1,30})?")
-private val FLOAT_RE = Regex("[+-]?[0-9]{1,35}(\\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?")
-private val TIME_RE = Regex("([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]{1,6})?)?")
-private val TIME_TZ_RE = Regex("([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?")
-private val DATE_RE = Regex("([0-9]{4})-([0-9]{2})-([0-9]{2})")
-private val TIMESTAMP_RE = Regex("([0-9]{4}-[0-9]{2}-[0-9]{2})(?:[ T](.*))?", RegexOption.DOT_MATCHES_ALL)
+private const val TIMESTAMP_DESCRIPTION = "a date such as 2016-01-31, optionally with a time such as 10:30:00"
+private const val CLOCK_TAIL = ":[0-5][0-9](:[0-5][0-9](\\.[0-9]{1,6})?)?"
+private const val PG_CLOCK = "(([01][0-9]|2[0-3])$CLOCK_TAIL|24:00(:00(\\.0{1,6})?)?)"
+private const val TZ_OFFSET = "(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?"
+private val MYSQL_DECIMAL_RE = Regex("[+-]?[0-9]{1,35}(\\.[0-9]{1,30})?")
+private val MYSQL_FLOAT_RE = Regex("[+-]?[0-9]{1,35}(\\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?")
+private val MYSQL_TIME_RE = Regex("-?([0-9]{2,3})$CLOCK_TAIL")
+private val PG_NUMERIC_RE = Regex("[+-]?[0-9]+(\\.[0-9]+)?")
+private val PG_FLOAT_RE = Regex("[+-]?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]{1,3})?")
+private val PG_SPECIAL_NUMBER_RE = Regex("nan|[+-]?infinity", RegexOption.IGNORE_CASE)
+private val PG_INFINITY_RE = Regex("-?infinity", RegexOption.IGNORE_CASE)
+private val TIME_RE = Regex("([01][0-9]|2[0-3])$CLOCK_TAIL")
+private val PG_TIME_RE = Regex(PG_CLOCK)
+private val PG_TIME_TZ_RE = Regex(PG_CLOCK + TZ_OFFSET)
+private val DATE_RE = Regex("([0-9]{4,7})-([0-9]{2})-([0-9]{2})")
 
-/** A YYYY-MM-DD string naming a real day in years 0001-9999. */
-private fun realDate(s: String): Boolean {
+/**
+ * A real YYYY-MM-DD date from year 0001; [wideYears] allows up to 7 year
+ * digits. A [bc] year counts back from 1 BC, which is a leap year.
+ */
+private fun calendarDate(s: String, wideYears: Boolean, bc: Boolean): Boolean {
     val m = DATE_RE.matchEntire(s) ?: return false
-    val (y, mo, d) = m.destructured
-    if (y.toInt() < 1) return false
-    return try {
-        java.time.LocalDate.of(y.toInt(), mo.toInt(), d.toInt())
-        true
-    } catch (_: java.time.DateTimeException) {
-        false
-    }
+    val (yText, monthText, dayText) = m.destructured
+    if (!wideYears && yText.length != 4) return false
+    val y = yText.toInt()
+    val month = monthText.toInt()
+    val day = dayText.toInt()
+    if (y < 1 || month !in 1..12) return false
+    val leapYear = if (bc) y - 1 else y
+    val leap = leapYear % 4 == 0 && (leapYear % 100 != 0 || leapYear % 400 == 0)
+    val days = intArrayOf(31, if (leap) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)[month - 1]
+    return day in 1..days
 }
+
+private fun mysqlDate(s: String): Boolean = s == "0000-00-00" || calendarDate(s, wideYears = false, bc = false)
+
+/** A date accepted by [dateOk], optionally followed by a space or `T` and a time accepted by [timeOk]. */
+private fun timestampOf(v: String, dateOk: (String) -> Boolean, timeOk: (String) -> Boolean): Boolean {
+    val i = v.indexOfFirst { it == ' ' || it == 'T' }
+    return if (i < 0) dateOk(v) else dateOk(v.substring(0, i)) && timeOk(v.substring(i + 1))
+}
+
+/** Calls [f] with [v] minus a trailing ` BC`, and whether it had one. */
+private fun pgDateBc(v: String, f: (String, Boolean) -> Boolean): Boolean =
+    if (v.endsWith(" BC")) f(v.dropLast(3), true) else f(v, false)
+
+private fun pgTimestamp(v: String, time: Regex): Boolean = PG_INFINITY_RE.matches(v) ||
+    pgDateBc(v) { t, bc -> timestampOf(t, { calendarDate(it, wideYears = true, bc = bc) }) { time.matches(it) } }
+
+/** SQLSTATEs that name a bad value, which in a filtered query is the filter's (`spec/protocol.md` §5.4.2). */
+internal val BAD_VALUE_SQLSTATES = setOf("22P02", "22003", "22007", "22008", "22021", "22P05")
 
 data class WhereClause(val sql: String, val values: List<String>)
 
@@ -168,6 +221,8 @@ internal fun opSqlKeyword(op: String): String = when (op) {
     "<=" -> "<="
     "LIKE" -> "LIKE"
     "ILIKE" -> "ILIKE"
+    "IN" -> "IN"
+    "BETWEEN" -> "BETWEEN"
     "IS NULL" -> "IS NULL"
     "IS NOT NULL" -> "IS NOT NULL"
     else -> throw FilterException("invalid op $op")

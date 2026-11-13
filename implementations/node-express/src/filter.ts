@@ -51,6 +51,10 @@ export function opSql(op: string): string {
       return "LIKE";
     case "ILIKE":
       return "ILIKE";
+    case "IN":
+      return "IN";
+    case "BETWEEN":
+      return "BETWEEN";
     case "IS NULL":
       return "IS NULL";
     case "IS NOT NULL":
@@ -202,63 +206,134 @@ export function valueItems(cond: Condition): string[] {
 }
 
 /** The form a value compared in its column's own type must have (spec/protocol.md §5.4.2). */
-export type ValueForm = "number" | "float" | "date" | "timestamp" | "timestamptz" | "time" | "timetz";
+export type ValueForm =
+  | "mysql-decimal"
+  | "mysql-float"
+  | "mysql-date"
+  | "mysql-datetime"
+  | "mysql-time"
+  | "pg-numeric"
+  | "pg-float"
+  | "pg-date"
+  | "pg-timestamp"
+  | "pg-timestamptz"
+  | "pg-time"
+  | "pg-timetz";
 
-const NUMBER_RE = /^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?$/;
-const FLOAT_RE = /^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?$/;
-const TIME_RE = /^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?$/;
-const TIME_TZ_RE =
-  /^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?$/;
-const TIMESTAMP_RE = /^([0-9]{4}-[0-9]{2}-[0-9]{2})(?:[ T](.*))?$/;
+// Each form is the common one widened to every value its engine stores and
+// renders (spec/protocol.md §5.4.2), so a cell's own text always filters
+// back to its row.
+const CLOCK_TAIL = String.raw`:[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?`;
+const PG_CLOCK = String.raw`(([01][0-9]|2[0-3])${CLOCK_TAIL}|24:00(:00(\.0{1,6})?)?)`;
+const TZ_OFFSET = String.raw`(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?`;
+const MYSQL_DECIMAL_RE = /^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?$/;
+const MYSQL_FLOAT_RE = /^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?$/;
+const MYSQL_TIME_RE = new RegExp(String.raw`^-?([0-9]{2,3})${CLOCK_TAIL}$`);
+const PG_NUMERIC_RE = /^[+-]?[0-9]+(\.[0-9]+)?$/;
+const PG_FLOAT_RE = /^[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,3})?$/;
+const PG_SPECIAL_NUMBER_RE = /^(nan|[+-]?infinity)$/i;
+const PG_INFINITY_RE = /^-?infinity$/i;
+const TIME_RE = new RegExp(String.raw`^([01][0-9]|2[0-3])${CLOCK_TAIL}$`);
+const PG_TIME_RE = new RegExp(`^${PG_CLOCK}$`);
+const PG_TIME_TZ_RE = new RegExp(`^${PG_CLOCK}${TZ_OFFSET}$`);
 
-/** A YYYY-MM-DD string naming a real day in years 0001-9999. */
-function realDate(s: string): boolean {
-  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(s);
-  if (!m) return false;
+/**
+ * A real YYYY-MM-DD date from year 0001; `wideYears` allows up to 7 year
+ * digits. A `bc` year counts back from 1 BC, which is a leap year.
+ */
+function calendarDate(s: string, wideYears: boolean, bc: boolean): boolean {
+  const m = /^([0-9]{4,7})-([0-9]{2})-([0-9]{2})$/.exec(s);
+  if (!m || (!wideYears && m[1].length !== 4)) return false;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   if (y < 1 || mo < 1 || mo > 12 || d < 1) return false;
-  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  const ly = bc ? y - 1 : y;
+  const leap = ly % 4 === 0 && (ly % 100 !== 0 || ly % 400 === 0);
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
   return d <= days;
 }
 
+const mysqlDate = (s: string): boolean => s === "0000-00-00" || calendarDate(s, false, false);
+
+/** A date accepted by `dateOk`, optionally followed by a space or `T` and a time accepted by `timeOk`. */
+function timestampOf(v: string, dateOk: (d: string) => boolean, timeOk: (t: string) => boolean): boolean {
+  const i = v.search(/[ T]/);
+  return i < 0 ? dateOk(v) : dateOk(v.slice(0, i)) && timeOk(v.slice(i + 1));
+}
+
+/** Calls `f` with `v` minus a trailing ` BC`, and whether it had one. */
+function pgDateBc(v: string, f: (rest: string, bc: boolean) => boolean): boolean {
+  return v.endsWith(" BC") ? f(v.slice(0, -3), true) : f(v, false);
+}
+
+function pgTimestamp(v: string, time: RegExp): boolean {
+  return (
+    PG_INFINITY_RE.test(v) ||
+    pgDateBc(v, (t, bc) =>
+      timestampOf(
+        t,
+        (d) => calendarDate(d, true, bc),
+        (c) => time.test(c),
+      ),
+    )
+  );
+}
+
 export function formAccepts(form: ValueForm, v: string): boolean {
   switch (form) {
-    case "number":
-      return NUMBER_RE.test(v);
-    case "float":
-      return FLOAT_RE.test(v);
-    case "date":
-      return realDate(v);
-    case "timestamp":
-    case "timestamptz": {
-      const m = TIMESTAMP_RE.exec(v);
-      const time = form === "timestamptz" ? TIME_TZ_RE : TIME_RE;
-      return m !== null && realDate(m[1]) && (m[2] === undefined || time.test(m[2]));
+    case "mysql-decimal":
+      return MYSQL_DECIMAL_RE.test(v);
+    case "mysql-float":
+      return MYSQL_FLOAT_RE.test(v);
+    case "mysql-date":
+      return mysqlDate(v);
+    case "mysql-datetime":
+      return timestampOf(v, mysqlDate, (t) => TIME_RE.test(t));
+    case "mysql-time": {
+      const m = MYSQL_TIME_RE.exec(v);
+      return m !== null && Number(m[1]) <= 838;
     }
-    case "time":
-      return TIME_RE.test(v);
-    case "timetz":
-      return TIME_TZ_RE.test(v);
+    case "pg-numeric":
+      return PG_SPECIAL_NUMBER_RE.test(v) || PG_NUMERIC_RE.test(v);
+    case "pg-float":
+      return PG_SPECIAL_NUMBER_RE.test(v) || PG_FLOAT_RE.test(v);
+    case "pg-date":
+      return PG_INFINITY_RE.test(v) || pgDateBc(v, (d, bc) => calendarDate(d, true, bc));
+    case "pg-timestamp":
+      return pgTimestamp(v, PG_TIME_RE);
+    case "pg-timestamptz":
+      return pgTimestamp(v, PG_TIME_TZ_RE);
+    case "pg-time":
+      return PG_TIME_RE.test(v);
+    case "pg-timetz":
+      return PG_TIME_TZ_RE.test(v);
   }
 }
 
 /** Names the expected form in an error title. */
 export function describeForm(form: ValueForm): string {
   switch (form) {
-    case "number":
+    case "mysql-decimal":
       return "a decimal number such as -12 or 0.5";
-    case "float":
+    case "mysql-float":
       return "a number such as 0.5 or 1.5e-3";
-    case "date":
+    case "mysql-date":
       return "a date such as 2016-01-31";
-    case "timestamp":
+    case "mysql-datetime":
+    case "pg-timestamp":
       return "a date such as 2016-01-31, optionally with a time such as 10:30:00";
-    case "timestamptz":
+    case "mysql-time":
+      return "a time such as 10:30 or -100:00:00";
+    case "pg-numeric":
+      return "a decimal number such as -12, 0.5 or NaN";
+    case "pg-float":
+      return "a number such as 0.5, 1.5e-3 or Infinity";
+    case "pg-date":
+      return "a date such as 2016-01-31, 0044-03-15 BC or infinity";
+    case "pg-timestamptz":
       return "a date such as 2016-01-31, optionally with a time such as 10:30:00 and an offset such as +02:00";
-    case "time":
+    case "pg-time":
       return "a time such as 10:30 or 10:30:00.5";
-    case "timetz":
+    case "pg-timetz":
       return "a time such as 10:30, optionally with an offset such as +02:00";
   }
 }

@@ -98,6 +98,15 @@ async fn builder_fixture_cases_over_http() {
             Some(raw) => raw.as_str().unwrap().to_string(),
             None => serde_json::to_string(&case["conditions"]).unwrap(),
         };
+        // A case limited to other engines names a value only they store (`NaN`, ` BC`).
+        if case.get("engines").is_some_and(|e| {
+            !e.as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.as_str() == Some(Backend::current().fixture_name()))
+        }) {
+            continue;
+        }
         let resp = fetch(&srv, table, &filter).await;
         if case.get("expect").is_some() {
             assert_status(&resp, 200, &format!("case {name}: valid AST"));

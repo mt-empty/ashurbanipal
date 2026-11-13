@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { pgColumnClass, pgTypedCompare } from "../src/db/postgres.js";
+import { JOIN_DIALECT as pg, pgColumnClass, pgTypedCompare } from "../src/db/postgres.js";
 import { FilterError, NotAllowedError, quoteIdent } from "../src/errors.js";
 import { parseFilter } from "../src/filter.js";
 import { type ColMeta, type JoinDialect, type TableMeta, tableWhereClause } from "../src/join.js";
@@ -46,14 +46,6 @@ function seedTable(table: string): TableMeta {
     }),
   };
 }
-
-const pg: JoinDialect = {
-  quote: quoteIdent,
-  castText: (e) => `${e}::text`,
-  castParam: (p, t) => `${p}::${t}`,
-  numbered: true,
-  ilike: "native",
-};
 
 // Re-numbers the fixture's $1-based placeholders to match
 // tableWhereClause's real numbering, which starts at $3 in production

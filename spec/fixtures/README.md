@@ -85,13 +85,17 @@ Each entry in `cases`:
   - `where` — the fragment in the Postgres shape: double-quoted column
     identifiers, a `::text` cast on the column for a text comparison, a
     cast on the placeholder for a typed one (`$1::numeric`), no cast for
-    `IS [NOT] NULL`, `$n` placeholders numbered **from `$1` in condition
+    `IS [NOT] NULL` on a typed column, `$n` placeholders numbered **from `$1` in condition
     order** (an `IN` or `BETWEEN` takes one per item). Runners with a different
     placeholder scheme (`?`, offset numbering — the Rust implementation
     itself binds limit/offset first, so it checks against `$n+2`) normalize
     before comparing; the operator spellings and parenthesization are
     normative.
   - `values` — the bind values, in placeholder order.
+- `engines` (optional) — the engines whose stored values include this
+  case's value (`NaN`, a ` BC` date), so the HTTP runner checks the case
+  only there; SQLite is listed because it skips the value check. Absent
+  means every engine.
 - `expect_error` — the case must be rejected (HTTP: 400). The kind names
   *why*, and implies the stage:
   - `unknown_column` — structurally valid AST, column fails the live

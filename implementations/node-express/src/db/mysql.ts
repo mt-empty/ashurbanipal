@@ -21,6 +21,7 @@ import {
   tableSchemas,
   tableWhereClause,
   tieBreakKeys,
+  typedClass,
   type UniqueKey,
 } from "../join.js";
 import {
@@ -69,10 +70,7 @@ const JOIN_DIALECT: JoinDialect = {
 
 /**
  * The typed filter comparison for an information_schema.COLUMNS.DATA_TYPE
- * (spec/protocol.md §5.4.2). A bare DECIMAL cast is DECIMAL(10,0) and rounds;
- * a temporal value is bound bare because MySQL 8.4 compares a TIME column
- * unequal to an equal CAST(? AS TIME), and coerces a string to the column's
- * own temporal type.
+ * (spec/protocol.md §5.4.2); the casts are in docs/adapter-decisions.md §5.4.2.
  */
 export function mysqlTypedCompare(dataType: string): TypedCompare | undefined {
   switch (dataType.toLowerCase()) {
@@ -84,18 +82,18 @@ export function mysqlTypedCompare(dataType: string): TypedCompare | undefined {
     case "bigint":
     case "decimal":
     case "numeric":
-      return { form: "number", cast: "DECIMAL(65,30)" };
+      return { form: "mysql-decimal", cast: "DECIMAL(65,30)" };
     case "float":
-      return { form: "float", cast: "FLOAT" };
+      return { form: "mysql-float", cast: "FLOAT" };
     case "double":
-      return { form: "float", cast: "DOUBLE" };
+      return { form: "mysql-float", cast: "DOUBLE" };
     case "date":
-      return { form: "date" };
+      return { form: "mysql-date" };
     case "datetime":
     case "timestamp":
-      return { form: "timestamp" };
+      return { form: "mysql-datetime" };
     case "time":
-      return { form: "time" };
+      return { form: "mysql-time" };
     default:
       return undefined;
   }
@@ -110,16 +108,9 @@ const MARIADB_JSON_COLUMNS_SQL =
 
 /** `spec/protocol.md` §5.11.2; the mapping is in `docs/adapter-decisions.md` §5.11. */
 export function mysqlColumnClass(dataType: string, columnType: string): ColumnClass {
+  const typed = typedClass(mysqlTypedCompare(dataType));
+  if (typed) return typed;
   switch (dataType.toLowerCase()) {
-    case "tinyint":
-    case "smallint":
-    case "mediumint":
-    case "int":
-    case "integer":
-    case "bigint":
-    case "decimal":
-    case "numeric":
-      return { kind: "number" };
     case "char":
     case "varchar":
     case "tinytext":
@@ -127,12 +118,6 @@ export function mysqlColumnClass(dataType: string, columnType: string): ColumnCl
     case "mediumtext":
     case "longtext":
       return { kind: "text" };
-    case "date":
-    case "datetime":
-    case "timestamp":
-      return { kind: "temporal" };
-    case "time":
-      return { kind: "time" };
     case "binary":
     case "varbinary":
     case "tinyblob":
@@ -144,9 +129,6 @@ export function mysqlColumnClass(dataType: string, columnType: string): ColumnCl
       return { kind: "uuid" };
     case "enum":
       return { kind: "enum", enumType: columnType };
-    case "float":
-    case "double":
-      return { kind: "float" };
     case "json":
       return { kind: "json" };
     default:
@@ -526,7 +508,7 @@ export class MySqlSource implements DbSource {
         opts.limit + 1,
         opts.offset,
       ]).catch((err: unknown) => {
-        throw mapSelectDeniedMysql(err, spec.table);
+        throw mapSelectDeniedMysql(err, spec.table, values.length > 0);
       });
       const out = joinRows(plan, rows, opts.limit, cellToJson);
       return { columns: joinColumnInfos(plan, realSchema), rows: out.rows, has_more: out.hasMore };
@@ -570,7 +552,7 @@ export class MySqlSource implements DbSource {
       );
       const dataRows = await queryRows(conn, dataSql, [...filterValues, opts.limit, opts.offset]).catch(
         (err: unknown) => {
-          throw mapSelectDeniedMysql(err, realTable);
+          throw mapSelectDeniedMysql(err, realTable, filterValues.length > 0);
         },
       );
       const outRows: Record<string, string | null>[] = dataRows.map((row) => {

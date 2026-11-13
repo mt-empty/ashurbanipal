@@ -143,9 +143,11 @@ Filters (§5.4.2, and §5.11.3's join filters) compare a `number`, `float`,
 `LIKE`/`ILIKE`, so `10 > 9` and `1.00 = 1`. Before, every op compared the
 column's text cast. A value that does not fit such a column's class is now
 a 400 `invalid_filter`, as is an engine error about a bad value (SQLite
-skips that check, since it does not enforce column types). Two ops
-are new: `IN`, whose `value` is an array of 1 to 1000 strings, and
-`BETWEEN`, whose `value` is `[lo, hi]`. `IS [NOT] NULL` tests the column
-without a cast. Changing what an existing filter returns is not additive,
+skips that check, since it does not enforce column types). Each form also
+accepts every value its engine stores and renders, so a cell's own text
+still filters back to its row, and a Postgres port renders dates in ISO
+form. Two ops are new: `IN`, whose `value` is an array of 1 to 1000
+strings, and `BETWEEN`, whose `value` is `[lo, hi]`. `IS [NOT] NULL` tests
+a typed column without a cast. Changing what an existing filter returns is not additive,
 so this lands under §7's alpha exception, with every port, the conformance
 runner and the bundled UI changed together.

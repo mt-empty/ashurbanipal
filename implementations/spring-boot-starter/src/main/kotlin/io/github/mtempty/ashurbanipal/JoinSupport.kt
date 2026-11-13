@@ -231,6 +231,16 @@ data class TypedCompare(
         if (intCast != null && value.toLongOrNull() != null) intCast else cast
 }
 
+/** The class of a typed column, read from its value form so a backend's class and typed comparison can't disagree. */
+internal fun typedClass(t: TypedCompare?): ColumnClass? = when (t?.form) {
+    null -> null
+    ValueForm.MYSQL_DECIMAL, ValueForm.PG_NUMERIC -> ColumnClass.NUMBER
+    ValueForm.MYSQL_FLOAT, ValueForm.PG_FLOAT -> ColumnClass.FLOAT
+    ValueForm.MYSQL_DATE, ValueForm.MYSQL_DATETIME, ValueForm.PG_DATE, ValueForm.PG_TIMESTAMP, ValueForm.PG_TIMESTAMP_TZ ->
+        ColumnClass.TEMPORAL
+    ValueForm.MYSQL_TIME, ValueForm.PG_TIME, ValueForm.PG_TIME_TZ -> ColumnClass.TIME
+}
+
 /** One column as the live catalog reports it. [collation] is set where two text collations can clash (§5.4.1). */
 data class ColMeta(
     val name: String,
@@ -469,7 +479,7 @@ private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, Lis
         val lhs = if (typed != null) t.expr else d.castText(t.expr)
         val items = cond.items()
         val inner = when (cond.op) {
-            in OPS_WITHOUT_VALUE -> "${t.expr} ${opSqlKeyword(cond.op)}"
+            in OPS_WITHOUT_VALUE -> "$lhs ${opSqlKeyword(cond.op)}"
             "IN" -> "$lhs IN (${items.joinToString(", ") { ph(it) }})"
             "BETWEEN" -> "$lhs BETWEEN ${ph(items[0])} AND ${ph(items[1])}"
             "ILIKE" -> when (d.ilike) {

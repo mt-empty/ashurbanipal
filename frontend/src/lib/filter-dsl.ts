@@ -173,14 +173,18 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
     return value;
   };
   const parseValue = (): string => (peek() === "'" ? parseQuotedValue() : parseBareValue());
-  // A bare list item also stops at , ( and ). A bare NULL is rejected: x NOT IN (1, NULL) is never true in SQL.
-  const parseListItem = (): string => {
+  // A bare NULL is rejected where SQL could never match it: x NOT IN (1, NULL)
+  // is never true, and neither is x BETWEEN NULL AND 5.
+  const parseNonNullValue = (stop: string, nullMessage: string): string => {
     if (peek() === "'") return parseQuotedValue();
     const start = pos;
-    const value = parseBareValue(",()");
-    if (/^NULL$/i.test(value)) throw err("NULL cannot be in a list; use IS NULL", start);
+    const value = parseBareValue(stop);
+    if (/^NULL$/i.test(value)) throw err(nullMessage, start);
     return value;
   };
+  // A bare list item also stops at , ( and ).
+  const parseListItem = (): string => parseNonNullValue(",()", "NULL cannot be in a list; use IS NULL");
+  const parseBound = (): string => parseNonNullValue("", "NULL cannot be a BETWEEN bound; use IS NULL");
   const parseList = (): string[] => {
     skipWsOptional();
     if (peek() !== "(") throw err("expected ( to start the list", pos);
@@ -235,11 +239,11 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
         if (consumeKeyword("IN")) return { column, join, op: "IN", value: parseList() };
         if (!consumeKeyword("BETWEEN")) return null;
         skipWsRequired();
-        const lo = parseValue();
+        const lo = parseBound();
         skipWsRequired();
         if (!consumeKeyword("AND")) throw err("expected AND between the BETWEEN bounds", pos);
         skipWsRequired();
-        return { column, join, op: "BETWEEN", value: [lo, parseValue()] };
+        return { column, join, op: "BETWEEN", value: [lo, parseBound()] };
       };
       const simple = wordOp();
       if (simple) return negated ? { ...simple, not: true } : simple;

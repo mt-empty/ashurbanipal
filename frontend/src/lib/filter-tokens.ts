@@ -62,6 +62,8 @@ export function tokenizeFilterDsl(text: string): Tokenized {
   const tokens: Token[] = [];
   let expect = "column" as Expect;
   let column: string | null = null;
+  // A condition that starts with NOT cannot negate its operator too.
+  let negated = false;
   let i = 0;
   const push = (kind: TokenKind, start: number, end: number, next: Expect): void => {
     tokens.push({ kind, start, end, expect, column });
@@ -82,6 +84,7 @@ export function tokenizeFilterDsl(text: string): Tokenized {
     }
     if (expect === "column") {
       if (keywordAt(text, i, "NOT")) {
+        negated = true;
         push("keyword", s, i + 3, "column");
         continue;
       }
@@ -98,7 +101,7 @@ export function tokenizeFilterDsl(text: string): Tokenized {
         push("keyword", s, i + 2, "isTail");
         continue;
       }
-      if (expect === "operator" && keywordAt(text, i, "NOT")) {
+      if (expect === "operator" && !negated && keywordAt(text, i, "NOT")) {
         push("keyword", s, i + 3, "notTail");
         continue;
       }
@@ -160,6 +163,7 @@ export function tokenizeFilterDsl(text: string): Tokenized {
       if (word) {
         push("keyword", s, i + word.length, "column");
         column = null;
+        negated = false;
         continue;
       }
     }

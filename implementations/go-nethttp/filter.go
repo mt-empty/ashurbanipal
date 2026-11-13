@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
-	"time"
 )
 
 // MaxFilterBytes bounds the URL-decoded filter JSON (spec/protocol.md §5.4.2).
@@ -180,6 +180,16 @@ func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 	return conditions, nil
 }
 
+// isBadValueSQLState reports whether an engine's SQLSTATE names a bad value,
+// which in a filtered query is the filter's (spec/protocol.md §5.4.2).
+func isBadValueSQLState(code string) bool {
+	switch code {
+	case "22P02", "22003", "22007", "22008", "22021", "22P05":
+		return true
+	}
+	return false
+}
+
 // opSQL returns a literal allow-listed SQL fragment, never wire text (spec/protocol.md §5.4.2).
 func opSQL(op string) string {
 	switch op {
@@ -199,6 +209,10 @@ func opSQL(op string) string {
 		return "LIKE"
 	case "ILIKE":
 		return "ILIKE"
+	case "IN":
+		return "IN"
+	case "BETWEEN":
+		return "BETWEEN"
 	case "IS NULL":
 		return "IS NULL"
 	case "IS NOT NULL":
@@ -209,76 +223,159 @@ func opSQL(op string) string {
 }
 
 // valueForm is the form a value compared in its column's own type must have
-// (spec/protocol.md §5.4.2).
+// (spec/protocol.md §5.4.2): the common form, widened to every value the
+// engine stores and renders for that type, so a cell's own text always
+// filters back to its row.
 type valueForm int
 
 const (
-	formNone valueForm = iota // not checked: SQLite does not enforce column types
-	formNumber
-	formFloat
-	formDate
-	formTimestamp
-	formTimestampTz // may end in a time-zone offset (Postgres timestamptz)
-	formTime
-	formTimeTz // may end in a time-zone offset (Postgres timetz)
+	formNone         valueForm = iota // not checked: SQLite does not enforce column types
+	formMysqlDecimal                  // at most 35 integer and 30 fraction digits: the DECIMAL(65,30) cast's bound
+	formMysqlFloat
+	formMysqlDate // years 0001-9999, or the zero date 0000-00-00
+	formMysqlDatetime
+	formMysqlTime // hours up to ±838
+	formPgNumeric // any number of digits, NaN or ±Infinity
+	formPgFloat
+	formPgDate // years from 0001 with an optional " BC", above 9999, or ±infinity
+	formPgTimestamp
+	formPgTimestampTz // may carry a time-zone offset
+	formPgTime        // hours 00-23, or exactly 24:00
+	formPgTimeTz
+)
+
+const (
+	clockTail = `:[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?`
+	pgClock   = `(([01][0-9]|2[0-3])` + clockTail + `|24:00(:00(\.0{1,6})?)?)`
+	tzOffset  = `(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?`
 )
 
 var (
-	numberRe    = regexp.MustCompile(`^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?$`)
-	floatRe     = regexp.MustCompile(`^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?$`)
-	timeRe      = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?$`)
-	timeTzRe    = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?$`)
-	dateRe      = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
-	timestampRe = regexp.MustCompile(`^([0-9]{4}-[0-9]{2}-[0-9]{2})([ T](.*))?$`)
+	mysqlDecimalRe    = regexp.MustCompile(`^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?$`)
+	mysqlFloatRe      = regexp.MustCompile(`^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?$`)
+	mysqlTimeRe       = regexp.MustCompile(`^-?([0-9]{2,3})` + clockTail + `$`)
+	pgNumericRe       = regexp.MustCompile(`^[+-]?[0-9]+(\.[0-9]+)?$`)
+	pgFloatRe         = regexp.MustCompile(`^[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,3})?$`)
+	pgSpecialNumberRe = regexp.MustCompile(`(?i)^(nan|[+-]?infinity)$`)
+	pgInfinityRe      = regexp.MustCompile(`(?i)^-?infinity$`)
+	timeRe            = regexp.MustCompile(`^([01][0-9]|2[0-3])` + clockTail + `$`)
+	pgTimeRe          = regexp.MustCompile(`^` + pgClock + `$`)
+	pgTimeTzRe        = regexp.MustCompile(`^` + pgClock + tzOffset + `$`)
+	dateRe            = regexp.MustCompile(`^([0-9]{4,7})-([0-9]{2})-([0-9]{2})$`)
 )
 
-// realDate reports whether a YYYY-MM-DD string names a day in years 0001-9999.
-func realDate(s string) bool {
-	if !dateRe.MatchString(s) || s[:4] == "0000" {
+// calendarDate reports whether s is a real YYYY-MM-DD date from year 0001;
+// wideYears allows up to 7 year digits. A bc year counts back from 1 BC,
+// which is a leap year.
+func calendarDate(s string, wideYears, bc bool) bool {
+	m := dateRe.FindStringSubmatch(s)
+	if m == nil || (!wideYears && len(m[1]) != 4) {
 		return false
 	}
-	_, err := time.Parse("2006-01-02", s)
-	return err == nil
+	y, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day, _ := strconv.Atoi(m[3])
+	if y < 1 {
+		return false
+	}
+	leapYear := y
+	if bc {
+		leapYear = y - 1
+	}
+	days := [13]int{0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+	if leapYear%4 == 0 && (leapYear%100 != 0 || leapYear%400 == 0) {
+		days[2] = 29
+	}
+	return month >= 1 && month <= 12 && day >= 1 && day <= days[month]
+}
+
+func mysqlDate(s string) bool { return s == "0000-00-00" || calendarDate(s, false, false) }
+
+// timestampOf: a date accepted by dateOK, optionally followed by a space or
+// T and a time accepted by timeOK.
+func timestampOf(v string, dateOK, timeOK func(string) bool) bool {
+	if i := strings.IndexAny(v, " T"); i >= 0 {
+		return dateOK(v[:i]) && timeOK(v[i+1:])
+	}
+	return dateOK(v)
+}
+
+// pgDateBC calls f with v minus a trailing " BC", and whether it had one.
+func pgDateBC(v string, f func(string, bool) bool) bool {
+	if rest, ok := strings.CutSuffix(v, " BC"); ok {
+		return f(rest, true)
+	}
+	return f(v, false)
+}
+
+func mysqlTime(v string) bool {
+	m := mysqlTimeRe.FindStringSubmatch(v)
+	if m == nil {
+		return false
+	}
+	h, _ := strconv.Atoi(m[1])
+	return h <= 838
 }
 
 func (f valueForm) accepts(v string) bool {
+	pgDate := func(d string, bc bool) bool { return calendarDate(d, true, bc) }
 	switch f {
 	case formNone:
 		return true
-	case formNumber:
-		return numberRe.MatchString(v)
-	case formFloat:
-		return floatRe.MatchString(v)
-	case formDate:
-		return realDate(v)
-	case formTimestamp, formTimestampTz:
-		tr := timeRe
-		if f == formTimestampTz {
-			tr = timeTzRe
+	case formMysqlDecimal:
+		return mysqlDecimalRe.MatchString(v)
+	case formMysqlFloat:
+		return mysqlFloatRe.MatchString(v)
+	case formMysqlDate:
+		return mysqlDate(v)
+	case formMysqlDatetime:
+		return timestampOf(v, mysqlDate, timeRe.MatchString)
+	case formMysqlTime:
+		return mysqlTime(v)
+	case formPgNumeric:
+		return pgSpecialNumberRe.MatchString(v) || pgNumericRe.MatchString(v)
+	case formPgFloat:
+		return pgSpecialNumberRe.MatchString(v) || pgFloatRe.MatchString(v)
+	case formPgDate:
+		return pgInfinityRe.MatchString(v) || pgDateBC(v, pgDate)
+	case formPgTimestamp, formPgTimestampTz:
+		timeOK := pgTimeRe.MatchString
+		if f == formPgTimestampTz {
+			timeOK = pgTimeTzRe.MatchString
 		}
-		m := timestampRe.FindStringSubmatch(v)
-		return m != nil && realDate(m[1]) && (m[2] == "" || tr.MatchString(m[3]))
-	case formTimeTz:
-		return timeTzRe.MatchString(v)
-	default:
-		return timeRe.MatchString(v)
+		return pgInfinityRe.MatchString(v) || pgDateBC(v, func(t string, bc bool) bool {
+			return timestampOf(t, func(d string) bool { return pgDate(d, bc) }, timeOK)
+		})
+	case formPgTime:
+		return pgTimeRe.MatchString(v)
+	case formPgTimeTz:
+		return pgTimeTzRe.MatchString(v)
 	}
+	return false
 }
 
 // describe names the expected form in an error title.
 func (f valueForm) describe() string {
 	switch f {
-	case formNumber:
+	case formMysqlDecimal:
 		return "a decimal number such as -12 or 0.5"
-	case formFloat:
+	case formMysqlFloat:
 		return "a number such as 0.5 or 1.5e-3"
-	case formDate:
+	case formMysqlDate:
 		return "a date such as 2016-01-31"
-	case formTimestamp:
+	case formMysqlDatetime, formPgTimestamp:
 		return "a date such as 2016-01-31, optionally with a time such as 10:30:00"
-	case formTimestampTz:
+	case formMysqlTime:
+		return "a time such as 10:30 or -100:00:00"
+	case formPgNumeric:
+		return "a decimal number such as -12, 0.5 or NaN"
+	case formPgFloat:
+		return "a number such as 0.5, 1.5e-3 or Infinity"
+	case formPgDate:
+		return "a date such as 2016-01-31, 0044-03-15 BC or infinity"
+	case formPgTimestampTz:
 		return "a date such as 2016-01-31, optionally with a time such as 10:30:00 and an offset such as +02:00"
-	case formTimeTz:
+	case formPgTimeTz:
 		return "a time such as 10:30, optionally with an offset such as +02:00"
 	default:
 		return "a time such as 10:30 or 10:30:00.5"
