@@ -32,10 +32,38 @@ func init() {
 }
 
 var pgJoinDialect = joinDialect{
-	quote:    quoteIdent,
-	castText: func(c string) string { return c + "::text" },
-	numbered: true,
-	ilike:    ilikeNative,
+	quote:     quoteIdent,
+	castText:  func(c string) string { return c + "::text" },
+	castParam: func(p, target string) string { return p + "::" + target },
+	numbered:  true,
+	ilike:     ilikeNative,
+}
+
+// pgTypedCompare is the typed filter comparison for an
+// information_schema.columns.data_type (spec/protocol.md §5.4.2); the cast
+// target matches the column's own type so real compares as real.
+func pgTypedCompare(dataType string) *typedCompare {
+	switch dataType {
+	case "smallint", "integer", "bigint":
+		return &typedCompare{form: formNumber, cast: "numeric", intCast: "int8"}
+	case "numeric":
+		return &typedCompare{form: formNumber, cast: "numeric"}
+	case "real":
+		return &typedCompare{form: formFloat, cast: "real"}
+	case "double precision":
+		return &typedCompare{form: formFloat, cast: "float8"}
+	case "date":
+		return &typedCompare{form: formDate, cast: "date"}
+	case "timestamp without time zone":
+		return &typedCompare{form: formTimestamp, cast: "timestamp"}
+	case "timestamp with time zone":
+		return &typedCompare{form: formTimestampTz, cast: "timestamptz"}
+	case "time without time zone":
+		return &typedCompare{form: formTime, cast: "time"}
+	case "time with time zone":
+		return &typedCompare{form: formTimeTz, cast: "timetz"}
+	}
+	return nil
 }
 
 // pgColumnClass maps information_schema types to spec/protocol.md §5.11.2
@@ -292,7 +320,7 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 		}
 		col := colMeta{
 			name: name, typeName: fullType, class: pgColumnClass(dataType, udtSchema, udtName, isEnum),
-			comment: comment.String,
+			compare: pgTypedCompare(dataType), comment: comment.String,
 		}
 		if collation.Valid {
 			col.collation = &collation.String
@@ -412,12 +440,12 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 	defer cancel()
 	rows, err := tx.QueryContext(queryCtx, "select "+body, args...)
 	if err != nil {
-		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort)
+		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort, len(values) > 0)
 	}
 	defer rows.Close()
 	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
 	if err != nil {
-		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort)
+		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort, len(values) > 0)
 	}
 	rows.Close()
 	if err := tx.Commit(); err != nil {
@@ -544,12 +572,13 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 // mapSelectDenied turns a residual "permission denied" (SQLSTATE 42501) at
 // the row fetch into a NotAllowedError (400) — the allow-list already
 // rejects tables the role can't SELECT, so this only catches the edge. It
-// also maps a filter value Postgres's text encoding rejects (SQLSTATE
-// 22021/22P05) to a FilterError, also 400, never a raw 500
+// also maps a filter value Postgres rejects (SQLSTATE class 22, only when
+// values were bound: a NUL byte, or a value a typed comparison's cast
+// refuses) to a FilterError, also 400, never a raw 500
 // (docs/adapter-decisions.md §5.4.2 has the cross-backend rationale). When the
 // request sorts, an "undefined function" error (SQLSTATE 42883) is the sort
 // column's type having no ordering operator (json, xml, geometric types).
-func mapSelectDenied(err error, table string, sort *string) error {
+func mapSelectDenied(err error, table string, sort *string, filtered bool) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
@@ -559,7 +588,8 @@ func mapSelectDenied(err error, table string, sort *string) error {
 			}
 		case "42501":
 			return &NotAllowedError{Kind: NotAllowedNotReadable, What: fmt.Sprintf("table %q", table)}
-		case "22021", "22P05":
+		}
+		if filtered && strings.HasPrefix(pgErr.Code, "22") {
 			return filterErr("value invalid for this backend: %s", pgErr.Message)
 		}
 	}
@@ -608,7 +638,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = BuildWhereClause(opts.Filter, columnNames)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta.columns, pgJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}
@@ -630,7 +660,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	// Identifiers spliced here are schema-validated (realSchema via
 	// resolveSchema, realTable/columns via allowedTables/allowedColumns,
 	// sort via the findExact check above, filter columns via
-	// BuildWhereClause's own allow-list check); every value is a bound $N
+	// tableWhereClause's own allow-list check); every value is a bound $N
 	// parameter.
 	query := fmt.Sprintf("select %s from %s.%s%s%s limit $1 offset $2",
 		selectList, quoteIdent(realSchema), quoteIdent(realTable), whereClause, orderClause)
@@ -645,7 +675,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, mapSelectDenied(err, realTable, sort)
+		return TableData{}, mapSelectDenied(err, realTable, sort, len(filterValues) > 0)
 	}
 	defer rows.Close()
 
@@ -657,7 +687,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 			cells[i] = &values[i]
 		}
 		if err := rows.Scan(cells...); err != nil {
-			return TableData{}, err
+			return TableData{}, mapSelectDenied(err, realTable, sort, len(filterValues) > 0)
 		}
 		row := make(map[string]*string, len(columns))
 		for i, col := range columns {
@@ -665,8 +695,9 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 		}
 		out = append(out, row)
 	}
+	// A bad filter value can surface while rows stream, not only at the query.
 	if err := rows.Err(); err != nil {
-		return TableData{}, err
+		return TableData{}, mapSelectDenied(err, realTable, sort, len(filterValues) > 0)
 	}
 	if out == nil {
 		out = []map[string]*string{}

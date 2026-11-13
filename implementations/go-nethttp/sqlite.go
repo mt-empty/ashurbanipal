@@ -51,10 +51,23 @@ func init() {
 }
 
 var sqliteJoinDialect = joinDialect{
-	quote:    quoteIdent,
-	castText: func(c string) string { return "CAST(" + c + " AS TEXT)" },
-	numbered: false,
-	ilike:    ilikeLike,
+	quote:     quoteIdent,
+	castText:  func(c string) string { return "CAST(" + c + " AS TEXT)" },
+	castParam: func(p, target string) string { return "CAST(" + p + " AS " + target + ")" },
+	numbered:  false,
+	ilike:     ilikeLike,
+}
+
+// sqliteTypedCompare is the typed filter comparison for a column class
+// (spec/protocol.md §5.4.2). A stored value need not match its declared type,
+// so values are not checked; bound bare, the column's affinity compares a
+// value that reads as a number numerically and anything else as text.
+func sqliteTypedCompare(class columnClass) *typedCompare {
+	switch class {
+	case classNumber, classFloat, classTemporal, classTime:
+		return &typedCompare{unchecked: true}
+	}
+	return nil
 }
 
 // sqliteColumnClass maps a declared type to a spec/protocol.md §5.11.2 class:
@@ -108,7 +121,10 @@ func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (
 		if typeName == "" {
 			typeName = "unknown"
 		}
-		meta.columns = append(meta.columns, colMeta{name: name, typeName: typeName, class: sqliteColumnClass(declared)})
+		class := sqliteColumnClass(declared)
+		meta.columns = append(meta.columns, colMeta{
+			name: name, typeName: typeName, class: class, compare: sqliteTypedCompare(class),
+		})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -374,63 +390,6 @@ func (c *SQLiteSource) keyMetadata(ctx context.Context, q queryer, table string)
 	return pkColumns, fkColumns, nil
 }
 
-// sqliteBuildWhereClause is the SQLite equivalent of postgres.go's
-// BuildWhereClause: `?` placeholders instead of `$N`, `CAST(col AS TEXT)`
-// instead of `col::text`, and ILIKE mapped to plain LIKE — SQLite's LIKE
-// is already ASCII case-insensitive by default, so there's no separate
-// case-insensitive keyword to map to (docs/adapter-decisions.md §5.4.2).
-func sqliteBuildWhereClause(conditions []Condition, columnNames []string) (string, []string, error) {
-	if len(conditions) == 0 {
-		return "", nil, nil
-	}
-	allowed := make(map[string]bool, len(columnNames))
-	for _, c := range columnNames {
-		allowed[c] = true
-	}
-
-	var values []string
-	var clause []byte
-	for i, cond := range conditions {
-		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
-		}
-		if !validOps[cond.Op] {
-			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
-		}
-		keyword := cond.Op
-		if keyword == "ILIKE" {
-			keyword = "LIKE"
-		}
-		cast := fmt.Sprintf("CAST(%s AS TEXT)", quoteIdent(cond.Column))
-		var inner string
-		if opTakesValue(cond.Op) {
-			if cond.Value == nil {
-				return "", nil, filterErr("op %q requires a value", cond.Op)
-			}
-			inner = fmt.Sprintf("%s %s ?", cast, keyword)
-			values = append(values, *cond.Value)
-		} else {
-			inner = fmt.Sprintf("%s %s", cast, keyword)
-		}
-		wrapped := "(" + inner + ")"
-		if cond.Not {
-			wrapped = "(NOT (" + inner + "))"
-		}
-		if i > 0 {
-			if cond.Logic == nil {
-				return "", nil, filterErr("condition %d is missing logic", i)
-			}
-			if *cond.Logic == "OR" {
-				clause = append(clause, " OR "...)
-			} else {
-				clause = append(clause, " AND "...)
-			}
-		}
-		clause = append(clause, wrapped...)
-	}
-	return " where " + string(clause), values, nil
-}
-
 func (c *SQLiteSource) Engine() Engine { return EngineSQLite }
 
 func (c *SQLiteSource) ListSchemas(ctx context.Context) (SchemaListing, error) {
@@ -505,7 +464,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = sqliteBuildWhereClause(opts.Filter, columnNames)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta.columns, sqliteJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}
@@ -521,7 +480,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 
 	// Identifiers spliced here are schema-validated (realTable via
 	// allowedTables, columns via allowedColumns, sort via the findExact
-	// check above, filter columns via sqliteBuildWhereClause's own
+	// check above, filter columns via tableWhereClause's own
 	// allow-list check); every value is a bound ? parameter.
 	query := fmt.Sprintf("select %s from %s%s%s limit ? offset ?",
 		selectList, quoteIdent(realTable), whereClause, orderClause)

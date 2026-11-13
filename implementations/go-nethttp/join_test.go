@@ -3,6 +3,7 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -214,7 +215,7 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 	plan, err := planJoin(spec, testOrdersUsers(), JoinOpts{
 		Sort: &sort, SortJoin: &sortJoin,
 		Filter: []Condition{
-			{Column: "email", Op: "=", Value: &email, Join: &sortJoin},
+			{Column: "email", Op: "=", Value: StringValue(email), Join: &sortJoin},
 			{Logic: &or, Not: true, Column: "status", Op: "IS NULL"},
 		},
 	})
@@ -225,7 +226,7 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 	for _, want := range []string{
 		`t0."id"::text as c0, `,
 		` from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"`,
-		` where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))`,
+		` where (t1."email"::text = $3) OR (NOT (t0."status" IS NULL))`,
 		` order by t1."email" asc, t0."id" asc limit $1 offset $2`,
 	} {
 		if !strings.Contains(sqlText, want) {
@@ -234,6 +235,66 @@ func TestBuildJoinSelectUsesCatalogNamesAndGeneratedAliasesOnly(t *testing.T) {
 	}
 	if len(values) != 1 || values[0] != email {
 		t.Errorf("values = %v", values)
+	}
+}
+
+func TestTypedColumnsCompareInTheirOwnType(t *testing.T) {
+	spec, _ := ParseJoin(testJoinJSON)
+	tables := testOrdersUsers()
+	tables[0].columns = append(tables[0].columns, colMeta{
+		name: "total", typeName: "integer", class: classNumber, compare: pgTypedCompare("integer"),
+	})
+	and, or := "AND", "OR"
+	list := func(v ...string) *FilterValue { return &FilterValue{Items: v, List: true} }
+	plan, err := planJoin(spec, tables, JoinOpts{Filter: []Condition{
+		{Column: "total", Op: "BETWEEN", Value: list("1", "9.5")},
+		{Logic: &and, Not: true, Column: "status", Op: "IN", Value: list("a", "b")},
+		{Logic: &or, Column: "total", Op: "LIKE", Value: StringValue("1%")},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlText, values := buildJoinSelect(plan, pgJoinDialect)
+	want := ` where (t0."total" BETWEEN $3::int8 AND $4::numeric) AND (NOT (t0."status"::text IN ($5, $6))) OR (t0."total"::text LIKE $7)`
+	if !strings.Contains(sqlText, want) {
+		t.Errorf("sql missing %q:\n%s", want, sqlText)
+	}
+	if !slices.Equal(values, []string{"1", "9.5", "a", "b", "1%"}) {
+		t.Errorf("values = %v", values)
+	}
+	_, err = planJoin(spec, tables, JoinOpts{Filter: []Condition{{Column: "total", Op: "IN", Value: list("1", "x")}}})
+	var fe *FilterError
+	if !errors.As(err, &fe) || !strings.Contains(fe.Reason, `"x"`) || !strings.Contains(fe.Reason, `"total"`) {
+		t.Errorf("bad value err = %v", err)
+	}
+}
+
+func TestValueForms(t *testing.T) {
+	for _, c := range []struct {
+		form valueForm
+		v    string
+		ok   bool
+	}{
+		{formNumber, "-12", true}, {formNumber, "+3.25", true}, {formNumber, ".5", false},
+		{formNumber, "5.", false}, {formNumber, "1e3", false}, {formNumber, "abc", false},
+		{formNumber, strings.Repeat("9", 35), true}, {formNumber, strings.Repeat("9", 36), false},
+		{formFloat, "1.5e-3", true}, {formFloat, "2E10", true}, {formFloat, "1e", false}, {formFloat, "NaN", false},
+		{formDate, "2016-02-29", true}, {formDate, "2015-02-29", false}, {formDate, "0000-01-01", false},
+		{formDate, "2016-01-01 10:00", false},
+		{formTimestamp, "2016-01-01", true}, {formTimestamp, "2016-01-01T10:30:00.123456", true},
+		{formTimestamp, "2016-01-01T10:30:00.1234567", false}, {formTimestamp, "2016-01-01T10:30:00Z", false},
+		{formTimestamp, "2016-01-01 ", false},
+		{formTime, "23:59:59", true}, {formTime, "24:00", false}, {formTime, "9:30", false},
+		{formTime, "10:00+02", false}, {formTimestampTz, "2016-01-01 10:00:00+00", true},
+		{formTimestampTz, "2016-01-01T10:00:00.5+05:30", true}, {formTimestampTz, "1890-01-01 00:00:00+00:53:28", true},
+		{formTimestampTz, "2016-01-01 10:00-0300", true}, {formTimestampTz, "2016-01-01 10:00Z", true},
+		{formTimestampTz, "2016-01-01", true}, {formTimestampTz, "2016-01-01Z", false},
+		{formTimestampTz, "2016-01-01 10:00+5", false}, {formTimestampTz, "2016-01-01 10:00+05:3", false},
+		{formTimeTz, "10:00:00+02", true}, {formTimeTz, "10:00", true}, {formTimeTz, "10:00+", false},
+	} {
+		if got := c.form.accepts(c.v); got != c.ok {
+			t.Errorf("%v accepts %q = %v, want %v", c.form, c.v, got, c.ok)
+		}
 	}
 }
 

@@ -3,7 +3,9 @@ package ashurbanipal
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // MaxFilterBytes bounds the URL-decoded filter JSON (spec/protocol.md §5.4.2).
@@ -12,24 +14,100 @@ const MaxFilterBytes = 8192
 // MaxConditions caps conditions per request (spec/protocol.md §5.4.2).
 const MaxConditions = 10
 
+// MaxInItems caps an IN list (spec/protocol.md §5.4.2).
+const MaxInItems = 1000
+
 // Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
 var validOps = map[string]bool{
 	"=": true, "!=": true, ">": true, "<": true, ">=": true, "<=": true,
-	"LIKE": true, "ILIKE": true, "IS NULL": true, "IS NOT NULL": true,
+	"LIKE": true, "ILIKE": true, "IN": true, "BETWEEN": true, "IS NULL": true, "IS NOT NULL": true,
 }
 
 func opTakesValue(op string) bool {
 	return op != "IS NULL" && op != "IS NOT NULL"
 }
 
-// Condition holds untrusted filter input; BuildWhereClause validates Column
+// opIsPattern: LIKE/ILIKE always compare the text cast, whatever the column's class.
+func opIsPattern(op string) bool {
+	return op == "LIKE" || op == "ILIKE"
+}
+
+// FilterValue is a condition's value: a JSON string for most ops, an array
+// of strings for IN and BETWEEN.
+type FilterValue struct {
+	Items []string
+	List  bool
+}
+
+// StringValue is the single-string value of a non-list op.
+func StringValue(v string) *FilterValue { return &FilterValue{Items: []string{v}} }
+
+func (v *FilterValue) UnmarshalJSON(b []byte) error {
+	trimmed := strings.TrimSpace(string(b))
+	if strings.HasPrefix(trimmed, "[") {
+		// Decoded as raw items first: encoding/json turns a null item into "".
+		var raw []json.RawMessage
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return err
+		}
+		items := make([]string, len(raw))
+		for i, r := range raw {
+			if !strings.HasPrefix(strings.TrimSpace(string(r)), `"`) {
+				return fmt.Errorf("list item %d is not a string", i)
+			}
+			if err := json.Unmarshal(r, &items[i]); err != nil {
+				return err
+			}
+		}
+		*v = FilterValue{Items: items, List: true}
+		return nil
+	}
+	var one string
+	if err := json.Unmarshal(b, &one); err != nil {
+		return err
+	}
+	*v = FilterValue{Items: []string{one}}
+	return nil
+}
+
+func (v FilterValue) MarshalJSON() ([]byte, error) {
+	if v.List {
+		return json.Marshal(v.Items)
+	}
+	return json.Marshal(v.Items[0])
+}
+
+// checkValueShape checks a value against its op (spec/protocol.md §5.4.2).
+func checkValueShape(op string, v *FilterValue) error {
+	switch {
+	case !opTakesValue(op) && v != nil:
+		return filterErr("op %q takes no value", op)
+	case !opTakesValue(op):
+		return nil
+	case v == nil:
+		return filterErr("op %q requires a value", op)
+	case op == "IN":
+		if !v.List || len(v.Items) < 1 || len(v.Items) > MaxInItems {
+			return filterErr("op \"IN\" needs an array of 1 to %d strings", MaxInItems)
+		}
+	case op == "BETWEEN":
+		if !v.List || len(v.Items) != 2 {
+			return filterErr("op \"BETWEEN\" needs an array of two strings, [low, high]")
+		}
+	case v.List:
+		return filterErr("op %q needs a string value", op)
+	}
+	return nil
+}
+
+// Condition holds untrusted filter input; tableWhereClause validates Column
 // against the live schema before SQL (spec/protocol.md §5.4.2).
 type Condition struct {
-	Logic  *string `json:"logic,omitempty"`
-	Not    bool    `json:"not,omitempty"`
-	Column string  `json:"column"`
-	Op     string  `json:"op"`
-	Value  *string `json:"value,omitempty"`
+	Logic  *string      `json:"logic,omitempty"`
+	Not    bool         `json:"not,omitempty"`
+	Column string       `json:"column"`
+	Op     string       `json:"op"`
+	Value  *FilterValue `json:"value,omitempty"`
 	// Join is a table position, accepted only by ParseFilterForJoin
 	// (spec/protocol.md §5.11.3).
 	Join *int `json:"join,omitempty"`
@@ -97,12 +175,8 @@ func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 		if !validOps[cond.Op] {
 			return nil, filterErr("condition %d has invalid op %q", i, cond.Op)
 		}
-		takesValue := opTakesValue(cond.Op)
-		if takesValue && cond.Value == nil {
-			return nil, filterErr("op %q requires a value", cond.Op)
-		}
-		if !takesValue && cond.Value != nil {
-			return nil, filterErr("op %q takes no value", cond.Op)
+		if err := checkValueShape(cond.Op, cond.Value); err != nil {
+			return nil, filterErr("condition %d: %s", i, err.(*FilterError).Reason)
 		}
 	}
 	return conditions, nil
@@ -127,80 +201,89 @@ func opSQL(op string) string {
 		return "LIKE"
 	case "ILIKE":
 		return "ILIKE"
+	case "IN":
+		return "IN"
+	case "BETWEEN":
+		return "BETWEEN"
 	case "IS NULL":
 		return "IS NULL"
 	case "IS NOT NULL":
 		return "IS NOT NULL"
 	default:
-		panic("opSQL called with an op BuildWhereClause's validOps check should have rejected: " + op)
+		panic("opSQL called with an op the validOps check should have rejected: " + op)
 	}
 }
 
-// BuildWhereClause renders conditions into a " where ..." SQL fragment
-// with $N placeholders (numbered from $3: $1/$2 are reserved for
-// limit/offset by QueryTable's caller) and the ordered bind values. Every
-// column is matched against columnNames (the live information_schema
-// allow-list) before being spliced in — the same discipline `sort` gets
-// (spec/protocol.md §6). Conditions are joined by their own logic tokens,
-// relying on SQL's native AND-tighter-than-OR precedence; there is no
-// grouping/nesting in the AST.
-func BuildWhereClause(conditions []Condition, columnNames []string) (string, []string, error) {
-	if len(conditions) == 0 {
-		return "", nil, nil
+// valueForm is the form a value compared in its column's own type must have
+// (spec/protocol.md §5.4.2).
+type valueForm int
+
+const (
+	formNumber valueForm = iota
+	formFloat
+	formDate
+	formTimestamp
+	formTimestampTz // may end in a time-zone offset (Postgres timestamptz)
+	formTime
+	formTimeTz // may end in a time-zone offset (Postgres timetz)
+)
+
+var (
+	numberRe    = regexp.MustCompile(`^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?$`)
+	floatRe     = regexp.MustCompile(`^[+-]?[0-9]{1,35}(\.[0-9]{1,30})?([eE][+-]?[0-9]{1,3})?$`)
+	timeRe      = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?$`)
+	timeTzRe    = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9](\.[0-9]{1,6})?)?(Z|[+-][0-9]{2}([0-9]{2}|:[0-9]{2}(:[0-9]{2})?)?)?$`)
+	dateRe      = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	timestampRe = regexp.MustCompile(`^([0-9]{4}-[0-9]{2}-[0-9]{2})([ T](.*))?$`)
+)
+
+// realDate reports whether a YYYY-MM-DD string names a day in years 0001-9999.
+func realDate(s string) bool {
+	if !dateRe.MatchString(s) || s[:4] == "0000" {
+		return false
 	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
 
-	allowed := make(map[string]bool, len(columnNames))
-	for _, c := range columnNames {
-		allowed[c] = true
+func (f valueForm) accepts(v string) bool {
+	switch f {
+	case formNumber:
+		return numberRe.MatchString(v)
+	case formFloat:
+		return floatRe.MatchString(v)
+	case formDate:
+		return realDate(v)
+	case formTimestamp, formTimestampTz:
+		tr := timeRe
+		if f == formTimestampTz {
+			tr = timeTzRe
+		}
+		m := timestampRe.FindStringSubmatch(v)
+		return m != nil && realDate(m[1]) && (m[2] == "" || tr.MatchString(m[3]))
+	case formTimeTz:
+		return timeTzRe.MatchString(v)
+	default:
+		return timeRe.MatchString(v)
 	}
+}
 
-	var values []string
-	var clause strings.Builder
-	nextParam := 3
-	for i, cond := range conditions {
-		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
-		}
-		// Defense in depth: BuildWhereClause is exported, so a future
-		// caller could feed it conditions straight from JSON without
-		// going through ParseFilter first — re-checking here is what
-		// makes opSQL's hardcoded table load-bearing, not decorative
-		// (PORTING.md hardening item 6).
-		if !validOps[cond.Op] {
-			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
-		}
-
-		quotedColumn := quoteIdent(cond.Column)
-		var inner string
-		if opTakesValue(cond.Op) {
-			if cond.Value == nil {
-				return "", nil, filterErr("op %q requires a value", cond.Op)
-			}
-			inner = fmt.Sprintf("%s::text %s $%d", quotedColumn, opSQL(cond.Op), nextParam)
-			values = append(values, *cond.Value)
-			nextParam++
-		} else {
-			inner = fmt.Sprintf("%s::text %s", quotedColumn, opSQL(cond.Op))
-		}
-
-		var wrapped string
-		if cond.Not {
-			wrapped = "(NOT (" + inner + "))"
-		} else {
-			wrapped = "(" + inner + ")"
-		}
-
-		if i > 0 {
-			if cond.Logic == nil {
-				return "", nil, filterErr("condition %d is missing logic", i)
-			}
-			if *cond.Logic == "OR" {
-				clause.WriteString(" OR ")
-			} else {
-				clause.WriteString(" AND ")
-			}
-		}
-		clause.WriteString(wrapped)
+// describe names the expected form in an error title.
+func (f valueForm) describe() string {
+	switch f {
+	case formNumber:
+		return "a decimal number such as -12 or 0.5"
+	case formFloat:
+		return "a number such as 0.5 or 1.5e-3"
+	case formDate:
+		return "a date such as 2016-01-31"
+	case formTimestamp:
+		return "a date such as 2016-01-31, optionally with a time such as 10:30:00"
+	case formTimestampTz:
+		return "a date such as 2016-01-31, optionally with a time such as 10:30:00 and an offset such as +02:00"
+	case formTimeTz:
+		return "a time such as 10:30, optionally with an offset such as +02:00"
+	default:
+		return "a time such as 10:30 or 10:30:00.5"
 	}
-	return " where " + clause.String(), values, nil
 }

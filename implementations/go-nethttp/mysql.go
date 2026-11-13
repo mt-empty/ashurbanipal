@@ -36,65 +36,6 @@ func quoteIdentMySQL(s string) string {
 	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
 }
 
-// mysqlBuildWhereClause maps ILIKE through LOWER for collation independence
-// (`spec/protocol.md` §5.4.2).
-func mysqlBuildWhereClause(conditions []Condition, columnNames []string) (string, []string, error) {
-	if len(conditions) == 0 {
-		return "", nil, nil
-	}
-	allowed := make(map[string]bool, len(columnNames))
-	for _, c := range columnNames {
-		allowed[c] = true
-	}
-
-	var values []string
-	var clause []byte
-	for i, cond := range conditions {
-		if !allowed[cond.Column] {
-			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", cond.Column)}
-		}
-		if !validOps[cond.Op] {
-			return "", nil, filterErr("condition %d has invalid op %q", i, cond.Op)
-		}
-		cast := fmt.Sprintf("CAST(%s AS CHAR)", quoteIdentMySQL(cond.Column))
-
-		var inner string
-		switch {
-		case cond.Op == "ILIKE":
-			if cond.Value == nil {
-				return "", nil, filterErr("op %q requires a value", cond.Op)
-			}
-			values = append(values, *cond.Value)
-			inner = fmt.Sprintf("LOWER(%s) LIKE LOWER(?)", cast)
-		case opTakesValue(cond.Op):
-			if cond.Value == nil {
-				return "", nil, filterErr("op %q requires a value", cond.Op)
-			}
-			values = append(values, *cond.Value)
-			inner = fmt.Sprintf("%s %s ?", cast, cond.Op)
-		default:
-			inner = fmt.Sprintf("%s %s", cast, cond.Op)
-		}
-
-		wrapped := "(" + inner + ")"
-		if cond.Not {
-			wrapped = "(NOT (" + inner + "))"
-		}
-		if i > 0 {
-			if cond.Logic == nil {
-				return "", nil, filterErr("condition %d is missing logic", i)
-			}
-			if *cond.Logic == "OR" {
-				clause = append(clause, " OR "...)
-			} else {
-				clause = append(clause, " AND "...)
-			}
-		}
-		clause = append(clause, wrapped...)
-	}
-	return " where " + string(clause), values, nil
-}
-
 // MySQLSource implements the MySQL backend (`spec/protocol.md` §5).
 type MySQLSource struct {
 	db         *sql.DB
@@ -125,10 +66,34 @@ func init() {
 }
 
 var mysqlJoinDialect = joinDialect{
-	quote:    quoteIdentMySQL,
-	castText: func(c string) string { return "CAST(" + c + " AS CHAR)" },
-	numbered: false,
-	ilike:    ilikeLoweredLike,
+	quote:     quoteIdentMySQL,
+	castText:  func(c string) string { return "CAST(" + c + " AS CHAR)" },
+	castParam: func(p, target string) string { return "CAST(" + p + " AS " + target + ")" },
+	numbered:  false,
+	ilike:     ilikeLoweredLike,
+}
+
+// mysqlTypedCompare is the typed filter comparison for an
+// information_schema.COLUMNS.DATA_TYPE (spec/protocol.md §5.4.2). A bare
+// DECIMAL cast is DECIMAL(10,0) and rounds; a temporal value is bound bare
+// because MySQL 8.4 compares a TIME column unequal to an equal
+// CAST(? AS TIME), and coerces a string to the column's own temporal type.
+func mysqlTypedCompare(dataType string) *typedCompare {
+	switch strings.ToLower(dataType) {
+	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric":
+		return &typedCompare{form: formNumber, cast: "DECIMAL(65,30)"}
+	case "float":
+		return &typedCompare{form: formFloat, cast: "FLOAT"}
+	case "double":
+		return &typedCompare{form: formFloat, cast: "DOUBLE"}
+	case "date":
+		return &typedCompare{form: formDate, cast: ""}
+	case "datetime", "timestamp":
+		return &typedCompare{form: formTimestamp, cast: ""}
+	case "time":
+		return &typedCompare{form: formTime, cast: ""}
+	}
+	return nil
 }
 
 // mysqlColumnClass maps information_schema types to spec/protocol.md
@@ -418,9 +383,12 @@ func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVa
 			return tableMeta{}, err
 		}
 		// column_type keeps what data_type drops: tinyint(1), int unsigned, an enum's members.
-		col := colMeta{name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType), comment: comment}
+		col := colMeta{
+			name: name, typeName: columnType, class: mysqlColumnClass(dataType, columnType),
+			compare: mysqlTypedCompare(dataType), comment: comment,
+		}
 		if jsonColumns[name] {
-			col.typeName, col.class = "json", classJSON
+			col.typeName, col.class, col.compare = "json", classJSON, nil
 		}
 		if collation.Valid {
 			cl := collation.String
@@ -738,7 +706,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	var whereClause string
 	var filterValues []string
 	if len(opts.Filter) > 0 {
-		whereClause, filterValues, err = mysqlBuildWhereClause(opts.Filter, columnNames)
+		whereClause, filterValues, err = tableWhereClause(opts.Filter, meta.columns, mysqlJoinDialect)
 		if err != nil {
 			return TableData{}, err
 		}
@@ -759,7 +727,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	// Identifiers spliced here are schema-validated (realSchema via
 	// resolveSchemaInTx, realTable/columns via allowedTablesInTx/
 	// allowedColumnsInTx, sort via the findExact check above, filter
-	// columns via mysqlBuildWhereClause's own allow-list check); every
+	// columns via tableWhereClause's own allow-list check); every
 	// value is a bound ? parameter.
 	sqlBody := fmt.Sprintf("%s from %s.%s%s%s limit ? offset ?",
 		selectList, quoteIdentMySQL(realSchema), quoteIdentMySQL(realTable), whereClause, orderClause)

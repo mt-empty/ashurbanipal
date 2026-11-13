@@ -459,7 +459,7 @@ func runMySQLJoinChecks(t *testing.T, source *MySQLSource) {
 	pattern, zero := "B@X.%", 0
 	one, err := source.QueryJoin(ctx, nil, left, JoinOpts{
 		Limit:  10,
-		Filter: []Condition{{Column: "email", Op: "ILIKE", Value: &pattern, Join: &zero}},
+		Filter: []Condition{{Column: "email", Op: "ILIKE", Value: StringValue(pattern), Join: &zero}},
 	})
 	if err != nil || len(one.Rows) != 1 {
 		t.Errorf("ILIKE on a joined column: %v %+v", err, one)

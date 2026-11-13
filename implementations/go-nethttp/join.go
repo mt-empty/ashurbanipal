@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -298,11 +299,38 @@ func (c columnClass) joinable() bool {
 
 func classEnum(enumType string) columnClass { return columnClass{kind: "enum", enumType: enumType} }
 
+// typedCompare is how a filter compares a column in its own type
+// (spec/protocol.md §5.4.2): the form a value must have, and the engine's cast
+// target for the bound value, from a hardcoded per-engine table ("" binds it
+// bare).
+type typedCompare struct {
+	form valueForm
+	cast string
+	// intCast is the target for a whole number that fits 64 bits, so an
+	// integer column keeps its index (Postgres compares int = numeric by
+	// converting the column).
+	intCast string
+	// unchecked skips the value check: SQLite does not enforce column types.
+	unchecked bool
+}
+
+// castFor is the cast target for one bound value.
+func (t *typedCompare) castFor(v string) string {
+	if t.intCast != "" {
+		if _, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return t.intCast
+		}
+	}
+	return t.cast
+}
+
 // colMeta is one column as the live catalog reports it.
 type colMeta struct {
-	name       string
-	typeName   string
-	class      columnClass
+	name     string
+	typeName string
+	class    columnClass
+	// compare is nil when filters compare the column's text cast.
+	compare    *typedCompare
 	collation  *string // set where two text collations can clash (spec/protocol.md §5.4.1)
 	key        KeyKind
 	references *ColumnRef
@@ -663,11 +691,14 @@ func planJoin(spec JoinSpec, tables []tableMeta, opts JoinOpts) (*joinPlan, erro
 		if !validOps[c.Op] {
 			return nil, filterErr("condition %d has invalid op %q", i, c.Op)
 		}
-		if opTakesValue(c.Op) != (c.Value != nil) {
-			return nil, filterErr("condition %d: op %q has the wrong value arity", i, c.Op)
+		if err := checkValueShape(c.Op, c.Value); err != nil {
+			return nil, filterErr("condition %d: %s", i, err.(*FilterError).Reason)
 		}
 		col, err := tables[pos].index(c.Column)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkTypedValues(tables[pos].columns[col], c); err != nil {
 			return nil, err
 		}
 		p.filter = append(p.filter, resolvedCondition{cond: c, pos: pos, col: col})
@@ -705,8 +736,145 @@ const (
 type joinDialect struct {
 	quote    func(string) string
 	castText func(string) string
-	numbered bool // $n placeholders (Postgres) instead of ?
-	ilike    ilikeStyle
+	// castParam converts a bound placeholder to a typedCompare cast target.
+	castParam func(placeholder, target string) string
+	numbered  bool // $n placeholders (Postgres) instead of ?
+	ilike     ilikeStyle
+}
+
+// checkTypedValues is the column-typed half of the spec/protocol.md §5.4.2
+// value check.
+func checkTypedValues(col colMeta, c Condition) error {
+	if col.compare == nil || col.compare.unchecked || c.Value == nil || opIsPattern(c.Op) {
+		return nil
+	}
+	for _, v := range c.Value.Items {
+		if !col.compare.form.accepts(v) {
+			return filterErr("value %q for column %q must be %s", v, col.name, col.compare.form.describe())
+		}
+	}
+	return nil
+}
+
+// filterTerm is one condition with its column resolved; expr is the column as SQL.
+type filterTerm struct {
+	cond Condition
+	expr string
+	col  colMeta
+}
+
+// filterSQL joins the conditions by their logic, without "where", and
+// returns the values in placeholder order. Numbered placeholders start at
+// $3, after limit and offset.
+func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
+	var values []string
+	next := 3
+	var clause strings.Builder
+	for i, t := range terms {
+		c := t.cond
+		typed := t.col.compare
+		if opIsPattern(c.Op) {
+			typed = nil
+		}
+		placeholder := func(v string) string {
+			p := "?"
+			if d.numbered {
+				p = fmt.Sprintf("$%d", next)
+				next++
+			}
+			if typed != nil {
+				if target := typed.castFor(v); target != "" {
+					return d.castParam(p, target)
+				}
+			}
+			return p
+		}
+		lhs := d.castText(t.expr)
+		if typed != nil {
+			lhs = t.expr
+		}
+		var items []string
+		if c.Value != nil {
+			items = c.Value.Items
+		}
+		var inner string
+		switch c.Op {
+		case "IS NULL", "IS NOT NULL":
+			inner = fmt.Sprintf("%s %s", t.expr, opSQL(c.Op))
+		case "IN":
+			list := make([]string, len(items))
+			for k, v := range items {
+				list[k] = placeholder(v)
+			}
+			inner = fmt.Sprintf("%s IN (%s)", lhs, strings.Join(list, ", "))
+		case "BETWEEN":
+			lo := placeholder(items[0])
+			inner = fmt.Sprintf("%s BETWEEN %s AND %s", lhs, lo, placeholder(items[1]))
+		case "ILIKE":
+			switch d.ilike {
+			case ilikeNative:
+				inner = fmt.Sprintf("%s ILIKE %s", lhs, placeholder(items[0]))
+			case ilikeLike:
+				inner = fmt.Sprintf("%s LIKE %s", lhs, placeholder(items[0]))
+			default:
+				inner = fmt.Sprintf("LOWER(%s) LIKE LOWER(%s)", lhs, placeholder(items[0]))
+			}
+		default:
+			inner = fmt.Sprintf("%s %s %s", lhs, opSQL(c.Op), placeholder(items[0]))
+		}
+		values = append(values, items...)
+		if i > 0 {
+			if c.Logic != nil && *c.Logic == "OR" {
+				clause.WriteString(" OR ")
+			} else {
+				clause.WriteString(" AND ")
+			}
+		}
+		if c.Not {
+			clause.WriteString("(NOT (" + inner + "))")
+		} else {
+			clause.WriteString("(" + inner + ")")
+		}
+	}
+	return clause.String(), values
+}
+
+// tableWhereClause renders the data route's " where …" ("" without
+// conditions) and its values, with each condition's column checked against
+// the live catalog's columns (spec/protocol.md §5.4.2).
+func tableWhereClause(conditions []Condition, columns []colMeta, d joinDialect) (string, []string, error) {
+	terms := make([]filterTerm, 0, len(conditions))
+	for i, c := range conditions {
+		idx := -1
+		for k, col := range columns {
+			if col.name == c.Column {
+				idx = k
+				break
+			}
+		}
+		if idx < 0 {
+			return "", nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", c.Column)}
+		}
+		// Defends the SQL boundary when a caller bypasses ParseFilter.
+		if !validOps[c.Op] {
+			return "", nil, filterErr("condition %d has invalid op %q", i, c.Op)
+		}
+		if err := checkValueShape(c.Op, c.Value); err != nil {
+			return "", nil, filterErr("condition %d: %s", i, err.(*FilterError).Reason)
+		}
+		if i > 0 && c.Logic == nil {
+			return "", nil, filterErr("condition %d is missing logic", i)
+		}
+		if err := checkTypedValues(columns[idx], c); err != nil {
+			return "", nil, err
+		}
+		terms = append(terms, filterTerm{cond: c, expr: d.quote(columns[idx].name), col: columns[idx]})
+	}
+	clause, values := filterSQL(terms, d)
+	if clause == "" {
+		return "", values, nil
+	}
+	return " where " + clause, values, nil
 }
 
 // buildJoinSelect renders "<select list> from … limit … offset …" (no
@@ -746,53 +914,13 @@ func buildJoinSelect(p *joinPlan, d joinDialect) (string, []string) {
 		sb.WriteString(fmt.Sprintf(" %s %s on %s", kind, fromItem(position), strings.Join(conds, " and ")))
 	}
 
-	var values []string
-	next := 3
-	placeholder := func() string {
-		if d.numbered {
-			s := fmt.Sprintf("$%d", next)
-			next++
-			return s
-		}
-		return "?"
-	}
-	var clause strings.Builder
+	terms := make([]filterTerm, len(p.filter))
 	for i, rc := range p.filter {
-		c := rc.cond
-		cast := d.castText(alias(rc.pos, rc.col))
-		var inner string
-		switch {
-		case !opTakesValue(c.Op):
-			inner = fmt.Sprintf("%s %s", cast, opSQL(c.Op))
-		case c.Op == "ILIKE":
-			values = append(values, *c.Value)
-			switch d.ilike {
-			case ilikeNative:
-				inner = fmt.Sprintf("%s ILIKE %s", cast, placeholder())
-			case ilikeLike:
-				inner = fmt.Sprintf("%s LIKE %s", cast, placeholder())
-			default:
-				inner = fmt.Sprintf("LOWER(%s) LIKE LOWER(%s)", cast, placeholder())
-			}
-		default:
-			values = append(values, *c.Value)
-			inner = fmt.Sprintf("%s %s %s", cast, opSQL(c.Op), placeholder())
-		}
-		if i > 0 {
-			if c.Logic != nil && *c.Logic == "OR" {
-				clause.WriteString(" OR ")
-			} else {
-				clause.WriteString(" AND ")
-			}
-		}
-		if c.Not {
-			clause.WriteString("(NOT (" + inner + "))")
-		} else {
-			clause.WriteString("(" + inner + ")")
-		}
+		terms[i] = filterTerm{cond: rc.cond, expr: alias(rc.pos, rc.col), col: p.tables[rc.pos].columns[rc.col]}
 	}
-	if clause.Len() > 0 {
-		sb.WriteString(" where " + clause.String())
+	clause, values := filterSQL(terms, d)
+	if clause != "" {
+		sb.WriteString(" where " + clause)
 	}
 	sb.WriteString(orderByClause(p.sort, joinOrderKeys(p.tables, p.ons), p.descending, func(k [2]int) string { return alias(k[0], k[1]) }))
 	if d.numbered {

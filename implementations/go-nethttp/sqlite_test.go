@@ -552,7 +552,7 @@ func TestSQLiteJoinFilterSortAndRejections(t *testing.T) {
 	like, one, sort := "a@%", 1, "email"
 	data, err := source.QueryJoin(ctx, nil, three, JoinOpts{
 		Limit: 10, Sort: &sort, SortJoin: &one,
-		Filter: []Condition{{Column: "email", Op: "LIKE", Value: &like, Join: &one}},
+		Filter: []Condition{{Column: "email", Op: "LIKE", Value: StringValue(like), Join: &one}},
 	})
 	if err != nil || len(data.Rows) != 1 || *data.Rows[0]["gift_message"] != "enjoy!" {
 		t.Fatalf("three-table join: %v %+v", err, data)
