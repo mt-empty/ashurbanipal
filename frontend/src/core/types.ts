@@ -93,7 +93,19 @@ export interface StructureResponse {
   };
 }
 
-export type FilterOp = "=" | "!=" | ">" | ">=" | "<" | "<=" | "LIKE" | "ILIKE" | "IS NULL" | "IS NOT NULL";
+export type FilterOp =
+  | "="
+  | "!="
+  | ">"
+  | ">="
+  | "<"
+  | "<="
+  | "LIKE"
+  | "ILIKE"
+  | "IN"
+  | "BETWEEN"
+  | "IS NULL"
+  | "IS NOT NULL";
 
 export interface FilterCondition {
   logic?: "AND" | "OR";
@@ -102,7 +114,8 @@ export interface FilterCondition {
   join?: number;
   column: string;
   op: FilterOp;
-  value?: string;
+  // A string for most ops; the items for IN, [lo, hi] for BETWEEN.
+  value?: string | string[];
 }
 
 export interface CommonValue {

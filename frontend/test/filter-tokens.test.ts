@@ -119,3 +119,36 @@ test("a last word that could still grow into a valid one is unfinished", () => {
   for (const text of ["", "status ", "status = completed oops", "a = 1 x", "status Q", "a IS x"])
     assert.equal(endsInUnfinishedWord(text), false, text);
 });
+
+test("IN lists and BETWEEN bounds: operators, punctuation and values", () => {
+  assert.deepEqual(kinds("id NOT IN (1,'a b') AND t BETWEEN 1 AND 2"), [
+    "column:id",
+    "keyword:NOT",
+    "op:IN",
+    "op:(",
+    "value:1",
+    "op:,",
+    "value:'a b'",
+    "op:)",
+    "keyword:AND",
+    "column:t",
+    "op:BETWEEN",
+    "value:1",
+    "keyword:AND",
+    "value:2",
+  ]);
+  assert.deepEqual(kinds("id IN ()"), ["column:id", "op:IN", "op:(", "plain:)"]);
+});
+
+test("completion inside IN lists and BETWEEN", () => {
+  assert.equal(at("id IN (").expect, "listItem");
+  assert.deepEqual(at("id IN (1, 2"), { expect: "listItem", partial: "2", head: "id IN (1, ", column: "id" });
+  assert.equal(at("id IN (1 ").expect, "listNext");
+  assert.equal(at("id IN (1) ").expect, "joiner");
+  assert.equal(at("id NOT ").expect, "notTail");
+  assert.equal(at("t BETWEEN ").expect, "lowBound");
+  assert.equal(at("t BETWEEN 1 ").expect, "boundAnd");
+  assert.equal(at("t BETWEEN 1 AND ").expect, "value");
+  for (const text of ["id N", "id NOT I", "id NOT B", "t BETWEEN 1 A"])
+    assert.equal(endsInUnfinishedWord(text), true, text);
+});

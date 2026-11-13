@@ -7,9 +7,27 @@ import type { FilterOp } from "../core/types.js";
 export type TokenKind = "column" | "op" | "value" | "keyword" | "space" | "plain";
 
 // What the grammar allows next: a column (after start/AND/OR/NOT), an operator
-// (after a column), the tail of IS [NOT] NULL, a value, AND/OR, or nothing
-// ("error": the text already left the grammar).
-export type Expect = "column" | "operator" | "isTail" | "value" | "joiner" | "error";
+// (after a column), the tail of IS [NOT] NULL, IN or BETWEEN after a NOT, an
+// IN list's "(", item or "," / ")", a BETWEEN's low bound or its AND, a value,
+// AND/OR, or nothing ("error": the text already left the grammar).
+export type Expect =
+  | "column"
+  | "operator"
+  | "isTail"
+  | "notTail"
+  | "listOpen"
+  | "listItem"
+  | "listNext"
+  | "lowBound"
+  | "boundAnd"
+  | "value"
+  | "joiner"
+  | "error";
+
+// The states in which the next token is a value.
+export function expectsValue(expect: Expect): boolean {
+  return expect === "value" || expect === "listItem" || expect === "lowBound";
+}
 
 export interface Token {
   kind: TokenKind;
@@ -42,7 +60,7 @@ function keywordAt(text: string, i: number, keyword: string): boolean {
 
 export function tokenizeFilterDsl(text: string): Tokenized {
   const tokens: Token[] = [];
-  let expect: Expect = "column";
+  let expect = "column" as Expect;
   let column: string | null = null;
   let i = 0;
   const push = (kind: TokenKind, start: number, end: number, next: Expect): void => {
@@ -74,11 +92,25 @@ export function tokenizeFilterDsl(text: string): Tokenized {
         column = name;
         continue;
       }
-    } else if (expect === "operator") {
-      if (keywordAt(text, i, "IS")) {
+    } else if (expect === "operator" || expect === "notTail") {
+      if (expect === "operator" && keywordAt(text, i, "IS")) {
         push("keyword", s, i + 2, "isTail");
         continue;
       }
+      if (expect === "operator" && keywordAt(text, i, "NOT")) {
+        push("keyword", s, i + 3, "notTail");
+        continue;
+      }
+      if (keywordAt(text, i, "IN")) {
+        push("op", s, i + 2, "listOpen");
+        continue;
+      }
+      if (keywordAt(text, i, "BETWEEN")) {
+        push("op", s, i + 7, "lowBound");
+        continue;
+      }
+    }
+    if (expect === "operator") {
       const word = keywordAt(text, i, "ILIKE") ? "ILIKE" : keywordAt(text, i, "LIKE") ? "LIKE" : null;
       const symbol = SYMBOLS.find((sym) => text.startsWith(sym, i));
       const op = word ?? symbol;
@@ -95,7 +127,17 @@ export function tokenizeFilterDsl(text: string): Tokenized {
         push("keyword", s, i + 4, "joiner");
         continue;
       }
-    } else if (expect === "value") {
+    } else if (expect === "listOpen" && text[i] === "(") {
+      push("op", s, i + 1, "listItem");
+      continue;
+    } else if (expect === "listNext" && (text[i] === "," || text[i] === ")")) {
+      push("op", s, i + 1, text[i] === "," ? "listItem" : "joiner");
+      continue;
+    } else if (expect === "boundAnd" && keywordAt(text, i, "AND")) {
+      push("keyword", s, i + 3, "value");
+      continue;
+    } else if (expectsValue(expect) && !(expect === "listItem" && /[,()]/.test(text[i]))) {
+      const inList = expect === "listItem";
       let j = i;
       if (text[i] === "'") {
         j = i + 1;
@@ -108,9 +150,9 @@ export function tokenizeFilterDsl(text: string): Tokenized {
           }
         }
       } else {
-        while (j < text.length && !isSpace(text[j]) && text[j] !== "'") j++;
+        while (j < text.length && !isSpace(text[j]) && text[j] !== "'" && !(inList && /[,()]/.test(text[j]))) j++;
       }
-      push("value", s, j, "joiner");
+      push("value", s, j, inList ? "listNext" : expect === "lowBound" ? "boundAnd" : "joiner");
       continue;
     } else if (expect === "joiner") {
       const word = keywordAt(text, i, "AND") ? "AND" : keywordAt(text, i, "OR") ? "OR" : null;
@@ -141,7 +183,9 @@ export interface Completion {
 export function completionAt(text: string): Completion {
   const { tokens, expect, column } = tokenizeFilterDsl(text);
   const last = tokens.at(-1);
-  if (!last || last.kind === "space") return { expect, partial: "", head: text, column };
+  // A list's ( or , is complete on its own, like a space.
+  const punct = last?.kind === "op" && (text[last.start] === "(" || text[last.start] === ",");
+  if (!last || last.kind === "space" || punct) return { expect, partial: "", head: text, column };
   return {
     expect: last.expect,
     partial: text.slice(last.start),
@@ -159,15 +203,19 @@ const FILTER_OPERATORS: readonly FilterOp[] = [
   "<=",
   "LIKE",
   "ILIKE",
+  "IN",
+  "BETWEEN",
   "IS NULL",
   "IS NOT NULL",
 ];
 
 // The words the grammar accepts next, for the tokens that are keywords.
 export function optionsFor(expect: Expect): readonly string[] {
-  if (expect === "operator") return FILTER_OPERATORS;
+  if (expect === "operator") return [...FILTER_OPERATORS, "NOT IN", "NOT BETWEEN"];
   if (expect === "joiner") return ["AND", "OR"];
   if (expect === "isTail") return ["NULL", "NOT NULL"];
+  if (expect === "notTail") return ["IN", "BETWEEN"];
+  if (expect === "boundAnd") return ["AND"];
   return [];
 }
 

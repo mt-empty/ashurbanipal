@@ -48,7 +48,7 @@ const typeOps = quoted(cap(/export type FilterOp\s*=\s*([^;]+);/, types));
 const refOps = quoted(cap(/operators:\s*(\[[^\]]*\])/, apiRef));
 const demoOps = quoted(cap(/VALID_OPS\s*=\s*new Set<FilterOp>\(\s*(\[[^\]]*\])/, demoServe));
 
-if (specOps.length !== 10) fail("could not read the op enum from spec/openapi.yaml");
+if (specOps.length !== 12) fail("could not read the op enum from spec/openapi.yaml");
 if (!sameSet(typeOps, specOps))
   fail(`types.ts FilterOp ${JSON.stringify(sortU(typeOps))} != spec/openapi.yaml op enum ${JSON.stringify(sortU(specOps))}`);
 if (!sameSet(refOps, specOps))

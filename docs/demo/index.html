@@ -182,12 +182,29 @@
     if (typeClass === "date") return new Date(a).getTime() - new Date(b).getTime();
     return a < b ? -1 : a > b ? 1 : 0;
   }
-  var VALID_OPS = /* @__PURE__ */ new Set(["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"]);
+  var VALID_OPS = /* @__PURE__ */ new Set([
+    "=",
+    "!=",
+    ">",
+    "<",
+    ">=",
+    "<=",
+    "LIKE",
+    "ILIKE",
+    "IN",
+    "BETWEEN",
+    "IS NULL",
+    "IS NOT NULL"
+  ]);
   function likeToRegExp(pattern, ci) {
     const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*").replace(/_/g, ".");
     return new RegExp(`^${escaped}$`, ci ? "i" : "");
   }
   function matches(col, cell, cond) {
+    const items = cond.value === void 0 ? [] : Array.isArray(cond.value) ? cond.value : [cond.value];
+    const bucket = columnTypeClass(col);
+    const typed = bucket === "number" || bucket === "date";
+    const equal = (v) => cell !== null && (typed ? typedCompare(col, cell, v) === 0 : cell === v);
     let result;
     switch (cond.op) {
       case "IS NULL":
@@ -197,14 +214,20 @@
         result = cell !== null;
         break;
       case "=":
-        result = cell !== null && cell === cond.value;
+        result = equal(items[0]);
         break;
       case "!=":
-        result = cell === null || cell !== cond.value;
+        result = cell === null || !equal(items[0]);
+        break;
+      case "IN":
+        result = items.some(equal);
+        break;
+      case "BETWEEN":
+        result = cell !== null && typedCompare(col, cell, items[0]) >= 0 && typedCompare(col, cell, items[1]) <= 0;
         break;
       case "LIKE":
       case "ILIKE":
-        result = cell !== null && likeToRegExp(cond.value ?? "", cond.op === "ILIKE").test(cell);
+        result = cell !== null && likeToRegExp(items[0] ?? "", cond.op === "ILIKE").test(cell);
         break;
       case ">":
       case "<":
@@ -214,7 +237,7 @@
           result = false;
           break;
         }
-        const cmp = typedCompare(col, cell, cond.value ?? "");
+        const cmp = typedCompare(col, cell, items[0] ?? "");
         result = cond.op === ">" ? cmp > 0 : cond.op === "<" ? cmp < 0 : cond.op === ">=" ? cmp >= 0 : cmp <= 0;
         break;
       }
@@ -1821,21 +1844,24 @@ function buildApiReference() {
     ],
     filter: {
       wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, op, value?}, ...]",
-      operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IS NULL", "IS NOT NULL"],
+      operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"],
       limits: { max_conditions: 10, max_json_bytes: 8192 },
       notes: [
         '`logic` ("AND" | "OR") must be absent on the first condition and present on every later one; AND binds tighter than OR (SQL precedence \u2014 no parentheses/nesting exist).',
         "`not: true` negates its single condition; optional, defaults to false.",
-        "`value` is always a JSON string, required except for IS NULL / IS NOT NULL, which take none.",
-        "columns are cast to text before comparison, so the same operators work regardless of the column's real type (UUID, timestamp, JSON, etc.) \u2014 but '>'/'<'/'>='/'<=' then compare lexicographically as text, not numerically: a filter like age > 9 will incorrectly exclude age = 10.",
+        "`value` is a JSON string, except: IN takes an array of 1 to 1000 strings, BETWEEN takes [low, high] (inclusive), and IS NULL / IS NOT NULL take none. There is no NOT IN op \u2014 use `not: true` with IN.",
+        "a column whose `class` is number, float, temporal or time compares in its own type for every operator except LIKE/ILIKE, so age > 9 includes 10 and price = 1 matches 1.00. Its value must look like one: a decimal number (no exponent; float also allows one), YYYY-MM-DD for a date, an optional HH:MM[:SS[.ffffff]] after it for a timestamp, HH:MM[:SS[.ffffff]] for a time. A value is read in the database session's time zone; an offset (+02:00, Z) is allowed only on a column whose type has a time zone (Postgres timestamptz/timetz), which renders its own values with one \u2014 anything else is a 400 invalid_filter.",
+        "every other column (text, uuid, json, enum, boolean, ...) and every LIKE/ILIKE compares as text: the column's text rendering, so a boolean is true/false on Postgres but 1/0 on MySQL and SQLite.",
         "an empty condition array is treated identically to an absent `filter` param.",
         "on GET /tables/join a condition may carry `join` (the table position, default 0); on GET /tables/data any `join` is a 400.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON \u2014 exceeding either is a 400.",
-        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text and compiles it to this AST client-side \u2014 DSL text sent as the `filter` param is a 400."
+        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text (plus `column [NOT] IN (a, b)` and `column [NOT] BETWEEN lo AND hi`) and compiles it to this AST client-side \u2014 DSL text sent as the `filter` param is a 400."
       ],
       example: [
         { column: "status", op: "=", value: "completed" },
         { logic: "AND", not: true, column: "created_at", op: ">", value: "2016-01-01" },
+        { logic: "AND", column: "id", op: "IN", value: ["7", "9"] },
+        { logic: "OR", column: "total_cents", op: "BETWEEN", value: ["100", "5000"] },
         { logic: "OR", column: "deleted_at", op: "IS NULL" }
       ]
     }
@@ -1988,6 +2014,40 @@ function parseFilterDsl(input2, aliases) {
       throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
     return value;
   };
+  const parseValue = () => peek() === "'" ? parseQuotedValue() : parseBareValue();
+  const parseListItem = () => {
+    if (peek() === "'") return parseQuotedValue();
+    const start = pos;
+    let c = peek();
+    while (c !== null && !isWs(c) && c !== "'" && c !== "," && c !== "(" && c !== ")") {
+      pos += c.length;
+      c = peek();
+    }
+    const value = input2.slice(start, pos);
+    if (value === "") throw err("expected value", start);
+    if (RESERVED_WORD_RE.test(value))
+      throw err(`bare ${value} is always a keyword here; quote it to use as a value`, start);
+    if (/^NULL$/i.test(value)) throw err("NULL cannot be in a list; use IS NULL", start);
+    return value;
+  };
+  const parseList = () => {
+    skipWsOptional();
+    if (peek() !== "(") throw err("expected ( to start the list", pos);
+    pos += 1;
+    skipWsOptional();
+    if (peek() === ")") throw err("empty list", pos);
+    const items = [];
+    for (; ; ) {
+      items.push(parseListItem());
+      skipWsOptional();
+      const c = peek();
+      if (c === null) throw err("unterminated list", pos);
+      pos += 1;
+      if (c === ")") return items;
+      if (c !== ",") throw err("expected , or )", pos - 1);
+      skipWsOptional();
+    }
+  };
   const parseOperator = () => {
     const start = pos;
     if (consumeKeyword("ILIKE")) return "ILIKE";
@@ -1998,7 +2058,7 @@ function parseFilterDsl(input2, aliases) {
         return sym;
       }
     }
-    throw err("expected operator (one of = != >= <= > < LIKE ILIKE, or IS [NOT] NULL)", start);
+    throw err("expected operator (one of = != >= <= > < LIKE ILIKE IN BETWEEN, or IS [NOT] NULL)", start);
   };
   const parseSimpleCondition = () => {
     const { column, join } = parseColumn();
@@ -2013,24 +2073,42 @@ function parseFilterDsl(input2, aliases) {
         if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
         return { column, join, op: isNot ? "IS NOT NULL" : "IS NULL" };
       }
+      const notStart = pos;
+      const negated = consumeKeyword("NOT");
+      if (negated) skipWsRequired();
+      const wordOp = () => {
+        if (consumeKeyword("IN")) return { column, join, op: "IN", value: parseList() };
+        if (!consumeKeyword("BETWEEN")) return null;
+        skipWsRequired();
+        const lo = parseValue();
+        skipWsRequired();
+        if (!consumeKeyword("AND")) throw err("expected AND between the BETWEEN bounds", pos);
+        skipWsRequired();
+        return { column, join, op: "BETWEEN", value: [lo, parseValue()] };
+      };
+      const simple = wordOp();
+      if (simple) return negated ? { ...simple, not: true } : simple;
+      if (negated) throw err("NOT here must be followed by IN or BETWEEN", notStart);
       pos = afterColumn;
     }
     skipWsOptional();
     const op = parseOperator();
     skipWsOptional();
-    const value = peek() === "'" ? parseQuotedValue() : parseBareValue();
-    return { column, join, op, value };
+    return { column, join, op, value: parseValue() };
   };
   const conditions = [];
   let pendingLogic = null;
   for (; ; ) {
     let not = false;
+    const notStart = pos;
     if (matchKeyword("NOT")) {
       pos += 3;
       skipWsRequired();
       not = true;
     }
     const simple = parseSimpleCondition();
+    if (not && simple.not) throw err("double negation", notStart);
+    not = not || simple.not === true;
     const condition = {
       ...pendingLogic ? { logic: pendingLogic } : {},
       ...not ? { not: true } : {},
@@ -2062,6 +2140,9 @@ function tryParseFilterDsl(input2, aliases) {
 function quoteFilterValue(value) {
   if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
   return `'${value.replace(/'/g, "''")}'`;
+}
+function quoteListItem(value) {
+  return /[,()]/.test(value) || /^NULL$/i.test(value) ? `'${value.replace(/'/g, "''")}'` : quoteFilterValue(value);
 }
 function filterClause(column, op, value) {
   return value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
@@ -3622,6 +3703,9 @@ function resetColumnWidths() {
 }
 
 // src/lib/filter-tokens.ts
+function expectsValue(expect) {
+  return expect === "value" || expect === "listItem" || expect === "lowBound";
+}
 var SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
 var IDENT = /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")\.[A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*/y;
 var WORD_CHAR = /[\p{L}\p{N}_]/u;
@@ -3663,11 +3747,25 @@ function tokenizeFilterDsl(text) {
         column = name;
         continue;
       }
-    } else if (expect === "operator") {
-      if (keywordAt(text, i, "IS")) {
+    } else if (expect === "operator" || expect === "notTail") {
+      if (expect === "operator" && keywordAt(text, i, "IS")) {
         push("keyword", s, i + 2, "isTail");
         continue;
       }
+      if (expect === "operator" && keywordAt(text, i, "NOT")) {
+        push("keyword", s, i + 3, "notTail");
+        continue;
+      }
+      if (keywordAt(text, i, "IN")) {
+        push("op", s, i + 2, "listOpen");
+        continue;
+      }
+      if (keywordAt(text, i, "BETWEEN")) {
+        push("op", s, i + 7, "lowBound");
+        continue;
+      }
+    }
+    if (expect === "operator") {
       const word = keywordAt(text, i, "ILIKE") ? "ILIKE" : keywordAt(text, i, "LIKE") ? "LIKE" : null;
       const symbol = SYMBOLS.find((sym) => text.startsWith(sym, i));
       const op = word ?? symbol;
@@ -3684,7 +3782,17 @@ function tokenizeFilterDsl(text) {
         push("keyword", s, i + 4, "joiner");
         continue;
       }
-    } else if (expect === "value") {
+    } else if (expect === "listOpen" && text[i] === "(") {
+      push("op", s, i + 1, "listItem");
+      continue;
+    } else if (expect === "listNext" && (text[i] === "," || text[i] === ")")) {
+      push("op", s, i + 1, text[i] === "," ? "listItem" : "joiner");
+      continue;
+    } else if (expect === "boundAnd" && keywordAt(text, i, "AND")) {
+      push("keyword", s, i + 3, "value");
+      continue;
+    } else if (expectsValue(expect) && !(expect === "listItem" && /[,()]/.test(text[i]))) {
+      const inList = expect === "listItem";
       let j2 = i;
       if (text[i] === "'") {
         j2 = i + 1;
@@ -3697,9 +3805,9 @@ function tokenizeFilterDsl(text) {
           }
         }
       } else {
-        while (j2 < text.length && !isSpace(text[j2]) && text[j2] !== "'") j2++;
+        while (j2 < text.length && !isSpace(text[j2]) && text[j2] !== "'" && !(inList && /[,()]/.test(text[j2]))) j2++;
       }
-      push("value", s, j2, "joiner");
+      push("value", s, j2, inList ? "listNext" : expect === "lowBound" ? "boundAnd" : "joiner");
       continue;
     } else if (expect === "joiner") {
       const word = keywordAt(text, i, "AND") ? "AND" : keywordAt(text, i, "OR") ? "OR" : null;
@@ -3718,7 +3826,8 @@ function tokenizeFilterDsl(text) {
 function completionAt(text) {
   const { tokens, expect, column } = tokenizeFilterDsl(text);
   const last = tokens.at(-1);
-  if (!last || last.kind === "space") return { expect, partial: "", head: text, column };
+  const punct = last?.kind === "op" && (text[last.start] === "(" || text[last.start] === ",");
+  if (!last || last.kind === "space" || punct) return { expect, partial: "", head: text, column };
   return {
     expect: last.expect,
     partial: text.slice(last.start),
@@ -3735,13 +3844,17 @@ var FILTER_OPERATORS = [
   "<=",
   "LIKE",
   "ILIKE",
+  "IN",
+  "BETWEEN",
   "IS NULL",
   "IS NOT NULL"
 ];
 function optionsFor(expect) {
-  if (expect === "operator") return FILTER_OPERATORS;
+  if (expect === "operator") return [...FILTER_OPERATORS, "NOT IN", "NOT BETWEEN"];
   if (expect === "joiner") return ["AND", "OR"];
   if (expect === "isTail") return ["NULL", "NOT NULL"];
+  if (expect === "notTail") return ["IN", "BETWEEN"];
+  if (expect === "boundAnd") return ["AND"];
   return [];
 }
 function endsInUnfinishedWord(text) {
@@ -6504,13 +6617,16 @@ function updateFilterSuggestions() {
     if (columnNamed(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
     showFilterSuggestions(ctx, plain(optionsFor("joiner")));
-  } else if (ctx.expect === "value") {
+  } else if (ctx.expect === "notTail" || ctx.expect === "boundAnd") {
+    showFilterSuggestions(ctx, plain(optionsFor(ctx.expect)));
+  } else if (expectsValue(ctx.expect)) {
+    const quote = ctx.expect === "listItem" ? quoteListItem : quoteFilterValue;
     const col = columnNamed(ctx.column);
     const source = col && commonValueSource(col);
     if (source) {
       commonValuesFor(source.table, source.column).then((values) => {
         if (token !== suggest.token() || document.activeElement !== input2) return;
-        const rows = values.map((value) => ({ label: value, insert: quoteFilterValue(value) }));
+        const rows = values.map((value) => ({ label: value, insert: quote(value) }));
         showFilterSuggestions(ctx, rows);
       });
     }
