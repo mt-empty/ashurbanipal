@@ -40,6 +40,41 @@ class JoinSupportTest {
         assertEquals(emptyList<Int>(), tieBreakKeys(cols, emptyList()))
     }
 
+    private fun keyed(name: String, cols: List<Pair<String, String>>, vararg key: Int) =
+        TableMeta(name, cols.map { (n, t) -> col(n, t, ColumnClass.NUMBER) }, null, key.toList())
+
+    private fun i(n: String) = n to "int4"
+
+    @Test
+    fun `join order keys leave out a key bound to a fixed table`() {
+        val a = keyed("a", listOf(i("id"), i("b_id")), 0)
+        assertEquals(listOf(0 to 0), joinOrderKeys(listOf(a, keyed("b", listOf(i("id")), 0)), listOf(listOf(Triple(0, 1, 0)))))
+        // Composite, bound column by column.
+        val a3 = keyed("a", listOf(i("id"), i("x"), i("y")), 0)
+        val b2 = keyed("b", listOf(i("x"), i("y")), 0, 1)
+        assertEquals(listOf(0 to 0), joinOrderKeys(listOf(a3, b2), listOf(listOf(Triple(0, 2, 1), Triple(0, 1, 0)))))
+        // Partly bound.
+        val ax = keyed("a", listOf(i("id"), i("x")), 0)
+        assertEquals(listOf(0 to 0, 1 to 0, 1 to 1), joinOrderKeys(listOf(ax, b2), listOf(listOf(Triple(0, 1, 0)))))
+        // Across types or collations.
+        val wide = keyed("a", listOf(i("id"), "b_id" to "int8"), 0)
+        assertEquals(listOf(0 to 0, 1 to 0), joinOrderKeys(listOf(wide, keyed("b", listOf(i("id")), 0)), listOf(listOf(Triple(0, 1, 0)))))
+        val base = keyed("a", listOf(i("id"), "b_code" to "text"), 0)
+        val collated = base.copy(columns = listOf(base.columns[0], base.columns[1].copy(collation = "C")))
+        val coded = keyed("b", listOf("code" to "text"), 0)
+        assertEquals(listOf(0 to 0, 1 to 0), joinOrderKeys(listOf(collated, coded), listOf(listOf(Triple(0, 1, 0)))))
+        // Bound to a keyless table.
+        val keyless = keyed("v", listOf(i("b_id")))
+        assertEquals(listOf(1 to 0), joinOrderKeys(listOf(keyless, keyed("b", listOf(i("id")), 0)), listOf(listOf(Triple(0, 0, 0)))))
+        // A left-out table still fixes its row for later joins.
+        val chain = listOf(a, keyed("b", listOf(i("id"), i("c_id")), 0), keyed("c", listOf(i("id")), 0))
+        assertEquals(listOf(0 to 0), joinOrderKeys(chain, listOf(listOf(Triple(0, 1, 0)), listOf(Triple(1, 1, 0)))))
+        // One binding from a fixed table is enough.
+        val mixed = listOf(keyless, a, keyed("b", listOf(i("id")), 0))
+        val ons = listOf(listOf(Triple(0, 0, 1)), listOf(Triple(0, 0, 0), Triple(1, 1, 0)))
+        assertEquals(listOf(1 to 0), joinOrderKeys(mixed, ons))
+    }
+
     @Test
     fun `a key with an unusable part is dropped`() {
         val parts = listOf(KeyPart("a", false, "x", true), KeyPart("a", false, "y", false), KeyPart("b", false, "x", true))
@@ -182,7 +217,7 @@ class JoinSupportTest {
         assertTrue(body.startsWith("t0.\"id\"::text as c0, "), body)
         assertTrue(body.contains(" from \"public\".\"orders\" t0 left join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\""), body)
         assertTrue(body.contains(" where (t1.\"email\"::text = ?) OR (NOT (t0.\"status\"::text IS NULL))"), body)
-        assertTrue(body.endsWith(" order by t1.\"email\" asc, t0.\"id\" asc, t1.\"id\" asc limit ? offset ?"), body)
+        assertTrue(body.endsWith(" order by t1.\"email\" asc, t0.\"id\" asc limit ? offset ?"), body)
         assertEquals(listOf("a@b.c"), values)
     }
 

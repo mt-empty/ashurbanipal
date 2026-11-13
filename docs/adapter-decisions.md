@@ -302,10 +302,14 @@ how a native type reaches a class is not. The `float`, `json`, `array` and
 **Statement shape.** `ON` compares the columns' native types, not the text
 cast that filters use. Filters on joined columns keep the §5.4.2 cast.
 
-**Paging over ties (accepted gap).** The join route adds no primary-key
-tie-break, as the §5.4 route does not. A `sort` on a column with repeated
-values can repeat or skip rows between pages, and with no `sort` the
-engine's order applies.
+**Key pruning (§5.11.3).** Each port's `join_order_keys`
+(`joinOrderKeys` in Go, Node and Kotlin) applies the rule, comparing
+`type` strings and reported collations. Postgres reports no collation for
+the database default, so an explicit one on either side keeps the key.
+SQLite reports none at all; there the rule is safe only because every port
+writes `on` as `right = left`, and SQLite compares with the left operand's
+collation, the key column's own. A join that includes a table with no
+tie-break key still MAY repeat or skip rows (tie-break keys, above).
 
 **SQLite connection.** The whole operation, catalog lookups and select,
 runs on one connection inside the timeout wrapper, as §6 requires of any

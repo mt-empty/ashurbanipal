@@ -471,6 +471,32 @@ export interface JoinDialect {
 }
 
 /**
+ * Each table's tie-break key as `[position, column]`, in position order. A key
+ * whose every column an `on` pair binds, at the same type and collation, to a
+ * table already fixed by earlier keys is left out: it cannot change the order
+ * (spec/protocol.md §5.11.3).
+ */
+export function joinOrderKeys(tables: TableMeta[], ons: [number, number, number][][]): [number, number][] {
+  const fixed: boolean[] = [];
+  const keys: [number, number][] = [];
+  tables.forEach((t, p) => {
+    const bound =
+      p > 0 &&
+      t.orderKeys.length > 0 &&
+      t.orderKeys.every((k) =>
+        ons[p - 1].some(([lp, lc, rc]) => {
+          const l = tables[lp].columns[lc];
+          const r = t.columns[rc];
+          return rc === k && fixed[lp] && l.type === r.type && l.collation === r.collation;
+        }),
+      );
+    if (!bound) for (const c of t.orderKeys) keys.push([p, c]);
+    fixed.push(t.orderKeys.length > 0);
+  });
+  return keys;
+}
+
+/**
  * Renders `<select list> from … limit … offset …` (no leading `select`, so
  * MySQL can wrap it in its timeout hint) and the filter values in
  * placeholder order. Numbered dialects reserve $1/$2 for limit and offset;
@@ -487,6 +513,7 @@ export function buildJoinSelect(plan: JoinPlan, d: JoinDialect): { body: string;
   let sql = `${selectList} from ${fromItem(0)}`;
   plan.left.forEach((isLeft, i) => {
     const position = i + 1;
+    // Right column first: SQLite compares with the left operand's collation, which key pruning (joinOrderKeys) relies on.
     const on = plan.ons[i].map(([lp, lc, rc]) => `${alias(position, rc)} = ${alias(lp, lc)}`).join(" and ");
     sql += ` ${isLeft ? "left join" : "inner join"} ${fromItem(position)} on ${on}`;
   });
@@ -513,10 +540,9 @@ export function buildJoinSelect(plan: JoinPlan, d: JoinDialect): { body: string;
     clause += cond.not ? `(NOT (${inner}))` : `(${inner})`;
   });
   if (clause) sql += ` where ${clause}`;
-  const keys = plan.tables.flatMap((t, pos) => t.orderKeys.map((c): [number, number] => [pos, c]));
   sql += orderByClause(
     plan.sort,
-    keys,
+    joinOrderKeys(plan.tables, plan.ons),
     plan.descending,
     ([p, c]) => alias(p, c),
     (a, b) => a[0] === b[0] && a[1] === b[1],

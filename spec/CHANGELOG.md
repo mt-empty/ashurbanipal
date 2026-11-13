@@ -123,6 +123,10 @@ tied or unsorted rows could repeat or skip a row before; it still can on a
 table with no such key. The order of tied and unsorted rows was
 unspecified, so no caller could rely on it, and v1 stands.
 
+A join (§5.11.3) may leave out a joined table's key when its `on` pairs
+bind every key column to a table whose own key already fixes its row. The
+row order is the same, so v1 stands.
+
 Column metadata (§5.4.1) must not depend on the role owning the table: a
 role with only `SELECT` sees the same `key` and `references`. A foreign key
 to a table the role cannot read should report neither. The Postgres ports

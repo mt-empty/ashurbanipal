@@ -38,6 +38,7 @@ from ashurbanipal.join import (
     build_select,
     enum_class,
     group_unique_keys,
+    join_order_keys,
     order_by_clause,
     parse_join,
     plan_join,
@@ -233,8 +234,47 @@ def test_build_select_uses_catalog_names_and_generated_aliases_only() -> None:
     assert body.startswith('t0."id"::text as c0, ')
     assert ' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"' in body
     assert ' where (t1."email"::text = %s) OR (NOT (t0."status"::text IS NULL))' in body
-    assert body.endswith(' order by t1."email" asc, t0."id" asc, t1."id" asc limit %s offset %s')
+    assert body.endswith(' order by t1."email" asc, t0."id" asc limit %s offset %s')
     assert values == ["a@b.c"]
+
+
+def _keyed(name: str, cols: list[tuple[str, str]], *key: int) -> TableMeta:
+    return TableMeta(name, [_col(n, t, NUMBER) for n, t in cols], order_keys=list(key))
+
+
+def test_join_order_keys_leave_out_a_key_bound_to_a_fixed_table() -> None:
+    i = "int4"
+    a = _keyed("a", [("id", i), ("b_id", i)], 0)
+    assert join_order_keys([a, _keyed("b", [("id", i)], 0)], [[(0, 1, 0)]]) == [(0, 0)]
+    # Composite, bound column by column.
+    a3 = _keyed("a", [("id", i), ("x", i), ("y", i)], 0)
+    assert join_order_keys([a3, _keyed("b", [("x", i), ("y", i)], 0, 1)], [[(0, 2, 1), (0, 1, 0)]]) == [(0, 0)]
+    # Partly bound.
+    ax = _keyed("a", [("id", i), ("x", i)], 0)
+    assert join_order_keys([ax, _keyed("b", [("x", i), ("y", i)], 0, 1)], [[(0, 1, 0)]]) == [
+        (0, 0),
+        (1, 0),
+        (1, 1),
+    ]
+    # Across types or collations.
+    wide = _keyed("a", [("id", i), ("b_id", "int8")], 0)
+    assert join_order_keys([wide, _keyed("b", [("id", i)], 0)], [[(0, 1, 0)]]) == [(0, 0), (1, 0)]
+    collated = _keyed("a", [("id", i), ("b_code", "text")], 0)
+    collated.columns[1].collation = "C"
+    assert join_order_keys([collated, _keyed("b", [("code", "text")], 0)], [[(0, 1, 0)]]) == [(0, 0), (1, 0)]
+    # Bound to a keyless table.
+    keyless = _keyed("v", [("b_id", i)])
+    assert join_order_keys([keyless, _keyed("b", [("id", i)], 0)], [[(0, 0, 0)]]) == [(1, 0)]
+    # A left-out table still fixes its row for later joins.
+    chain = [
+        _keyed("a", [("id", i), ("b_id", i)], 0),
+        _keyed("b", [("id", i), ("c_id", i)], 0),
+        _keyed("c", [("id", i)], 0),
+    ]
+    assert join_order_keys(chain, [[(0, 1, 0)], [(1, 1, 0)]]) == [(0, 0)]
+    # One binding from a fixed table is enough.
+    mixed = [keyless, _keyed("a", [("id", i), ("b_id", i)], 0), _keyed("b", [("id", i)], 0)]
+    assert join_order_keys(mixed, [[(0, 0, 1)], [(0, 0, 0), (1, 1, 0)]]) == [(1, 0)]
 
 
 def test_join_key_in_a_filter_is_only_accepted_by_parse_for_join() -> None:

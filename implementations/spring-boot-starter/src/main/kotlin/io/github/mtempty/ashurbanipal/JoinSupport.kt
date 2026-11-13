@@ -423,6 +423,29 @@ internal class JoinDialect(
 )
 
 /**
+ * Each table's tie-break key as `position to column`, in position order. A key
+ * whose every column an `on` pair binds, at the same type and collation, to a
+ * table already fixed by earlier keys is left out: it cannot change the order
+ * (`spec/protocol.md` §5.11.3).
+ */
+internal fun joinOrderKeys(tables: List<TableMeta>, ons: List<List<Triple<Int, Int, Int>>>): List<Pair<Int, Int>> {
+    val fixed = mutableListOf<Boolean>()
+    val keys = mutableListOf<Pair<Int, Int>>()
+    tables.forEachIndexed { p, t ->
+        val bound = p > 0 && t.orderKeys.isNotEmpty() && t.orderKeys.all { k ->
+            ons[p - 1].any { (lp, lc, rc) ->
+                val l = tables[lp].columns[lc]
+                val r = t.columns[rc]
+                rc == k && fixed[lp] && l.type == r.type && l.collation == r.collation
+            }
+        }
+        if (!bound) t.orderKeys.mapTo(keys) { p to it }
+        fixed += t.orderKeys.isNotEmpty()
+    }
+    return keys
+}
+
+/**
  * Renders `<select list> from … limit ? offset ?` (no leading `select`, so
  * MySQL can wrap it in its timeout hint) and the filter values in
  * placeholder order. Bind the values first, then limit, then offset.
@@ -439,6 +462,7 @@ internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<
     val sql = StringBuilder("$selectList from ${fromItem(0)}")
     plan.left.forEachIndexed { i, isLeft ->
         val position = i + 1
+        // Right column first: SQLite compares with the left operand's collation, which key pruning (joinOrderKeys) relies on.
         val on = plan.ons[i].joinToString(" and ") { (lp, lc, rc) -> "${alias(position, rc)} = ${alias(lp, lc)}" }
         sql.append(" ${if (isLeft) "left join" else "inner join"} ${fromItem(position)} on $on")
     }
@@ -467,8 +491,7 @@ internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<
         clause.append(if (cond.not) "(NOT ($inner))" else "($inner)")
     }
     if (clause.isNotEmpty()) sql.append(" where $clause")
-    val keys = plan.tables.flatMapIndexed { p, t -> t.orderKeys.map { c -> p to c } }
-    sql.append(orderByClause(plan.sort, keys, plan.descending) { (p, c) -> alias(p, c) })
+    sql.append(orderByClause(plan.sort, joinOrderKeys(plan.tables, plan.ons), plan.descending) { (p, c) -> alias(p, c) })
     sql.append(" limit ? offset ?")
     return sql.toString() to values
 }

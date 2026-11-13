@@ -518,6 +518,37 @@ class Dialect:
     ilike: str  # "native", "like" or "lowered-like"
 
 
+def join_order_keys(
+    tables: Sequence[TableMeta], ons: Sequence[Sequence[tuple[int, int, int]]]
+) -> list[tuple[int, int]]:
+    """Each table's tie-break key as `(position, column)`, in position order.
+    A key whose every column an `on` pair binds, at the same type and
+    collation, to a table already fixed by earlier keys is left out: it cannot
+    change the order (`spec/protocol.md` §5.11.3).
+    """
+    fixed: list[bool] = []
+    keys: list[tuple[int, int]] = []
+    for p, t in enumerate(tables):
+        bound = (
+            p > 0
+            and bool(t.order_keys)
+            and all(
+                any(
+                    rc == k
+                    and fixed[lp]
+                    and tables[lp].columns[lc].type_name == t.columns[rc].type_name
+                    and tables[lp].columns[lc].collation == t.columns[rc].collation
+                    for lp, lc, rc in ons[p - 1]
+                )
+                for k in t.order_keys
+            )
+        )
+        if not bound:
+            keys.extend((p, c) for c in t.order_keys)
+        fixed.append(bool(t.order_keys))
+    return keys
+
+
 def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
     """Renders `<select list> from … limit … offset …` (no leading `select`,
     so MySQL can wrap it in its timeout hint) and the filter values in
@@ -537,6 +568,8 @@ def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
     sql = f"{select_list} from {from_item(0)}"
     for i, is_left in enumerate(plan.left):
         position = i + 1
+        # Right column first: SQLite compares with the left operand's collation,
+        # which key pruning (join_order_keys) relies on.
         on = " and ".join(f"{alias(position, rc)} = {alias(lp, lc)}" for lp, lc, rc in plan.ons[i])
         sql += f" {'left join' if is_left else 'inner join'} {from_item(position)} on {on}"
 
@@ -564,7 +597,6 @@ def build_select(plan: JoinPlan, d: Dialect) -> tuple[str, list[str]]:
         clause += f"(NOT ({inner}))" if cond.not_ else f"({inner})"
     if clause:
         sql += f" where {clause}"
-    keys = [(pos, c) for pos, t in enumerate(plan.tables) for c in t.order_keys]
-    sql += order_by_clause(plan.sort, keys, plan.descending, lambda k: alias(*k))
+    sql += order_by_clause(plan.sort, join_order_keys(plan.tables, plan.ons), plan.descending, lambda k: alias(*k))
     sql += f" limit {ph} offset {ph}"
     return sql, values

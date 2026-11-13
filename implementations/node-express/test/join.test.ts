@@ -13,6 +13,7 @@ import {
   type JoinDialect,
   type JoinOpts,
   joinColumnInfos,
+  joinOrderKeys,
   joinTableRefs,
   orderByClause,
   parseJoin,
@@ -84,6 +85,80 @@ describe("row order (spec/protocol.md §5.4)", () => {
     // order applies only with a sort.
     expect(orderByClause(undefined, [0], true, render)).toBe(" order by c0 asc");
     expect(orderByClause(undefined, [], false, render)).toBe("");
+  });
+});
+
+describe("joinOrderKeys (spec/protocol.md §5.11.3)", () => {
+  const keyed = (name: string, cols: [string, string][], ...orderKeys: number[]): TableMeta => ({
+    name,
+    columns: cols.map(([n, type]) => ({ name: n, type, class: { kind: "number" } })),
+    orderKeys,
+  });
+  const int = (n: string): [string, string] => [n, "int4"];
+
+  it("leaves out a key fully bound to a fixed table, column by column if composite", () => {
+    expect(joinOrderKeys([keyed("a", [int("id"), int("b_id")], 0), keyed("b", [int("id")], 0)], [[[0, 1, 0]]])).toEqual(
+      [[0, 0]],
+    );
+    const a = keyed("a", [int("id"), int("x"), int("y")], 0);
+    const b = keyed("b", [int("x"), int("y")], 0, 1);
+    expect(
+      joinOrderKeys(
+        [a, b],
+        [
+          [
+            [0, 2, 1],
+            [0, 1, 0],
+          ],
+        ],
+      ),
+    ).toEqual([[0, 0]]);
+  });
+
+  it("keeps a partly bound key", () => {
+    const b = keyed("b", [int("x"), int("y")], 0, 1);
+    expect(joinOrderKeys([keyed("a", [int("id"), int("x")], 0), b], [[[0, 1, 0]]])).toEqual([
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ]);
+  });
+
+  it("keeps a key bound across types or collations", () => {
+    const b = keyed("b", [int("id")], 0);
+    expect(joinOrderKeys([keyed("a", [int("id"), ["b_id", "int8"]], 0), b], [[[0, 1, 0]]])).toEqual([
+      [0, 0],
+      [1, 0],
+    ]);
+    const a = keyed("a", [int("id"), ["b_code", "text"]], 0);
+    a.columns[1].collation = "C";
+    expect(joinOrderKeys([a, keyed("b", [["code", "text"]], 0)], [[[0, 1, 0]]])).toEqual([
+      [0, 0],
+      [1, 0],
+    ]);
+  });
+
+  it("keeps a key bound to a keyless table", () => {
+    expect(joinOrderKeys([keyed("v", [int("b_id")]), keyed("b", [int("id")], 0)], [[[0, 0, 0]]])).toEqual([[1, 0]]);
+  });
+
+  it("counts a left-out table as fixed, and one binding from a fixed table is enough", () => {
+    const chain = [
+      keyed("a", [int("id"), int("b_id")], 0),
+      keyed("b", [int("id"), int("c_id")], 0),
+      keyed("c", [int("id")], 0),
+    ];
+    expect(joinOrderKeys(chain, [[[0, 1, 0]], [[1, 1, 0]]])).toEqual([[0, 0]]);
+    const mixed = [keyed("v", [int("b_id")]), keyed("a", [int("id"), int("b_id")], 0), keyed("b", [int("id")], 0)];
+    expect(
+      joinOrderKeys(mixed, [
+        [[0, 0, 1]],
+        [
+          [0, 0, 0],
+          [1, 1, 0],
+        ],
+      ]),
+    ).toEqual([[1, 0]]);
   });
 });
 
@@ -238,7 +313,7 @@ describe("buildJoinSelect", () => {
     expect(body).toContain('t0."id"::text as c0, ');
     expect(body).toContain(' from "public"."orders" t0 left join "public"."users" t1 on t1."id" = t0."user_id"');
     expect(body).toContain(' where (t1."email"::text = $3) OR (NOT (t0."status"::text IS NULL))');
-    expect(body).toMatch(/ order by t1\."email" asc, t0\."id" asc, t1\."id" asc limit \$1 offset \$2$/);
+    expect(body).toMatch(/ order by t1\."email" asc, t0\."id" asc limit \$1 offset \$2$/);
     expect(values).toEqual(["a@b.c"]);
   });
 });
