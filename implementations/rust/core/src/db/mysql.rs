@@ -375,8 +375,9 @@ impl MySqlSource {
         Ok(names.into_iter().collect())
     }
 
-    /// MySQL's `PRIMARY` name repeats, so join on table name; omit composite
-    /// FKs (`spec/protocol.md` §5.4.1).
+    /// `key_column_usage` alone: MariaDB hides `table_constraints` from a
+    /// SELECT-only role. A primary key is always named `PRIMARY`; composite
+    /// FKs are omitted (`spec/protocol.md` §5.4.1).
     async fn key_metadata_in_tx(
         &self,
         tx: &mut Transaction<'_, MySql>,
@@ -398,17 +399,14 @@ impl MySqlSource {
         >(sqlx::AssertSqlSafe(timed_select(
             variant,
             timeout_secs,
-            "tc.constraint_name, tc.constraint_type, kcu.column_name, \
-                    kcu.referenced_table_schema, kcu.referenced_table_name, \
+            "kcu.constraint_name, \
+                    case when kcu.referenced_table_name is not null then 'FOREIGN KEY' else 'PRIMARY KEY' end, \
+                    kcu.column_name, kcu.referenced_table_schema, kcu.referenced_table_name, \
                     kcu.referenced_column_name \
-             from information_schema.table_constraints tc \
-             join information_schema.key_column_usage kcu \
-               on kcu.constraint_name = tc.constraint_name \
-              and kcu.table_schema = tc.table_schema \
-              and kcu.table_name = tc.table_name \
-             where tc.table_schema = ? \
-               and tc.table_name = ? \
-               and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
+             from information_schema.key_column_usage kcu \
+             where kcu.table_schema = ? \
+               and kcu.table_name = ? \
+               and (kcu.constraint_name = 'PRIMARY' or kcu.referenced_table_name is not null)",
         )))
         .bind(schema)
         .bind(table)

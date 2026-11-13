@@ -2,6 +2,7 @@ package io.github.mtempty.ashurbanipal
 
 import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.RowCallbackHandler
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -149,75 +150,41 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
         return table
     }
 
-    private data class ConstraintRow(
-        val constraintName: String,
-        val constraintType: String,
-        val columnName: String,
-        val refSchema: String?,
-        val refTable: String?,
-        val refColumn: String?,
-    )
-
-    private data class FkCandidate(
-        val columnName: String,
-        val refSchema: String?,
-        val refTable: String?,
-        val refColumn: String?,
-    )
-
-    /** Use constraint_schema for cross-schema FKs; omit composites (`spec/protocol.md` §5.4.1). */
-    private fun keyMetadata(schema: String, table: String): Pair<Set<String>, Map<String, ColumnRef>> {
-        val rows = jdbcTemplate.query(
-            "select tc.constraint_name, tc.constraint_type, kcu.column_name, " +
-                "ccu.table_schema as ref_schema, ccu.table_name as ref_table, ccu.column_name as ref_column " +
-                "from information_schema.table_constraints tc " +
-                "join information_schema.key_column_usage kcu " +
-                "  on kcu.constraint_name = tc.constraint_name " +
-                " and kcu.table_schema = tc.table_schema " +
-                "left join information_schema.constraint_column_usage ccu " +
-                "  on ccu.constraint_name = tc.constraint_name " +
-                " and ccu.constraint_schema = tc.table_schema " +
-                " and tc.constraint_type = 'FOREIGN KEY' " +
-                "where tc.table_schema = ? " +
-                "  and tc.table_name = ? " +
-                "  and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
-            RowMapper { rs, _ ->
-                ConstraintRow(
-                    rs.getString("constraint_name"),
-                    rs.getString("constraint_type"),
-                    rs.getString("column_name"),
-                    rs.getString("ref_schema"),
-                    rs.getString("ref_table"),
-                    rs.getString("ref_column"),
-                )
-            },
-            schema,
-            table,
-        )
-
+    /**
+     * Reads `pg_constraint`, which has no privilege filter, so a role that doesn't own the table still
+     * sees its keys. Composite foreign keys, and ones whose target the role can't open, are left out
+     * (`spec/protocol.md` §5.4.1).
+     */
+    private fun keyMetadata(schema: String, oid: Long): Pair<Set<String>, Map<String, ColumnRef>> {
         val pkColumns = mutableSetOf<String>()
-        val fkCandidates = mutableMapOf<String, MutableList<FkCandidate>>()
-        for (row in rows) {
-            when (row.constraintType) {
-                "PRIMARY KEY" -> pkColumns.add(row.columnName)
-                "FOREIGN KEY" -> fkCandidates.getOrPut(row.constraintName) { mutableListOf() }
-                    .add(FkCandidate(row.columnName, row.refSchema, row.refTable, row.refColumn))
-            }
-        }
         val fkColumns = mutableMapOf<String, ColumnRef>()
-        for (members in fkCandidates.values) {
-            val distinctColumns = members.map { it.columnName }.toSet()
-            if (distinctColumns.size != 1) continue // composite FK: omit entirely
-            val first = members.first()
-            val refSchema = first.refSchema
-            val refTable = first.refTable
-            val refColumn = first.refColumn
-            if (refSchema != null && refTable != null && refColumn != null) {
-                // Same-schema references omit schema on the wire (spec/protocol.md §5.4.1).
-                val fkSchema = if (refSchema != schema) refSchema else null
-                fkColumns[first.columnName] = ColumnRef(refTable, refColumn, fkSchema)
-            }
-        }
+        jdbcTemplate.query(
+            "select con.contype = 'p' as is_pk, a.attname::text as column_name, " +
+                "rn.nspname::text as ref_schema, rc.relname::text as ref_table, ra.attname::text as ref_column " +
+                "from pg_constraint con " +
+                "cross join lateral unnest(con.conkey) k(attnum) " +
+                "join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum " +
+                "left join pg_class rc on con.contype = 'f' and rc.oid = con.confrelid " +
+                "left join pg_namespace rn on rn.oid = rc.relnamespace " +
+                "left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1] " +
+                "where con.conrelid = ? " +
+                "  and (con.contype = 'p' " +
+                "       or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r' " +
+                "           and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))",
+            RowCallbackHandler { rs ->
+                val column = rs.getString("column_name")
+                val refSchema = rs.getString("ref_schema")
+                val refTable = rs.getString("ref_table")
+                val refColumn = rs.getString("ref_column")
+                if (rs.getBoolean("is_pk")) {
+                    pkColumns.add(column)
+                } else if (refSchema != null && refTable != null && refColumn != null) {
+                    // Same-schema references omit schema on the wire (spec/protocol.md §5.4.1).
+                    fkColumns[column] = ColumnRef(refTable, refColumn, if (refSchema != schema) refSchema else null)
+                }
+            },
+            oid,
+        )
         return pkColumns to fkColumns
     }
 
@@ -268,7 +235,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int, private val 
             schema,
             table,
         )
-        val (pkColumns, fkColumns) = keyMetadata(schema, table)
+        val (pkColumns, fkColumns) = keyMetadata(schema, oid)
         val colMetas = columns.map { c ->
             ColMeta(
                 name = c.name,

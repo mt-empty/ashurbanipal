@@ -452,7 +452,7 @@ impl PgPoolSource {
         .fetch_all(&mut **tx)
         .await?;
         let (pk_columns, fk_columns) = self
-            .key_metadata_in_tx(tx, schema.as_str(), table.name.as_str())
+            .key_metadata_in_tx(tx, schema.as_str(), table.oid)
             .await?;
         let unique_keys = unique_keys_in_tx(tx, table.oid).await?;
         let columns: Vec<ColMeta> = columns
@@ -495,84 +495,45 @@ impl PgPoolSource {
         })
     }
 
-    /// Use `ccu.constraint_schema` for cross-schema FKs; omit composites
-    /// (`spec/protocol.md` §5.4.1).
+    /// `pg_constraint` has no privilege filter, so a role that doesn't own the
+    /// table still sees its keys. Composite foreign keys, and ones whose target
+    /// the role can't open, are omitted (`spec/protocol.md` §5.4.1).
     async fn key_metadata_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
-        table: &str,
+        table: i32,
     ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
-        let rows = sqlx::query_as::<
-            _,
-            (
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            ),
-        >(
-            "select tc.constraint_name, tc.constraint_type, kcu.column_name, \
-                    ccu.table_schema as ref_schema, ccu.table_name as ref_table, \
-                    ccu.column_name as ref_column \
-             from information_schema.table_constraints tc \
-             join information_schema.key_column_usage kcu \
-               on kcu.constraint_name = tc.constraint_name \
-              and kcu.table_schema = tc.table_schema \
-             left join information_schema.constraint_column_usage ccu \
-               on ccu.constraint_name = tc.constraint_name \
-              and ccu.constraint_schema = tc.table_schema \
-              and tc.constraint_type = 'FOREIGN KEY' \
-             where tc.table_schema = $1 \
-               and tc.table_name = $2 \
-               and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
-        )
-        .bind(schema)
-        .bind(table)
-        .fetch_all(&mut **tx)
-        .await?;
-
-        type FkCandidateRow = (String, Option<String>, Option<String>, Option<String>);
+        let rows =
+            sqlx::query_as::<_, (bool, String, Option<String>, Option<String>, Option<String>)>(
+                "select con.contype = 'p', a.attname, rn.nspname, rc.relname, ra.attname \
+             from pg_constraint con \
+             cross join lateral unnest(con.conkey) k(attnum) \
+             join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum \
+             left join pg_class rc on con.contype = 'f' and rc.oid = con.confrelid \
+             left join pg_namespace rn on rn.oid = rc.relnamespace \
+             left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1] \
+             where con.conrelid = $1 \
+               and (con.contype = 'p' \
+                    or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r' \
+                        and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))",
+            )
+            .bind(table)
+            .fetch_all(&mut **tx)
+            .await?;
 
         let mut pk_columns = HashSet::new();
-        let mut fk_candidates: HashMap<String, Vec<FkCandidateRow>> = HashMap::new();
-        for (constraint_name, constraint_type, column_name, ref_schema, ref_table, ref_column) in
-            rows
-        {
-            match constraint_type.as_str() {
-                "PRIMARY KEY" => {
-                    pk_columns.insert(column_name);
-                }
-                "FOREIGN KEY" => {
-                    fk_candidates.entry(constraint_name).or_default().push((
-                        column_name,
-                        ref_schema,
-                        ref_table,
-                        ref_column,
-                    ));
-                }
-                _ => {}
-            }
-        }
-
         let mut fk_columns = HashMap::new();
-        for members in fk_candidates.into_values() {
-            let distinct_columns: HashSet<&str> = members
-                .iter()
-                .map(|(name, _, _, _)| name.as_str())
-                .collect();
-            if distinct_columns.len() != 1 {
-                continue;
-            }
-            if let Some((column_name, Some(ref_schema), Some(ref_table), Some(ref_column))) =
-                members.into_iter().next()
+        for (primary, column, ref_schema, ref_table, ref_column) in rows {
+            if primary {
+                pk_columns.insert(column);
+            } else if let (Some(ref_schema), Some(ref_table), Some(ref_column)) =
+                (ref_schema, ref_table, ref_column)
             {
                 // Same-schema references omit `schema` on the wire (spec/protocol.md §5.4.1).
                 let schema = (ref_schema != schema).then_some(ref_schema);
                 fk_columns.insert(
-                    column_name,
+                    column,
                     ColumnRef {
                         table: ref_table,
                         column: ref_column,

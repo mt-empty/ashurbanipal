@@ -795,3 +795,73 @@ async fn columns_report_the_engines_full_type() {
         );
     }
 }
+
+/// spec/protocol.md §5.4.1: a foreign key whose target the client can't open
+/// SHOULD report no `fk` key or `references`. Runs only against a target
+/// connected as `conformance/seed/readonly-role.sql`'s role, which can read
+/// `readonly_probe.visible` and no other table listed in that schema; with
+/// `CONFORMANCE_EXPECT_READONLY_PROBE` set, any other listing fails.
+#[tokio::test]
+async fn a_foreign_key_to_a_table_the_client_cannot_open_reports_no_reference() {
+    let srv = TestServer::spawn().await;
+    let tables: Value = srv
+        .client()
+        .get(srv.url("/api/tables"))
+        .query(&[("schema", "readonly_probe")])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let names: Vec<&str> = tables["tables"]
+        .as_array()
+        .map(|t| t.iter().filter_map(|t| t["name"].as_str()).collect())
+        .unwrap_or_default();
+    if names != ["visible"] {
+        assert!(
+            std::env::var_os("CONFORMANCE_EXPECT_READONLY_PROBE").is_none(),
+            "readonly_probe lists {names:?}, expected exactly [\"visible\"] for a role that \
+             can read readonly_probe.visible but not readonly_probe.hidden (spec/protocol.md §5.2)"
+        );
+        eprintln!(
+            "table_data: skipping — readonly_probe lists {names:?}, need exactly [\"visible\"] \
+             (connect as conformance/seed/readonly-role.sql's role to exercise this check)"
+        );
+        return;
+    }
+
+    let body: Value = srv
+        .client()
+        .get(srv.url("/api/tables/data"))
+        .query(&[
+            ("schema", "readonly_probe"),
+            ("table", "visible"),
+            ("limit", "1"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let columns = body["columns"].as_array().unwrap();
+    // hidden: no SELECT; nousage: no USAGE on its schema; parted: a partitioned
+    // parent, which §5.2 never lists.
+    for name in ["hidden_id", "nousage_id", "parted_id"] {
+        let col = columns
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("readonly_probe.visible has no {name} column"));
+        assert_exact(
+            col.get("key").cloned(),
+            None,
+            &format!("readonly_probe.visible.{name} key"),
+        );
+        assert_exact(
+            col.get("references").cloned(),
+            None,
+            &format!("readonly_probe.visible.{name} references"),
+        );
+    }
+}

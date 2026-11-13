@@ -55,6 +55,21 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-report-actix-web
 
+  # Same suite as a SELECT-only role that doesn't own the tables: the owner
+  # sees catalog rows that other roles don't.
+  readonly-conformance:
+    name: Rust actix-web — conformance kit (SELECT-only Postgres role)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: postgres-readonly
+      toolchain: rust
+      start-command: "cargo run -p ashurbanipal-actix-web --manifest-path implementations/rust/actix-web/Cargo.toml --example demo"
+      start-env: "DATABASE_URL=$CONFORMANCE_PG_RO_URL"
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: conformance-report-actix-web-readonly
+
   # Same suite, run again (not instead) against a demo started with a
   # second source and labelled siblings — see rust-axum-conformance.yml's
   # identical job for the rationale.

@@ -209,22 +209,21 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     private fun requireTable(variant: Variant, schema: String, table: String): String =
         allowedTables(variant, schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
-    /** Join MySQL's repeating PRIMARY name on table name; omit composite FKs (`spec/protocol.md` §5.4.1). */
+    /**
+     * Reads `key_column_usage` alone: MariaDB hides `table_constraints` from a SELECT-only role. A primary key is
+     * always named `PRIMARY`; composite FKs are omitted (`spec/protocol.md` §5.4.1).
+     */
     private fun keyMetadata(variant: Variant, schema: String, table: String): Pair<Set<String>, Map<String, ColumnRef>> {
         val rows = query(
             dataSource,
             timedSelect(
                 variant,
                 queryTimeoutSecs,
-                "tc.constraint_name, tc.constraint_type, kcu.column_name, " +
-                    "kcu.referenced_table_schema, kcu.referenced_table_name, kcu.referenced_column_name " +
-                    "from information_schema.table_constraints tc " +
-                    "join information_schema.key_column_usage kcu " +
-                    "  on kcu.constraint_name = tc.constraint_name " +
-                    " and kcu.table_schema = tc.table_schema " +
-                    " and kcu.table_name = tc.table_name " +
-                    "where tc.table_schema = ? and tc.table_name = ? " +
-                    "  and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
+                "kcu.constraint_name, case when kcu.referenced_table_name is not null then 'FOREIGN KEY' else 'PRIMARY KEY' end, " +
+                    "kcu.column_name, kcu.referenced_table_schema, kcu.referenced_table_name, kcu.referenced_column_name " +
+                    "from information_schema.key_column_usage kcu " +
+                    "where kcu.table_schema = ? and kcu.table_name = ? " +
+                    "  and (kcu.constraint_name = 'PRIMARY' or kcu.referenced_table_name is not null)",
             ),
             listOf(schema, table),
         ) { rs ->

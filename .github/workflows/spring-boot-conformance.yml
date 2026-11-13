@@ -71,6 +71,21 @@ jobs:
       conformance-url: "http://localhost:4100/__ashurbanipal"
       report-name: spring-boot-conformance-report
 
+  # Same suite as a SELECT-only role that doesn't own the tables: the owner
+  # sees catalog rows that other roles don't.
+  readonly-conformance:
+    name: Spring Boot — conformance kit (SELECT-only Postgres role)
+    needs: build-and-test
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: postgres-readonly
+      toolchain: java
+      start-command: "cd implementations/spring-boot-starter && ./gradlew :demo:bootRun"
+      start-env: "SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/ashurbanipal SPRING_DATASOURCE_USERNAME=$CONFORMANCE_PG_RO_USER SPRING_DATASOURCE_PASSWORD=$CONFORMANCE_PG_RO_PASSWORD PORT=4100 ASHURBANIPAL_ENABLED=true"
+      health-url: "http://localhost:4100/__ashurbanipal/api/tables"
+      conformance-url: "http://localhost:4100/__ashurbanipal"
+      report-name: spring-boot-conformance-readonly-report
+
   # Same suite, run again (not instead) against a demo started with a
   # second source and labelled siblings — see rust-axum-conformance.yml's
   # identical job for the rationale. Spring's own idiom for the trigger is a

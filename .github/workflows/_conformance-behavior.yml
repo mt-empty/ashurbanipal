@@ -51,9 +51,13 @@ on:
         type: string
       backend:
         description: >-
-          Database the demo browses: postgres | mysql | mariadb | sqlite.
-          Exports CONFORMANCE_MYSQL_URL (mysql:// URL), CONFORMANCE_JDBC_URL
-          and CONFORMANCE_SQLITE_PATH for start-env to pass on.
+          Database the demo browses: postgres | postgres-readonly | mysql |
+          mariadb | sqlite. Exports CONFORMANCE_MYSQL_URL (mysql:// URL),
+          CONFORMANCE_JDBC_URL, CONFORMANCE_SQLITE_PATH and, for
+          postgres-readonly, CONFORMANCE_PG_RO_URL plus CONFORMANCE_PG_RO_USER
+          and CONFORMANCE_PG_RO_PASSWORD (a SELECT-only role) for start-env to
+          pass on; it also sets CONFORMANCE_EXPECT_READONLY_PROBE=1 so the
+          runner fails, not skips, the readonly_probe check.
         required: false
         type: string
         default: postgres
@@ -89,10 +93,21 @@ jobs:
           persist-credentials: false
 
       - name: Apply the conformance seed
-        if: inputs.backend == 'postgres'
+        if: inputs.backend == 'postgres' || inputs.backend == 'postgres-readonly'
         run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - name: Add the SELECT-only role
+        if: inputs.backend == 'postgres-readonly'
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/readonly-role.sql
+          {
+            echo "CONFORMANCE_PG_RO_USER=ashurbanipal_ro"
+            echo "CONFORMANCE_PG_RO_PASSWORD=ashurbanipal_ro"
+            echo "CONFORMANCE_PG_RO_URL=postgres://ashurbanipal_ro:ashurbanipal_ro@localhost:5432/ashurbanipal"
+            echo "CONFORMANCE_EXPECT_READONLY_PROBE=1"
+          } >> "$GITHUB_ENV"
 
       - name: Start ${{ inputs.backend }} and apply the MySQL conformance seed
         if: inputs.backend == 'mysql' || inputs.backend == 'mariadb'

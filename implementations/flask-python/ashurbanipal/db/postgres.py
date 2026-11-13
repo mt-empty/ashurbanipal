@@ -220,48 +220,36 @@ class PgSource(DbSource):
         )
         return [row[0] for row in cur.fetchall()]
 
-    def _key_metadata(self, cur: psycopg.Cursor, schema: str, table: str) -> tuple[set[str], dict[str, ColumnRef]]:
-        """Use constraint_schema for cross-schema FKs; omit composites (`spec/protocol.md` §5.4.1)."""
+    def _key_metadata(self, cur: psycopg.Cursor, schema: str, oid: int) -> tuple[set[str], dict[str, ColumnRef]]:
+        """Read pg_constraint, which has no privilege filter, so a role that
+        doesn't own the table still sees its keys. Composite foreign keys, and
+        ones whose target the role can't open, are left out (`spec/protocol.md` §5.4.1)."""
         cur.execute(
-            "select tc.constraint_name, tc.constraint_type, kcu.column_name, "
-            "       ccu.table_schema as ref_schema, ccu.table_name as ref_table, "
-            "       ccu.column_name as ref_column "
-            "from information_schema.table_constraints tc "
-            "join information_schema.key_column_usage kcu "
-            "  on kcu.constraint_name = tc.constraint_name "
-            " and kcu.table_schema = tc.table_schema "
-            "left join information_schema.constraint_column_usage ccu "
-            "  on ccu.constraint_name = tc.constraint_name "
-            " and ccu.constraint_schema = tc.table_schema "
-            " and tc.constraint_type = 'FOREIGN KEY' "
-            "where tc.table_schema = %s "
-            "  and tc.table_name = %s "
-            "  and tc.constraint_type in ('PRIMARY KEY', 'FOREIGN KEY')",
-            (schema, table),
+            "select con.contype = 'p', a.attname::text, rn.nspname::text, rc.relname::text, ra.attname::text "
+            "from pg_constraint con "
+            "cross join lateral unnest(con.conkey) k(attnum) "
+            "join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum "
+            "left join pg_class rc on con.contype = 'f' and rc.oid = con.confrelid "
+            "left join pg_namespace rn on rn.oid = rc.relnamespace "
+            "left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1] "
+            "where con.conrelid = %s "
+            "  and (con.contype = 'p' "
+            "       or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r' "
+            "           and has_schema_privilege(rc.relnamespace, 'USAGE') "
+            "           and has_table_privilege(rc.oid, 'SELECT')))",
+            (oid,),
         )
         pk_columns: set[str] = set()
-        fk_candidates: dict[str, list[tuple[str, str | None, str | None, str | None]]] = {}
-        for constraint_name, constraint_type, column_name, ref_schema, ref_table, ref_column in cur.fetchall():
-            if constraint_type == "PRIMARY KEY":
-                pk_columns.add(column_name)
-            elif constraint_type == "FOREIGN KEY":
-                fk_candidates.setdefault(constraint_name, []).append(
-                    (column_name, ref_schema, ref_table, ref_column)
-                )
-
         fk_columns: dict[str, ColumnRef] = {}
-        for members in fk_candidates.values():
-            distinct_columns = {m[0] for m in members}
-            if len(distinct_columns) != 1:
-                continue
-            column_name, ref_schema, ref_table, ref_column = members[0]
-            if ref_schema is None or ref_table is None or ref_column is None:
-                continue
-            fk_columns[column_name] = ColumnRef(
-                table=ref_table,
-                column=ref_column,
-                schema=ref_schema if ref_schema != schema else None,
-            )
+        for primary, column, ref_schema, ref_table, ref_column in cur.fetchall():
+            if primary:
+                pk_columns.add(column)
+            elif ref_schema is not None and ref_table is not None and ref_column is not None:
+                fk_columns[column] = ColumnRef(
+                    table=ref_table,
+                    column=ref_column,
+                    schema=ref_schema if ref_schema != schema else None,
+                )
         return pk_columns, fk_columns
 
     @wrap_driver_errors(psycopg.Error)
@@ -398,7 +386,7 @@ class PgSource(DbSource):
             (oid, schema, table),
         )
         column_rows = list(cur.fetchall())
-        pk_columns, fk_columns = self._key_metadata(cur, schema, table)
+        pk_columns, fk_columns = self._key_metadata(cur, schema, oid)
         columns = [
             ColMeta(
                 name=name,

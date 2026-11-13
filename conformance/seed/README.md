@@ -22,6 +22,13 @@ When that variable is unset, the runner instead expects the target
 database to already carry this seed and fails fast if it can't confirm
 that — see "Sentinel" below.
 
+`readonly-role.sql` (Postgres only, applied after `seed.sql`) adds the
+`ashurbanipal_ro` login role with `SELECT` on the seeded schemas, plus the
+`readonly_probe` schema: `visible` is readable and has foreign keys to three
+tables the client can't open (no `SELECT`, no `USAGE` on the schema, and a
+partitioned parent). Each port's `readonly-conformance` CI job runs the
+whole suite connected as that role.
+
 ## Regenerating
 
 Never hand-edit `seed.sql`. Change `tools/seed-gen/src/main.rs`, then:

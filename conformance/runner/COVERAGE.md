@@ -91,6 +91,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.4.1-FK-METADATA` | `key`/`references` for FK columns | `table_data::foreign_key_columns_report_key_and_references` |
+| `P5.4.1-SELECT-ONLY-ROLE` | A SELECT-only role sees the same `key`/`references` as the owner, except a foreign key to a table the client can't open (unreadable, schema without USAGE, partitioned parent), which reports neither | The whole suite, run again by each port's `readonly-conformance` CI job as `conformance/seed/readonly-role.sql`'s role (Postgres); `table_data::a_foreign_key_to_a_table_the_client_cannot_open_reports_no_reference`, which skips unless `readonly_probe` lists only `visible` (fails instead under `CONFORMANCE_EXPECT_READONLY_PROBE`, which the CI job sets) |
 | `P5.4.1-COMMENT-OMITTED` | `comment` omitted when absent | `table_data::column_comments_are_present_only_where_seeded` |
 | `P5.4.1-TYPE` | `type` is the engine's full spelling (length, precision, array element, enum name) | `table_data::columns_report_the_engines_full_type` |
 | `P5.4.1-CLASS` | `class` is always present and is the §5.11.2 column class (`float`, `json`, `array`, `other` included); only an enum carries `enum_type` | `table_data::columns_report_their_column_class` |
