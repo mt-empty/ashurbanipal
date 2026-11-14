@@ -131,11 +131,11 @@ open structure, switch source, and run one join (`demo-pages.demo.ts`). No
 test checks the "no estimate" count on `order_items` (`shop.sql:126-128`),
 the PK+FK table, the second schema, or common values. *Size:* S per test.
 
-**D6. A demo deploy does not wait for the demo tests.** `pages.yml` deploys
-on every push to `main` (`pages.yml:7-10`), and its only `needs:` is its own
-build job (`pages.yml:49`). `demo.yml` runs separately. A broken live demo
-can go out while `demo.yml` fails. *Size:* S (run the smoke in `pages.yml`
-before deploy, or trigger on `workflow_run`).
+**D6. A demo deploy does not wait for the demo tests — DONE.** `demo.yml`
+runs only when demo sources change, so `pages.yml`'s `deploy` now needs its
+own `smoke` job, which runs `frontend:test-demo` on every deploy. The smoke
+serves `docs/` through `demo-preview.mjs`, not the Jekyll-built artifact
+that deploys.
 
 ### S — Shared conformance seeds
 
