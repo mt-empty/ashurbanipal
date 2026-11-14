@@ -12,6 +12,9 @@ use sqlx::Executor;
 /// unwinds included. `Drop` is sync and may run inside the test's own Tokio
 /// runtime, so the work goes on a throwaway current-thread runtime on its own
 /// thread; the `join()` keeps `cargo test` from exiting before the drops land.
+/// The `join()` also blocks that runtime, so a lock its own connections still
+/// hold would never be released: `lock_timeout` turns that into a logged
+/// failure instead of a hung test.
 pub struct PgCleanup {
     url: String,
     statements: Vec<String>,
@@ -19,9 +22,12 @@ pub struct PgCleanup {
 
 impl PgCleanup {
     pub fn new(url: &str, schemas: &[&str], roles: &[&str]) -> Self {
-        let statements = schemas
-            .iter()
-            .map(|s| format!("drop schema if exists {s} cascade"))
+        let statements = std::iter::once("set lock_timeout = '5s'".to_owned())
+            .chain(
+                schemas
+                    .iter()
+                    .map(|s| format!("drop schema if exists {s} cascade")),
+            )
             .chain(roles.iter().map(|r| format!("drop role if exists {r}")))
             .collect();
         Self {

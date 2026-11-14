@@ -21,7 +21,7 @@ private const val SCHEMA_A = "ashb_test_schema_isolation_a"
 private const val SCHEMA_B = "ashb_test_schema_isolation_b"
 
 private fun jdbcCredentials(): Triple<String, String, String> {
-    val databaseUrl = System.getenv("DATABASE_URL")
+    val databaseUrl = requireTestEnv("DATABASE_URL")
         ?: error("DATABASE_URL must be set (the devcontainer sets it automatically)")
     val uri = URI(databaseUrl)
     val (user, password) = (uri.userInfo ?: ":").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }

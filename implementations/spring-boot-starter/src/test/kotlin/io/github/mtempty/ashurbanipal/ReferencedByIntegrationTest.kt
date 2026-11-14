@@ -140,7 +140,7 @@ class ReferencedByIntegrationTest : AshurbanipalHttpTestBase() {
     }
 
     private fun setupPartitionedSchema(schema: String) {
-        val databaseUrl = System.getenv("DATABASE_URL")
+        val databaseUrl = requireTestEnv("DATABASE_URL")
             ?: error("DATABASE_URL must be set (the devcontainer sets it automatically)")
         withAdminConnection(databaseUrl) { st ->
             st.execute("drop schema if exists $schema cascade")
@@ -158,7 +158,7 @@ class ReferencedByIntegrationTest : AshurbanipalHttpTestBase() {
     }
 
     private fun dropSchema(schema: String) {
-        val databaseUrl = System.getenv("DATABASE_URL") ?: return
+        val databaseUrl = System.getenv("DATABASE_URL").takeUnless { it.isNullOrBlank() } ?: return
         withAdminConnection(databaseUrl) { st -> st.execute("drop schema if exists $schema cascade") }
     }
 

@@ -16,7 +16,7 @@ private const val SCHEMA = "ashb_test_table_privileges"
 private const val ROLE = "ashb_test_table_privileges_role"
 
 private fun jdbcCredentials(): Triple<String, String, String> {
-    val databaseUrl = System.getenv("DATABASE_URL")
+    val databaseUrl = requireTestEnv("DATABASE_URL")
         ?: error("DATABASE_URL must be set (the devcontainer sets it automatically)")
     val uri = URI(databaseUrl)
     val (user, password) = (uri.userInfo ?: ":").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
