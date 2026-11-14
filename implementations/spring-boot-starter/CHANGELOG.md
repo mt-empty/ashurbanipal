@@ -5,6 +5,34 @@ Notable changes to the Kotlin/Spring Boot starter. Format follows
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.14.0] - 2026-11-14
+
+### Features
+
+- *(frontend)* Show common values on join columns (#246)
+- *(protocol)* Let a join name tables from more than one schema (#248)
+- *(frontend)* Join tables from more than one schema (#249)
+- *(frontend)* Service names in Other services open your environment (#266)
+- *(protocol)* [**breaking**] Report each source's database engine in /api/sources (#269)
+- *(frontend)* Show the table list in a side panel that can be hidden (#270)
+- *(protocol)* [**breaking**] Typed filter comparison and IN/BETWEEN operators (#281)
+
+### Bug Fixes
+
+- *(frontend)* Don't suggest a join pair from a foreign key into another schema (#247)
+- *(frontend)* Name a table only once the scope's lists answer (#250)
+- *(protocol)* Break ties on the table's key so offset paging never repeats or skips a row (#279)
+- *(ports)* Read key metadata from catalog views a SELECT-only role can see (#280)
+- *(ports)* Filter a MySQL zero date by its text, found by a typed round-trip conformance test (#283)
+
+### Performance
+
+- *(ports)* Leave a joined table's key out of the sort when its on pairs already fix its row (#282)
+
+### Documentation
+
+- Fix spec and design doc drift, and add the testing-gaps story (#278)
+
 ## [0.13.0] - 2026-11-04
 
 ### Features
