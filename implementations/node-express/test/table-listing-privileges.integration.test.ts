@@ -1,14 +1,15 @@
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { PostgresSource } from "../src/db/postgres.js";
 import type { QueryOpts } from "../src/db/types.js";
 import { FilterError, NotAllowedError } from "../src/errors.js";
+import { describeWithEnv } from "./helpers.js";
 
 // The table listing, the counts, and the `table` allow-list must all
 // Excludes non-selectable tables and maps residual SELECT denial to NotAllowed
 // (spec/protocol.md §5.2).
 const databaseUrl = process.env.DATABASE_URL;
-const maybeDescribe = databaseUrl ? describe : describe.skip;
+const maybeDescribe = describeWithEnv("DATABASE_URL");
 
 const SCHEMA = "ashb_test_table_privileges";
 const ROLE = "ashb_test_table_privileges_role";

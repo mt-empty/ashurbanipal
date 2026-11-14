@@ -4,6 +4,7 @@ import { MySqlSource, mysqlColumnClass, timedSelect, type Variant } from "../../
 import type { QueryOpts } from "../../src/db/types.js";
 import { isQueryTimeout, NotAllowedError } from "../../src/errors.js";
 import { BadJoinError, parseJoin } from "../../src/join.js";
+import { describeWithEnv } from "../helpers.js";
 
 // Live-instance coverage against the devcontainer's MySQL and MariaDB services.
 
@@ -85,7 +86,7 @@ const baseOpts: QueryOpts = { limit: 10, offset: 0, descending: false, filter: [
 
 function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL", expectedVariant: Variant): void {
   const baseUrl = process.env[envVar];
-  const maybeDescribe = baseUrl ? describe : describe.skip;
+  const maybeDescribe = describeWithEnv(envVar);
 
   maybeDescribe(`MySqlSource against real ${label}`, () => {
     const dbs: SeededDb[] = [];

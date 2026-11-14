@@ -100,10 +100,7 @@ class MySqlSourceTest {
     private fun forEachReachableInstance(block: (envVar: String) -> Unit) {
         var ranAny = false
         for (envVar in listOf("MYSQL_TEST_URL", "MARIADB_TEST_URL")) {
-            // The Gradle `Test` task forwards these as "" rather than unset
-            // when the outer process doesn't have them (build.gradle.kts) —
-            // blank must be treated the same as absent.
-            if (!System.getenv(envVar).isNullOrBlank()) {
+            if (requireTestEnv(envVar) != null) {
                 ranAny = true
                 block(envVar)
             }

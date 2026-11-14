@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -19,10 +18,7 @@ import (
 
 func setupSchemaDDL(t *testing.T, schema, ddl string) {
 	t.Helper()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	databaseURL := requireTestEnv(t, "DATABASE_URL")
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		t.Fatalf("opening admin connection: %v", err)

@@ -6,11 +6,11 @@ Each test uses an isolated throwaway database and skips unavailable services.
 from __future__ import annotations
 
 import json
-import os
 import time
 
 import pymysql
 import pytest
+from _env import require_env
 
 from ashurbanipal.db import BadJoin, KeyKind, NotAllowed, QueryOpts, QueryTimeout, wrap_driver_errors
 from ashurbanipal.db.mysql import _MARIADB, MySqlSource, connect_kwargs_from_url
@@ -20,8 +20,8 @@ from ashurbanipal.join import JoinOpts, JoinSpec, parse_join
 pytestmark = pytest.mark.mysql
 
 _URLS = {
-    "mysql": os.environ.get("MYSQL_TEST_URL"),
-    "mariadb": os.environ.get("MARIADB_TEST_URL"),
+    "mysql": require_env("MYSQL_TEST_URL"),
+    "mariadb": require_env("MARIADB_TEST_URL"),
 }
 _AVAILABLE = [name for name, url in _URLS.items() if url]
 

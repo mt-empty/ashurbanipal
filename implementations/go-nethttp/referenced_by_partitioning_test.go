@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -21,10 +20,7 @@ import (
 
 func setupPartitionedSchema(t *testing.T, schema string) {
 	t.Helper()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	databaseURL := requireTestEnv(t, "DATABASE_URL")
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		t.Fatalf("opening admin connection: %v", err)

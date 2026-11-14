@@ -35,8 +35,8 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "postgres: needs DATABASE_URL (skips cleanly otherwise)",
-    "mysql: needs MYSQL_TEST_URL and/or MARIADB_TEST_URL (skips cleanly otherwise)",
+    "postgres: needs DATABASE_URL (skips locally otherwise, fails under CI)",
+    "mysql: needs MYSQL_TEST_URL and MARIADB_TEST_URL (each skips locally when unset, fails under CI)",
 ]
 filterwarnings = [
     "error::DeprecationWarning",

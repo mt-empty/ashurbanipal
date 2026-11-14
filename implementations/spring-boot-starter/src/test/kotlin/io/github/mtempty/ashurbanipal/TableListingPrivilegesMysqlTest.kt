@@ -27,8 +27,7 @@ class TableListingPrivilegesMysqlTest {
     fun `residual select-denied maps to NotAllowed on every reachable instance`() {
         var ranAny = false
         for (envVar in listOf("MYSQL_TEST_URL", "MARIADB_TEST_URL")) {
-            val raw = System.getenv(envVar)
-            if (raw.isNullOrBlank()) continue
+            val raw = requireTestEnv(envVar) ?: continue
             ranAny = true
             runFor(raw, envVar)
         }

@@ -20,7 +20,7 @@ description = "gofmt -l . (fails if any file needs reformatting)"
 run = "sh tools/check-go-fmt.sh"
 
 ["go:test"]
-description = "go test -race with the sqlite and mysql build tags (integration_test.go needs DATABASE_URL + the conformance seed; mysql tests skip without MYSQL_TEST_URL)"
+description = "go test -race with the sqlite and mysql build tags (integration_test.go needs DATABASE_URL + the conformance seed; database tests skip without their URL, and fail under CI)"
 run = "go test -race -tags sqlite,mysql ./..."
 dir = "implementations/go-nethttp"
 

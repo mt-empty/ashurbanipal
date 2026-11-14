@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,11 +18,7 @@ import (
 // exercises the same tests against the other fork.
 func testURL(t *testing.T) string {
 	t.Helper()
-	url := os.Getenv("MYSQL_TEST_URL")
-	if url == "" {
-		t.Skip("MYSQL_TEST_URL not set — needs a reachable MySQL/MariaDB instance (see .devcontainer)")
-	}
-	return url
+	return requireTestEnv(t, "MYSQL_TEST_URL")
 }
 
 var seededDBCounter int64
@@ -351,10 +346,7 @@ func TestMySQLSlowQueryIsAbortedByTheTimeoutMechanism(t *testing.T) {
 // MYSQL_TEST_URL) so it's skipped, not silently unrun, when only a plain
 // MySQL instance is reachable.
 func TestMariaDBSlowQueryIsAbortedByTheTimeoutMechanism(t *testing.T) {
-	url := os.Getenv("MARIADB_TEST_URL")
-	if url == "" {
-		t.Skip("MARIADB_TEST_URL not set — needs a reachable MariaDB instance (see .devcontainer)")
-	}
+	url := requireTestEnv(t, "MARIADB_TEST_URL")
 	runSlowQueryTimeoutTest(t, url)
 }
 
@@ -433,10 +425,7 @@ func TestMySQLJoinLeftKeepsUnmatchedRowsAndFiltersAJoinedColumn(t *testing.T) {
 }
 
 func TestMariaDBJoinLeftKeepsUnmatchedRowsAndFiltersAJoinedColumn(t *testing.T) {
-	url := os.Getenv("MARIADB_TEST_URL")
-	if url == "" {
-		t.Skip("MARIADB_TEST_URL not set — needs a reachable MariaDB instance (see .devcontainer)")
-	}
+	url := requireTestEnv(t, "MARIADB_TEST_URL")
 	runMySQLJoinChecks(t, NewMySQLSource(seededMySQLDB(t, url), 5))
 }
 

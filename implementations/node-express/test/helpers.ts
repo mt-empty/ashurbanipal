@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Router as ExpressRouter } from "express";
 import express from "express";
+import { describe } from "vitest";
 
 // Shared by every integration test file that spins up a real HTTP server
 // for a createRouter() result — schema.integration.test.ts, sources.test.ts,
@@ -27,4 +28,11 @@ export async function getJson(baseUrl: string, path: string): Promise<{ status: 
   const res = await fetch(`${baseUrl}${path}`);
   const body = res.status === 200 ? await res.json() : await res.text();
   return { status: res.status, body };
+}
+
+/** `describe` when the named database URL is set, else `describe.skip` locally. Under CI a missing URL throws, so a CI job that loses the variable fails instead of skipping. */
+export function describeWithEnv(name: string): typeof describe | typeof describe.skip {
+  if (process.env[name]) return describe;
+  if (process.env.CI) throw new Error(`${name} is not set; CI must provide it`);
+  return describe.skip;
 }

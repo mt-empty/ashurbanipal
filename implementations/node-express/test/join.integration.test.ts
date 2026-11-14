@@ -1,14 +1,15 @@
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { PostgresSource } from "../src/db/postgres.js";
 import { isQueryTimeout, UnsortableError } from "../src/errors.js";
 import { BadJoinError, type JoinOpts, type JoinSpec, parseJoin } from "../src/join.js";
+import { describeWithEnv } from "./helpers.js";
 
 // Postgres catalog types the conformance seed cannot vary: enum identity,
 // arrays, and the timeout label (spec/protocol.md §5.11). One schema per
 // describe so concurrent files cannot race each other's DDL.
 const databaseUrl = process.env.DATABASE_URL;
-const maybeDescribe = databaseUrl ? describe : describe.skip;
+const maybeDescribe = describeWithEnv("DATABASE_URL");
 
 const opts = (over: Partial<JoinOpts> = {}): JoinOpts => ({
   limit: 10,

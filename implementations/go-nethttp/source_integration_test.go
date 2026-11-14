@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"sync"
 	"testing"
 
@@ -35,10 +34,7 @@ var (
 
 func sourceTestServer(t *testing.T) string {
 	t.Helper()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	databaseURL := requireTestEnv(t, "DATABASE_URL")
 	// Deliberately never closed: the server and its two pools must outlive
 	// every individual test function that shares them, so they're left to
 	// the test binary's own process exit rather than scoped to whichever
@@ -77,7 +73,7 @@ func sourceTestServer(t *testing.T) string {
 		sourceServerURL = srv.URL
 	})
 	if sourceServerURL == "" {
-		t.Skip("source test server failed to start")
+		t.Fatal("source test server failed to start")
 	}
 	return sourceServerURL
 }

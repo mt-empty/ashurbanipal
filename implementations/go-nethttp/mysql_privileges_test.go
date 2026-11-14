@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -113,9 +112,6 @@ func TestMySQLSelectDeniedMapsToNotAllowed(t *testing.T) {
 }
 
 func TestMariaDBSelectDeniedMapsToNotAllowed(t *testing.T) {
-	url := os.Getenv("MARIADB_TEST_URL")
-	if url == "" {
-		t.Skip("MARIADB_TEST_URL not set — needs a reachable MariaDB instance (see .devcontainer)")
-	}
+	url := requireTestEnv(t, "MARIADB_TEST_URL")
 	runMySQLPrivilegeTest(t, url)
 }
