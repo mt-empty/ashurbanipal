@@ -129,6 +129,9 @@ by reusing the frontend and fixtures above:
    cast to text *in the SQL itself*; decoding into a native type and
    reformatting in application code is non-conformant even if the end
    result happens to look like a string (see hardening checklist item 1).
+   Every catalog and data query MUST run on the oldest supported version of
+   each engine, not just the newest (`docs/adapter-decisions.md`,
+   "Supported engine versions").
 4. **Filter AST validation + WHERE-clause building** (§5.4.2) — no DSL
    text parsing (that's frontend-only, `spec/filter-dsl.md`); this is
    pure JSON-AST-in, WHERE-fragment-out. Columns validated against the

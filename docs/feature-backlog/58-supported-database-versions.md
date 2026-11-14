@@ -1,6 +1,6 @@
 # Supported database versions
 
-> **Status:** OPEN · **Area:** ports, conformance, infra, docs
+> **Status:** DONE · **Area:** ports, conformance, infra, docs · **Ref:** range in `readme.md` and `docs/adapter-decisions.md` ("Supported engine versions"); Postgres 15, MySQL 8.4, MariaDB 10.11, SQLite 3.16
 
 ## 1. The ask
 
@@ -17,14 +17,25 @@ would have caught it.
 
 ## 2. Proposed range
 
-**Progress (2026-11-14, [[57-testing-environment-gaps]] V1 and V2):** work
-items 1 to 3 are done. `docs/adapter-decisions.md` ("Supported engine
-versions") states the range, every CI image names an exact version, and
-`rust-axum-conformance.yml` runs both ends on each push to `main`. The
-owner set the rule that a version leaves the range when its vendor drops
-it, so the stated minimums are Postgres 15 and MySQL 8.4, not the 14 and
-8.0.17 in the table below. axum still passes conformance on Postgres 14
-and MySQL 8.0.46. Items 4 and 5 are open.
+**Outcome (2026-11-14, [[57-testing-environment-gaps]] V1 and V2):** all
+five work items are done.
+
+- `readme.md` and `docs/adapter-decisions.md` ("Supported engine
+  versions") state the range.
+- Every CI image names an exact version, and `rust-axum-conformance.yml`
+  runs both ends on each push to `main`.
+- The owner set the rule that a version leaves the range when its vendor
+  drops it. So the minimums are Postgres 15 and MySQL 8.4, not the 14 and
+  8.0.17 in the table below. That also settles the MySQL 8.0 question in
+  §6. axum still passes conformance on Postgres 14 and MySQL 8.0.46.
+- The SQLite minimum is 3.16. No port's SQLite SQL needs anything newer
+  than table-valued pragmas called with a column argument
+  (`join pragma_foreign_key_list(m.name)`). Flask's tests pass on SQLite
+  3.16.0 and fail on 3.15.2 (`no such table: pragma_table_info`). The test
+  ran in a `python:3.12` container, with `_sqlite3` rebuilt against each
+  SQLite version. CI does not repeat this test.
+- `PORTING.md` ("What you implement", item 3) says every query must run on
+  each engine's oldest supported version.
 
 | Engine | Minimum | Newest tested | Why this minimum |
 |---|---|---|---|
