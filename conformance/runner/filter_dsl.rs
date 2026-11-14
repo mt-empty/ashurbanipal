@@ -582,12 +582,36 @@ async fn a_value_that_does_not_fit_a_typed_column_is_invalid_filter() {
     }
 }
 
+/// Every row matching `filter`, keyed by `id` text, so a failure can name
+/// the row a value should have found.
+async fn ids(srv: &TestServer, table: &str, filter: &serde_json::Value) -> Vec<String> {
+    texts(&all_rows(srv, table, filter).await, "id")
+}
+
 /// A typed cell's own text filters back to its row, as click-to-filter
-/// writes it: an engine that renders an offset (Postgres `timestamptz`)
-/// must accept one, and a rendered number or date must fit its form.
+/// writes it (spec/protocol.md §5.4.2). `typed_samples` holds each engine's
+/// edge values (`NaN`, infinities, BC and five-digit years, `24:00`, MySQL's
+/// zero date and ±838-hour times); the other tables hold everyday values.
 #[tokio::test]
 async fn a_typed_cells_own_text_filters_back_to_its_row() {
     let srv = TestServer::spawn().await;
+    let engine = Backend::current().fixture_name();
+
+    let classes = column_classes(&srv, "typed_samples").await;
+    for (column, class) in &classes {
+        if column != "id" {
+            assert!(
+                TYPED_CLASSES.contains(&class.as_str()),
+                "{engine}: typed_samples.{column} reports class {class:?}, not a typed class"
+            );
+        }
+    }
+    let mut columns: Vec<(&str, String)> = classes
+        .into_keys()
+        .filter(|c| c != "id")
+        .map(|c| ("typed_samples", c))
+        .collect();
+    columns.sort();
     for (table, column) in [
         ("users", "age"),
         ("users", "created_at"),
@@ -595,14 +619,72 @@ async fn a_typed_cells_own_text_filters_back_to_its_row() {
         ("products", "weight_kg"),
         ("products", "created_on"),
     ] {
-        let all = all_rows(&srv, table, &serde_json::Value::Null).await;
-        let values = texts(&all, column);
-        let value = &values[0];
-        let ast = serde_json::json!([{"column": column, "op": "=", "value": value}]);
-        let rows = all_rows(&srv, table, &ast).await;
-        assert!(
-            rows.iter().any(|r| r[column].as_str() == Some(value)),
-            "{table}.{column} = {value:?} should find its own row"
-        );
+        columns.push((table, column.to_string()));
     }
+
+    let mut failures = Vec::new();
+    for (table, column) in &columns {
+        let all = all_rows(&srv, table, &serde_json::Value::Null).await;
+        let mut distinct: Vec<String> = Vec::new();
+        for row in &all {
+            let Some(value) = row[column.as_str()].as_str() else {
+                continue;
+            };
+            if distinct.iter().any(|d| d == value) {
+                continue;
+            }
+            distinct.push(value.to_string());
+            let ast = serde_json::json!([{"column": column, "op": "=", "value": value}]);
+            let resp = fetch(&srv, table, &ast.to_string()).await;
+            if resp.status() != 200 {
+                let status = resp.status();
+                let body = resp.text().await.unwrap();
+                failures.push(format!("{table}.{column} = {value:?}: {status} {body}"));
+                continue;
+            }
+            let body: serde_json::Value = resp.json().await.unwrap();
+            let found = body["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r[column.as_str()].as_str() == Some(value));
+            if !found {
+                failures.push(format!(
+                    "{table}.{column} = {value:?}: its own row is missing"
+                ));
+            }
+        }
+        if *table == "typed_samples" && !distinct.is_empty() {
+            let with_value: Vec<String> = all
+                .iter()
+                .filter(|r| r[column.as_str()].is_string())
+                .map(|r| r["id"].as_str().unwrap().to_string())
+                .collect();
+            let ast = serde_json::json!([{"column": column, "op": "IN", "value": distinct}]);
+            let resp = fetch(&srv, table, &ast.to_string()).await;
+            if resp.status() == 200 {
+                let mut got = ids(&srv, table, &ast).await;
+                got.sort();
+                let mut want = with_value;
+                want.sort();
+                if got != want {
+                    failures.push(format!(
+                        "{table}.{column} IN its own values: rows {got:?}, want {want:?}"
+                    ));
+                }
+            } else {
+                let status = resp.status();
+                let body = resp.text().await.unwrap();
+                failures.push(format!(
+                    "{table}.{column} IN its own values: {status} {body}"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{engine}: {} typed values do not filter back to their rows:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }

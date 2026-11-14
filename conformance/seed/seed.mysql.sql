@@ -17,6 +17,7 @@
 SET FOREIGN_KEY_CHECKS = 0;
 DROP DATABASE IF EXISTS `warehouse`;
 DROP TABLE IF EXISTS `_conformance_meta`;
+DROP TABLE IF EXISTS `typed_samples`;
 DROP TABLE IF EXISTS `page_hits`;
 DROP TABLE IF EXISTS `feature_flags`;
 DROP TABLE IF EXISTS `inventory_counts`;
@@ -216,6 +217,25 @@ CREATE TABLE `page_hits` (
   UNIQUE KEY `page_hits_path_day` (`path`, `day`)
 );
 
+-- Edge values of every type a filter compares in its own type: each cell's
+-- text must filter back to its row (spec/protocol.md §5.4.2).
+CREATE TABLE `typed_samples` (
+  `id`            int PRIMARY KEY,
+  `tinyint_v`     tinyint,
+  `smallint_v`    smallint,
+  `mediumint_v`   mediumint,
+  `int_v`         int,
+  `bigint_v`      bigint,
+  `unsigned_v`    bigint unsigned,
+  `decimal_v`     decimal(65,30),
+  `float_v`       float,
+  `double_v`      double,
+  `date_v`        date,
+  `datetime_v`    datetime(6),
+  `timestamp_v`   timestamp(6) NULL DEFAULT NULL,
+  `time_v`        time(6)
+);
+
 CREATE TABLE `_conformance_meta` (
   `seed_version` varchar(20) NOT NULL,
   `dialect`      varchar(20) NOT NULL,
@@ -389,6 +409,18 @@ INSERT INTO `page_hits` (`path`, `day`, `hits`, `ref_code`, `detail`) VALUES
   ('/home', '2026-07-01', 30, NULL, '{"ms": 9}'),
   ('/pricing', '2026-07-02', 27, NULL, '{"ms": 27}');
 
+-- The zero date needs a mode without NO_ZERO_DATE.
+SET @seed_sql_mode = @@SESSION.sql_mode;
+SET SESSION sql_mode = '';
+INSERT INTO `typed_samples` VALUES
+  (1, -128, -32768, -8388608, -2147483648, -9223372036854775808, 0, -99999999999999999999999999999999999.999999999999999999999999999999, -3.40282e38, -1.7976931348623157e308, '1000-01-01', '1000-01-01 00:00:00', '1970-01-01 00:00:01', '-838:59:59'),
+  (2, 127, 32767, 8388607, 2147483647, 9223372036854775807, 18446744073709551615, 99999999999999999999999999999999999.999999999999999999999999999999, 3.40282e38, 1.7976931348623157e308, '9999-12-31', '9999-12-31 23:59:59.999999', '2038-01-19 03:14:07.999999', '838:59:59'),
+  (3, 0, 0, 0, 0, 0, 1, 0.000000000000000000000000000001, 1.17549e-38, 2.2250738585072014e-308, '0000-00-00', '0000-00-00 00:00:00', '2016-06-15 12:30:00.5', '-00:00:01.5'),
+  (4, -1, 1, -1, 1, -1, 2, 1.5, 0.1, 0.1, '2016-02-29', '2016-02-29 12:30:00.000001', '2000-01-01 00:00:00', '00:00:00.000001'),
+  (5, 1, -1, 1, -1, 1, 3, -0.0, 1.5, 1.5, '2016-01-31', '2016-01-31 00:00:00', '1999-12-31 23:59:59', '23:59:59.999999'),
+  (6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+SET SESSION sql_mode = @seed_sql_mode;
+
 -- ------------------------------------------------------------- warehouse
 -- The cross-database fixture, the counterpart of seed.sql's `warehouse`
 -- schema: its tables reference this database's `orders` and `users`. This
@@ -481,7 +513,7 @@ ANALYZE TABLE `warehouse`.`carriers`, `warehouse`.`shipments`,
 -- stays NULL -> mapped to -1 by mysql.rs (the §5.3 "never analyzed" case).
 ANALYZE TABLE `users`, `orders`, `order_extra`, `products`, `events`, `sessions`,
   `reviews`, `support_tickets`, `payments`, `audit_log`, `saved_reports`,
-  `inventory_locations`, `inventory_counts`, `page_hits`;
+  `inventory_locations`, `inventory_counts`, `page_hits`, `typed_samples`;
 
 INSERT INTO `_conformance_meta` (`seed_version`, `dialect`, `checksum`, `generated_at`)
-VALUES ('7', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));
+VALUES ('8', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));

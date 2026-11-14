@@ -346,6 +346,20 @@ func (t *typedCompare) castFor(v string) string {
 	return t.cast
 }
 
+// namesZeroDate: MySQL's NO_ZERO_DATE mode rejects a zero-date literal
+// (error 1525), so a condition naming one compares the column's text instead.
+func (t *typedCompare) namesZeroDate(values []string) bool {
+	if t == nil || (t.form != formMysqlDate && t.form != formMysqlDatetime) {
+		return false
+	}
+	for _, v := range values {
+		if strings.HasPrefix(v, "0000-00-00") {
+			return true
+		}
+	}
+	return false
+}
+
 // colMeta is one column as the live catalog reports it.
 type colMeta struct {
 	name     string
@@ -794,8 +808,12 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 	var clause strings.Builder
 	for i, t := range terms {
 		c := t.cond
+		var items []string
+		if c.Value != nil {
+			items = c.Value.Items
+		}
 		typed := t.col.compare
-		if opIsPattern(c.Op) {
+		if opIsPattern(c.Op) || typed.namesZeroDate(items) {
 			typed = nil
 		}
 		placeholder := func(v string) string {
@@ -814,10 +832,6 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 		lhs := d.castText(t.expr)
 		if typed != nil {
 			lhs = t.expr
-		}
-		var items []string
-		if c.Value != nil {
-			items = c.Value.Items
 		}
 		var inner string
 		switch c.Op {

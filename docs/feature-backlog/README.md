@@ -33,7 +33,7 @@ Each row links its rationale doc. Status lives in that doc's
 | [51](51-bounded-long-values-in-the-record-view.md) | Bounded long values in the record view, and stable previous/next | frontend, e2e |
 | [55](55-changed-cell-highlight-on-refresh.md) | Highlight cells that changed since the last refresh | frontend, docs, e2e |
 | [56](56-copy-and-download-the-current-page.md) | Copy or download the current page as CSV, TSV, or Markdown | frontend, docs, e2e |
-| [57](57-testing-environment-gaps.md) | Testing-environment gaps: seeds, demos, conformance, e2e and CI | conformance, ports, frontend, infra, docs, e2e |
+| [57](57-testing-environment-gaps.md) | Testing-environment gaps: seeds, demos, conformance, e2e and CI | conformance, ports, frontend, infra, docs, e2e, performance |
 | [58](58-supported-database-versions.md) | Supported database versions | ports, conformance, infra, docs |
 
 ## Partial

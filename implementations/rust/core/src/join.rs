@@ -270,6 +270,15 @@ impl TypedCompare {
             _ => self.cast,
         }
     }
+
+    /// MySQL's `NO_ZERO_DATE` mode rejects a zero-date literal (error 1525),
+    /// so a condition naming one compares the column's text instead.
+    pub fn names_zero_date(&self, values: &[String]) -> bool {
+        matches!(
+            self.form,
+            Some(ValueForm::MysqlDate | ValueForm::MysqlDatetime)
+        ) && values.iter().any(|v| v.starts_with("0000-00-00"))
+    }
 }
 
 /// One column as the live catalog reports it.
@@ -831,7 +840,11 @@ fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
     let mut clause = String::new();
     let mut values = Vec::new();
     for (i, t) in terms.iter().enumerate() {
-        let typed = t.col.compare.filter(|_| !t.op.is_pattern());
+        let items = t.value.map(FilterValue::items).unwrap_or_default();
+        let typed = t
+            .col
+            .compare
+            .filter(|c| !t.op.is_pattern() && !c.names_zero_date(items));
         let mut placeholder = |value: &str| {
             let p = if d.numbered {
                 next_param += 1;
@@ -849,7 +862,6 @@ fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
         } else {
             (d.cast_text)(&t.expr)
         };
-        let items = t.value.map(FilterValue::items).unwrap_or_default();
         let inner = match t.op {
             FilterOp::IsNull | FilterOp::IsNotNull => {
                 format!("{lhs} {}", crate::db::op_sql(t.op))
@@ -1370,6 +1382,41 @@ mod tests {
             matches!(&err, DbError::FilterParse(m) if m.contains("\"x\"") && m.contains("\"total\"")),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn a_mysql_zero_date_compares_the_columns_text() {
+        let table = TableMeta {
+            schema: None,
+            name: Ident::for_test("t"),
+            columns: vec![ColMeta {
+                compare: Some(TypedCompare {
+                    form: Some(ValueForm::MysqlDate),
+                    cast: None,
+                    int_cast: None,
+                }),
+                ..col("d", "date", ColumnClass::Temporal)
+            }],
+            order_keys: Vec::new(),
+        };
+        let list = |v: &[&str]| FilterValue::List(v.iter().map(|s| s.to_string()).collect());
+        for (filter, want) in [
+            (
+                cond("d", FilterOp::Eq, "2016-02-29".into()),
+                " where (\"d\" = $3)",
+            ),
+            (
+                cond("d", FilterOp::Eq, "0000-00-00".into()),
+                " where (\"d\"::text = $3)",
+            ),
+            (
+                cond("d", FilterOp::In, list(&["2016-02-29", "0000-00-00"])),
+                " where (\"d\"::text IN ($3, $4))",
+            ),
+        ] {
+            let (sql, _) = table_where_clause(&[filter], &table, &dialect()).unwrap();
+            assert_eq!(sql, want);
+        }
     }
 
     #[test]

@@ -16,6 +16,7 @@
 
 PRAGMA foreign_keys = OFF;
 DROP TABLE IF EXISTS _conformance_meta;
+DROP TABLE IF EXISTS typed_samples;
 DROP TABLE IF EXISTS page_hits;
 DROP TABLE IF EXISTS feature_flags;
 DROP TABLE IF EXISTS inventory_counts;
@@ -191,6 +192,20 @@ CREATE UNIQUE INDEX page_hits_path_day ON page_hits (path, day);
 CREATE UNIQUE INDEX page_hits_a_top ON page_hits (hits) WHERE hits > 1000000;
 CREATE UNIQUE INDEX page_hits_a_lower_path ON page_hits (lower(path), day);
 
+-- Edge values of every type a filter compares in its own type: each cell's
+-- text must filter back to its row (spec/protocol.md §5.4.2). REAL values keep
+-- to 15 significant digits: SQLite before 3.52 renders no more
+-- (docs/adapter-decisions.md §5.4.2).
+CREATE TABLE typed_samples (
+  id         INTEGER PRIMARY KEY,
+  integer_v  INTEGER,
+  numeric_v  NUMERIC,
+  real_v     REAL,
+  date_v     DATE,
+  datetime_v DATETIME,
+  time_v     TIME
+);
+
 CREATE TABLE _conformance_meta (
   seed_version TEXT NOT NULL,
   dialect      TEXT NOT NULL,
@@ -362,7 +377,15 @@ INSERT INTO page_hits (path, day, hits, ref_code, detail) VALUES
   ('/home', '2026-07-01', 30, NULL, '{"ms": 9}'),
   ('/pricing', '2026-07-02', 27, NULL, '{"ms": 27}');
 
+INSERT INTO typed_samples VALUES
+  (1, -9223372036854775808, -12345678901234.5, -1.79769313486231e308, '0001-01-01', '0001-01-01 00:00:00', '00:00:00'),
+  (2, 9223372036854775807, 0.000001, 1e308, '9999-12-31', '9999-12-31 23:59:59.999999', '23:59:59.999999'),
+  (3, 0, 1.50, -0.0, '2016-02-29', '2016-02-29T12:30:00', '24:00:00'),
+  (4, 1, '12', 1e-100, '2016-01-31', '2016-01-31 00:00:00.5', '12:30'),
+  (5, -1, 0.1, 0.1, '1970-01-01', '1970-01-01 00:00:00', '09:05:00'),
+  (6, NULL, NULL, NULL, NULL, NULL, NULL);
+
 ANALYZE;
 
 INSERT INTO _conformance_meta (seed_version, dialect, checksum, generated_at)
-VALUES ('7', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
+VALUES ('8', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');

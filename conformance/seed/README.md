@@ -83,6 +83,13 @@ plus tables and a second schema added for conformance coverage:
   pass: no planner statistics exist for it, so `common-values` must
   return an empty list rather than an error, and `table-counts` may read
   back `-1` for it.
+- **`typed_samples`** — one column per type a filter compares in its own
+  type (§5.4.2), holding each engine's edge values: Postgres `NaN`,
+  infinities, BC and five-digit years, `24:00` and `timetz` offsets; MySQL
+  unsigned and 35-digit decimals, float limits, the zero date and ±838-hour
+  times; SQLite int64 limits and `REAL` extremes. Each seed declares its
+  own columns. `filter_dsl::a_typed_cells_own_text_filters_back_to_its_row`
+  filters every cell by its own text and expects its row back.
 - **`other_schema.decoy_items`** — a second Postgres schema with its own
   table, so `current_schema()`-scoping (`spec/protocol.md` §6) is
   falsifiable: `decoy_items` must never appear in `/api/tables`, and

@@ -17,6 +17,7 @@ const SEEDED_TABLES = [
   "saved_reports",
   "sessions",
   "support_tickets",
+  "typed_samples",
   "users",
 ];
 

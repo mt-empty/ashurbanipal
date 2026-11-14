@@ -229,6 +229,10 @@ data class TypedCompare(
     /** The cast target for one bound value. */
     fun castFor(value: String): String? =
         if (intCast != null && value.toLongOrNull() != null) intCast else cast
+
+    /** MySQL's NO_ZERO_DATE mode rejects a zero-date literal (error 1525), so a condition naming one compares the column's text instead. */
+    fun namesZeroDate(values: List<String>): Boolean =
+        (form == ValueForm.MYSQL_DATE || form == ValueForm.MYSQL_DATETIME) && values.any { it.startsWith("0000-00-00") }
 }
 
 /** The class of a typed column, read from its value form so a backend's class and typed comparison can't disagree. */
@@ -474,10 +478,10 @@ private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, Lis
     val clause = StringBuilder()
     terms.forEachIndexed { i, t ->
         val cond = t.cond
-        val typed = t.col.compare.takeIf { cond.op !in PATTERN_OPS }
+        val items = cond.items()
+        val typed = t.col.compare.takeIf { cond.op !in PATTERN_OPS && it?.namesZeroDate(items) != true }
         fun ph(value: String) = typed?.castFor(value)?.let { d.castParam("?", it) } ?: "?"
         val lhs = if (typed != null) t.expr else d.castText(t.expr)
-        val items = cond.items()
         val inner = when (cond.op) {
             in OPS_WITHOUT_VALUE -> "$lhs ${opSqlKeyword(cond.op)}"
             "IN" -> "$lhs IN (${items.joinToString(", ") { ph(it) }})"

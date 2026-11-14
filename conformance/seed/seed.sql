@@ -32,6 +32,7 @@ drop schema if exists warehouse cascade;
 -- New tables are dropped before the originals they reference — `cascade` handles
 -- dependent constraints/views either way, but this keeps the drop order honest.
 drop table if exists _conformance_meta cascade;
+drop table if exists typed_samples cascade;
 drop table if exists page_hits cascade;
 drop table if exists feature_flags cascade;
 drop table if exists inventory_counts cascade;
@@ -224,6 +225,23 @@ create table page_hits (
 create unique index page_hits_path_day on page_hits (path, day);
 create unique index page_hits_a_top on page_hits (hits) where hits > 1000000;
 create unique index page_hits_a_lower_path on page_hits (lower(path), day);
+
+-- Edge values of every type a filter compares in its own type: each
+-- cell's text must filter back to its row (spec/protocol.md §5.4.2).
+create table typed_samples (
+    id integer primary key,
+    smallint_v smallint,
+    integer_v integer,
+    bigint_v bigint,
+    numeric_v numeric,
+    real_v real,
+    double_v double precision,
+    date_v date,
+    timestamp_v timestamp,
+    timestamptz_v timestamptz,
+    time_v time,
+    timetz_v timetz
+);
 
 -- Conformance sentinel (conformance/runner reads this when it isn't asked
 -- to apply the seed itself) — see write_conformance_meta().
@@ -53104,6 +53122,16 @@ insert into page_hits (path, day, hits, ref_code, detail) values
     ('/home', '2026-07-01', 30, null, '{"ms": 9}'),
     ('/pricing', '2026-07-02', 27, null, '{"ms": 27}');
 
+insert into typed_samples values
+    (1, -32768, -2147483648, -9223372036854775808, -1234567890123456789012345678901234567890.5, '-3.4028235e38', '-1.7976931348623157e308', '0001-01-01 BC', '4713-01-01 00:00:00 BC', '0001-01-01 00:00:00+00 BC', '00:00:00', '00:00:00-15:59'),
+    (2, 32767, 2147483647, 9223372036854775807, 0.000000000000000000000000000001, '3.4028235e38', '1.7976931348623157e308', '9999-12-31', '9999-12-31 23:59:59.999999', '9999-12-31 23:59:59.999999+00', '23:59:59.999999', '23:59:59.999999+15:59'),
+    (3, 0, 0, 0, 'NaN', 'NaN', 'NaN', '10000-01-01', '294276-12-31 23:59:59', '2016-06-15 12:30:00+05:30', '24:00:00', '24:00:00+00'),
+    (4, -1, 1, -1, 'Infinity', 'Infinity', 'Infinity', 'infinity', 'infinity', 'infinity', '12:30:00.5', '10:00:00+05:30'),
+    (5, 1, -1, 1, '-Infinity', '-Infinity', '-Infinity', '-infinity', '-infinity', '-infinity', '00:00:00.000001', '12:00:00+00'),
+    (6, 7, 7, 7, 1.50, '-0', '-0', '2016-02-29', '2016-02-29 00:00:00', '1900-01-01 00:00:00+00', '09:05:00', '09:05:00-03'),
+    (7, 7, 7, 7, 0.1, '1e-38', '5e-324', '1970-01-01', '1970-01-01 00:00:00.123', '2038-01-19 03:14:07+00', '00:00:00', '00:00:00+00'),
+    (8, null, null, null, null, null, null, null, null, null, null, null);
+
 insert into warehouse.carriers (name, contact_email, is_active) values
     ('Northwind Freight', 'keira@example.com', true),
     ('BlueDart Logistics', 'maryjane@example.com', true),
@@ -53594,8 +53622,9 @@ analyze saved_reports;
 analyze inventory_locations;
 analyze inventory_counts;
 analyze page_hits;
+analyze typed_samples;
 analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
 analyze warehouse.users;
-insert into _conformance_meta (seed_version, dialect, checksum) values ('7', 'postgres', 'dd16645c8007717a');
+insert into _conformance_meta (seed_version, dialect, checksum) values ('8', 'postgres', 'c1f1de93188ad05d');
