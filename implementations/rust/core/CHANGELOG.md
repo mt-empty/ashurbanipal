@@ -5,6 +5,33 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.14.0] - 2026-11-14
+
+### Features
+
+- *(protocol)* Let a join name tables from more than one schema (#248)
+- *(frontend)* Join tables from more than one schema (#249)
+- *(protocol)* [**breaking**] Report each source's database engine in /api/sources (#269)
+- *(protocol)* [**breaking**] Typed filter comparison and IN/BETWEEN operators (#281)
+
+### Bug Fixes
+
+- *(protocol)* Break ties on the table's key so offset paging never repeats or skips a row (#279)
+- *(ports)* Read key metadata from catalog views a SELECT-only role can see (#280)
+- *(ports)* Filter a MySQL zero date by its text, found by a typed round-trip conformance test (#283)
+
+### Performance
+
+- *(ports)* Leave a joined table's key out of the sort when its on pairs already fix its row (#282)
+
+### Refactor
+
+- *(rust)* Only a catalog name can be quoted into SQL (#264)
+
+### Documentation
+
+- Fix spec and design doc drift, and add the testing-gaps story (#278)
+
 ## [0.13.0] - 2026-11-04
 
 ### Features
