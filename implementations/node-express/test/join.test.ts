@@ -20,6 +20,7 @@ import {
   planJoin,
   type TableMeta,
   tableSchemas,
+  tableWhereClause,
   tieBreakKeys,
 } from "../src/join.js";
 
@@ -521,5 +522,24 @@ describe("pgColumnClass", () => {
     ] as const) {
       expect(pgColumnClass(t, "", "", false), t).toEqual({ kind });
     }
+  });
+});
+
+describe("a MySQL zero date", () => {
+  it("compares the column's text", () => {
+    const table: TableMeta = {
+      name: "t",
+      orderKeys: [],
+      columns: [{ name: "d", type: "date", class: { kind: "temporal" }, compare: { form: "mysql-date" } }],
+    };
+    for (const [value, want] of [
+      ["2016-02-29", ' where ("d" = $3)'],
+      ["0000-00-00", ' where ("d"::text = $3)'],
+    ] as const) {
+      expect(tableWhereClause([{ column: "d", op: "=", value }], table, pg).where).toBe(want);
+    }
+    expect(tableWhereClause([{ column: "d", op: "IN", value: ["2016-02-29", "0000-00-00"] }], table, pg).where).toBe(
+      ' where ("d"::text IN ($3, $4))',
+    );
   });
 });

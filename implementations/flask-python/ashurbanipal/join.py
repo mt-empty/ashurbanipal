@@ -234,6 +234,11 @@ class TypedCompare:
             return self.int_cast
         return self.cast
 
+    def names_zero_date(self, values: tuple[str, ...]) -> bool:
+        """MySQL's NO_ZERO_DATE mode rejects a zero-date literal (error 1525),
+        so a condition naming one compares the column's text instead."""
+        return self.form in ("mysql-date", "mysql-datetime") and any(v.startswith("0000-00-00") for v in values)
+
 
 _INT_RE = re.compile(r"[+-]?[0-9]+")
 
@@ -624,7 +629,9 @@ def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tupl
     values: list[str] = []
     clause = ""
     for i, (cond, expr, col) in enumerate(terms):
-        typed = None if cond.op in PATTERN_OPS else col.compare
+        typed = col.compare
+        if cond.op in PATTERN_OPS or (typed is not None and typed.names_zero_date(condition_values(cond))):
+            typed = None
 
         def ph_for(value: str, typed: TypedCompare | None = typed) -> str:
             target = typed.cast_for(value) if typed is not None else None

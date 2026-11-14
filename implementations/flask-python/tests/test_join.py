@@ -54,6 +54,7 @@ from ashurbanipal.join import (
     parse_join,
     plan_join,
     table_schemas,
+    table_where_clause,
     tie_break_keys,
 )
 from ashurbanipal.routes import router
@@ -664,3 +665,17 @@ def test_order_by_leaves_out_a_key_already_used_as_sort() -> None:
     # `order` applies only with a sort.
     assert order_by_clause(None, [0], True, render) == " order by c0 asc"
     assert order_by_clause(None, [], False, render) == ""
+
+
+def test_a_mysql_zero_date_compares_the_columns_text() -> None:
+    col = ColMeta(name="d", type_name="date", column_class=TEMPORAL, compare=TypedCompare("mysql-date"))
+    table = TableMeta("t", [col])
+    for cond, want in (
+        (Comparison(column="d", op="=", value="2016-02-29"), ' where ("d" = %s)'),
+        (Comparison(column="d", op="=", value="0000-00-00"), ' where ("d"::text = %s)'),
+        (
+            ListComparison(column="d", op="IN", value=("2016-02-29", "0000-00-00")),
+            ' where ("d"::text IN (%s, %s))',
+        ),
+    ):
+        assert table_where_clause([cond], table, _PG)[0] == want

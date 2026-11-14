@@ -432,4 +432,17 @@ class JoinSupportTest {
         assertFalse(isQueryTimeout(SQLException("permission denied", "42501")))
         assertFalse(isQueryTimeout(RuntimeException("boom")))
     }
+
+    @Test
+    fun `a MySQL zero date compares the column's text`() {
+        val d = ColMeta("d", "date", ColumnClass.TEMPORAL, compare = TypedCompare(ValueForm.MYSQL_DATE))
+        val table = TableMeta("t", listOf(d))
+        for ((cond, want) in listOf(
+            Condition(column = "d", op = "=", value = "2016-02-29") to " where (\"d\" = ?)",
+            Condition(column = "d", op = "=", value = "0000-00-00") to " where (\"d\"::text = ?)",
+            Condition(column = "d", op = "IN", value = listOf("2016-02-29", "0000-00-00")) to " where (\"d\"::text IN (?, ?))",
+        )) {
+            assertEquals(want, tableWhereClause(listOf(cond), table, pg).sql)
+        }
+    }
 }

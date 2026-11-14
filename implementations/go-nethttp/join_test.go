@@ -550,3 +550,23 @@ func TestJoinOrderKeysLeaveOutAKeyBoundToAFixedTable(t *testing.T) {
 		}
 	}
 }
+
+func TestAMySQLZeroDateComparesTheColumnsText(t *testing.T) {
+	table := tableMeta{name: "t", columns: []colMeta{{
+		name: "d", typeName: "date", class: classTemporal,
+		compare: &typedCompare{form: formMysqlDate},
+	}}}
+	for _, c := range []struct {
+		cond Condition
+		want string
+	}{
+		{Condition{Column: "d", Op: "=", Value: StringValue("2016-02-29")}, ` where ("d" = $3)`},
+		{Condition{Column: "d", Op: "=", Value: StringValue("0000-00-00")}, ` where ("d"::text = $3)`},
+		{Condition{Column: "d", Op: "IN", Value: &FilterValue{Items: []string{"2016-02-29", "0000-00-00"}, List: true}}, ` where ("d"::text IN ($3, $4))`},
+	} {
+		sql, _, err := tableWhereClause([]Condition{c.cond}, table, pgJoinDialect)
+		if err != nil || sql != c.want {
+			t.Errorf("%v: got %q, %v; want %q", c.cond.Value.Items, sql, err, c.want)
+		}
+	}
+}

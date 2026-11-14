@@ -252,6 +252,14 @@ function castFor(t: TypedCompare, v: string): string | undefined {
   return t.cast;
 }
 
+/**
+ * MySQL's NO_ZERO_DATE mode rejects a zero-date literal (error 1525), so a
+ * condition naming one compares the column's text instead.
+ */
+function namesZeroDate(t: TypedCompare | undefined, values: readonly string[]): boolean {
+  return (t?.form === "mysql-date" || t?.form === "mysql-datetime") && values.some((v) => v.startsWith("0000-00-00"));
+}
+
 /** One column as the live catalog reports it. */
 export interface ColMeta {
   name: string;
@@ -561,14 +569,14 @@ function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; value
   let next = 3;
   let clause = "";
   terms.forEach(({ cond, expr, col }, i) => {
-    const typed = opIsPattern(cond.op) ? undefined : col.compare;
+    const items = valueItems(cond);
+    const typed = opIsPattern(cond.op) || namesZeroDate(col.compare, items) ? undefined : col.compare;
     const placeholder = (v: string): string => {
       const p = d.numbered ? `$${next++}` : "?";
       const target = typed && castFor(typed, v);
       return target ? d.castParam(p, target) : p;
     };
     const lhs = typed ? expr : d.castText(expr);
-    const items = valueItems(cond);
     let inner: string;
     if (!opTakesValue(cond.op)) {
       inner = `${lhs} ${opSql(cond.op)}`;
