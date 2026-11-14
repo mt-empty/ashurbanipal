@@ -6,6 +6,9 @@ use ashurbanipal_axum::{DbError, DbSource, JoinOpts, JoinSpec, PgPoolSource, Que
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 // One schema per test: they run concurrently.
 const SCHEMA_TYPES: &str = "ashb_test_join_types";
 const SCHEMA_SLOW: &str = "ashb_test_join_slow";
@@ -13,9 +16,10 @@ const SCHEMA_COLLATION: &str = "ashb_test_join_collation";
 const SCHEMA_SORT: &str = "ashb_test_join_sort";
 const SCHEMA_KEY_COLLATION: &str = "ashb_test_key_collation";
 
-async fn setup(schema: &str, ddl: &str) -> PgPool {
+async fn setup(schema: &str, ddl: &str) -> (PgPool, PgCleanup) {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+    let cleanup = PgCleanup::new(&database_url, &[schema], &[]);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&database_url)
@@ -26,15 +30,7 @@ async fn setup(schema: &str, ddl: &str) -> PgPool {
     )))
     .await
     .expect("setup schema");
-    pool
-}
-
-async fn teardown(pool: &PgPool, schema: &str) {
-    pool.execute(sqlx::AssertSqlSafe(format!(
-        "drop schema if exists {schema} cascade;"
-    )))
-    .await
-    .ok();
+    (pool, cleanup)
 }
 
 fn table_opts() -> QueryOpts {
@@ -71,7 +67,7 @@ fn on(left_table: &str, left_col: &str, right_table: &str, right_col: &str) -> J
 #[tokio::test]
 async fn enums_pair_only_within_one_type_and_arrays_never_join() {
     let s = SCHEMA_TYPES;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create type {s}.mood as enum ('ok', 'sad'); \
@@ -109,14 +105,12 @@ async fn enums_pair_only_within_one_type_and_arrays_never_join() {
         .await
         .unwrap();
     assert_eq!(mixed.rows.len(), 1);
-
-    teardown(&pool, s).await;
 }
 
 #[tokio::test]
 async fn a_slow_join_is_a_query_timeout_and_releases_the_connection() {
     let s = SCHEMA_SLOW;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create table {s}.a as select g as id, g % 2 as k from generate_series(1, 20000) g; \
@@ -146,8 +140,6 @@ async fn a_slow_join_is_a_query_timeout_and_releases_the_connection() {
         .unwrap();
     assert_eq!(ok.rows.len(), 10);
     assert!(ok.has_more);
-
-    teardown(&pool, s).await;
 }
 
 // Postgres rejects a comparison of two different explicit collations, while
@@ -156,7 +148,7 @@ async fn a_slow_join_is_a_query_timeout_and_releases_the_connection() {
 #[tokio::test]
 async fn text_columns_with_clashing_collations_do_not_join() {
     let s = SCHEMA_COLLATION;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create table {s}.a (id int primary key, c text collate \"C\", p text collate \"POSIX\", d text); \
@@ -193,8 +185,6 @@ async fn text_columns_with_clashing_collations_do_not_join() {
         matches!(&clash, Err(DbError::BadJoin(m)) if m.contains("different text collations")),
         "expected a collation clash, got {clash:?}"
     );
-
-    teardown(&pool, s).await;
 }
 
 // A `json`, `xml` or geometric column has no ordering operator, so a sort on
@@ -203,7 +193,7 @@ async fn text_columns_with_clashing_collations_do_not_join() {
 #[tokio::test]
 async fn sorting_an_unorderable_column_is_a_client_error() {
     let s = SCHEMA_SORT;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create domain {s}.settings as jsonb; \
@@ -258,8 +248,6 @@ async fn sorting_an_unorderable_column_is_a_client_error() {
         .unwrap();
     let wire = serde_json::to_value(&table.columns).unwrap();
     assert_eq!(wire[3]["class"], "json");
-
-    teardown(&pool, s).await;
 }
 
 // A unique index in another collation than its column does not make the
@@ -268,7 +256,7 @@ async fn sorting_an_unorderable_column_is_a_client_error() {
 #[tokio::test]
 async fn a_unique_index_in_another_collation_is_no_tie_break_key() {
     let s = SCHEMA_KEY_COLLATION;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create collation {s}.ci (provider = icu, locale = 'und-u-ks-level2', deterministic = false); \
@@ -294,5 +282,4 @@ async fn a_unique_index_in_another_collation_is_no_tie_break_key() {
         ["b", "a"],
         "ordered by (a, b), not by the C-collated code index"
     );
-    teardown(&pool, s).await;
 }

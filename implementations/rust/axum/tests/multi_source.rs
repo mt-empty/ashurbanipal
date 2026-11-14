@@ -17,6 +17,9 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor;
 use tower::ServiceExt;
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 const SOURCE_SCHEMA_ALPHA: &str = "ashb_test_multi_source_alpha";
 const SOURCE_SCHEMA_BETA: &str = "ashb_test_multi_source_beta";
 // Its own schema: cargo runs this file's tests concurrently.
@@ -65,22 +68,6 @@ async fn build_pinned_source(
     PgPoolSource::new(pool)
 }
 
-async fn teardown_schemas(database_url: &str, schemas: &[&str]) {
-    let admin = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(database_url)
-        .await
-        .expect("connect for schema teardown");
-    for schema in schemas {
-        admin
-            .execute(sqlx::AssertSqlSafe(format!(
-                "drop schema if exists {schema} cascade"
-            )))
-            .await
-            .ok();
-    }
-}
-
 async fn get_status(app: &axum::Router, path: &str) -> StatusCode {
     let response = app
         .clone()
@@ -112,6 +99,11 @@ async fn omitting_source_resolves_to_first_registered_and_explicit_source_reache
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
+    let _cleanup = PgCleanup::new(
+        &database_url,
+        &[SOURCE_SCHEMA_ALPHA, SOURCE_SCHEMA_BETA],
+        &[],
+    );
     let alpha = build_pinned_source(&database_url, SOURCE_SCHEMA_ALPHA, "ALPHA").await;
     let beta = build_pinned_source(&database_url, SOURCE_SCHEMA_BETA, "BETA").await;
     let config = Config::from_toml("enabled = true").unwrap();
@@ -144,8 +136,6 @@ async fn omitting_source_resolves_to_first_registered_and_explicit_source_reache
         alpha_data, beta_data,
         "an explicit source param must actually reach that source's own data, not just be accepted"
     );
-
-    teardown_schemas(&database_url, &[SOURCE_SCHEMA_ALPHA, SOURCE_SCHEMA_BETA]).await;
 }
 
 #[tokio::test]
@@ -216,6 +206,7 @@ async fn schemas_reports_each_sources_own_default_schema() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
+    let _cleanup = PgCleanup::new(&database_url, &[SOURCE_SCHEMA_ALPHA_DEFAULT], &[]);
     let alpha = build_pinned_source(&database_url, SOURCE_SCHEMA_ALPHA_DEFAULT, "ALPHA").await;
     let config = Config::from_toml("enabled = true").unwrap();
     let app = router(config, vec![("alpha".to_string(), alpha)]);
@@ -226,8 +217,6 @@ async fn schemas_reports_each_sources_own_default_schema() {
         .as_array()
         .unwrap()
         .contains(&serde_json::json!({ "name": SOURCE_SCHEMA_ALPHA_DEFAULT })));
-
-    teardown_schemas(&database_url, &[SOURCE_SCHEMA_ALPHA_DEFAULT]).await;
 }
 
 #[tokio::test]

@@ -19,7 +19,10 @@ use std::sync::Arc;
 
 use ashurbanipal_axum::{DbSource, PgPoolSource, QueryOpts};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::Executor;
+
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
 
 const SCHEMA_A: &str = "ashb_test_schema_isolation_a";
 const SCHEMA_B: &str = "ashb_test_schema_isolation_b";
@@ -32,7 +35,8 @@ const SCHEMA_D: &str = "ashb_test_schema_isolation_d";
 const SCHEMA_E: &str = "ashb_test_schema_isolation_e";
 const SCHEMA_F: &str = "ashb_test_schema_isolation_f";
 
-async fn setup_schemas(database_url: &str, schema_a: &str, schema_b: &str) {
+async fn setup_schemas(database_url: &str, schema_a: &str, schema_b: &str) -> PgCleanup {
+    let cleanup = PgCleanup::new(database_url, &[schema_a, schema_b], &[]);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -63,16 +67,7 @@ async fn setup_schemas(database_url: &str, schema_a: &str, schema_b: &str) {
     )))
     .await
     .unwrap();
-}
-
-async fn teardown_schemas(pool: &PgPool, schema_a: &str, schema_b: &str) {
-    for schema in [schema_a, schema_b] {
-        pool.execute(sqlx::AssertSqlSafe(format!(
-            "drop schema if exists {schema} cascade"
-        )))
-        .await
-        .ok();
-    }
+    cleanup
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -80,7 +75,7 @@ async fn query_table_never_mixes_schemas_across_pooled_connections() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
-    setup_schemas(&database_url, SCHEMA_A, SCHEMA_B).await;
+    let _cleanup = setup_schemas(&database_url, SCHEMA_A, SCHEMA_B).await;
 
     // Alternates each newly-opened physical connection's search_path
     // between the two schemas, simulating a host pool whose sessions
@@ -93,7 +88,11 @@ async fn query_table_never_mixes_schemas_across_pooled_connections() {
             let connection_count = connection_count.clone();
             Box::pin(async move {
                 let n = connection_count.fetch_add(1, Ordering::SeqCst);
-                let schema = if n % 2 == 0 { SCHEMA_A } else { SCHEMA_B };
+                let schema = if n.is_multiple_of(2) {
+                    SCHEMA_A
+                } else {
+                    SCHEMA_B
+                };
                 conn.execute(sqlx::AssertSqlSafe(format!("set search_path = {schema}")))
                     .await?;
                 Ok(())
@@ -161,8 +160,6 @@ async fn query_table_never_mixes_schemas_across_pooled_connections() {
             ),
         }
     }
-
-    teardown_schemas(&pool, SCHEMA_A, SCHEMA_B).await;
 }
 
 #[tokio::test]
@@ -170,7 +167,7 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
-    setup_schemas(&database_url, SCHEMA_C, SCHEMA_D).await;
+    let _cleanup = setup_schemas(&database_url, SCHEMA_C, SCHEMA_D).await;
 
     let pool = PgPoolOptions::new()
         .max_connections(2)
@@ -227,8 +224,6 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
             .any(|s| s.starts_with("pg_") || s == "information_schema"),
         "system schemas must never be offered as selectable"
     );
-
-    teardown_schemas(&pool, SCHEMA_C, SCHEMA_D).await;
 }
 
 /// Regression test for the cross-schema FK metadata bug: `key_metadata_in_tx`'s
@@ -241,6 +236,7 @@ async fn explicit_schema_selects_that_schema_and_rejects_unknown_ones() {
 async fn cross_schema_foreign_key_reports_schema_qualified_reference() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+    let _cleanup = PgCleanup::new(&database_url, &[SCHEMA_E, SCHEMA_F], &[]);
 
     let pool = PgPoolOptions::new()
         .max_connections(2)
@@ -318,6 +314,4 @@ async fn cross_schema_foreign_key_reports_schema_qualified_reference() {
         same_refs.schema, None,
         "same-schema FK must omit `schema`, keeping the wire payload unchanged"
     );
-
-    teardown_schemas(&pool, SCHEMA_E, SCHEMA_F).await;
 }
