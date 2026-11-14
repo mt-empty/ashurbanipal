@@ -331,41 +331,19 @@ re-proposed here. Recorded so the retry count is a known trade-off.
 
 ### P — Port tests
 
-**P1. Port tests skip when a database URL is missing.** If a CI job loses
-or renames `DATABASE_URL`, `MYSQL_TEST_URL` or `MARIADB_TEST_URL`, the tests
-that need it disappear and CI stays green.
-- Go skips per test on each URL (`mysql_test.go:24,356,438`,
-  `mysql_privileges_test.go:118`, and 7 `DATABASE_URL` checks).
-  `source_integration_test.go:80` also skips when its test server fails to
-  start, which hides a real failure.
-- Node skips a whole `describe` per URL (`test/db/mysql.test.ts:88`,
-  `table-listing-privileges-mysql.integration.test.ts:32`, and 3 Postgres
-  files).
-- Flask and Spring skip only when *neither* MySQL URL is set
-  (`tests/test_mysql_integration.py:80`, `TableListingPrivilegesMysqlTest.kt:35`,
-  `MySqlSourceTest.kt:111`), so a single missing URL drops that engine
-  without notice. Both also skip on `DATABASE_URL`.
-- Rust fails on a missing `MYSQL_TEST_URL` (`core/src/db/mysql.rs:1036`)
-  but skips on a missing `MARIADB_TEST_URL`
-  (`axum/tests/table_listing_privileges_mysql.rs:144`).
-- Go's release job (`go-nethttp-publish.yml`) has no MySQL or MariaDB
-  service, so those tests have always skipped on release. Go is the only
-  port without a shared `_<port>-build-test.yml`.
+**P1. Port tests skip when a database URL is missing — DONE.** Each port's
+database tests skip a missing `DATABASE_URL`, `MYSQL_TEST_URL` or
+`MARIADB_TEST_URL` locally and fail it when `CI` is set, one URL at a time:
+Go `testenv_test.go`, Node `describeWithEnv` in `test/helpers.ts`, Flask
+`tests/_env.py`, Spring `TestEnv.kt`. Rust's axum tests fail on a missing URL
+everywhere. Go's release job now runs the same `_go-build-test.yml` as its
+pull requests, so its MySQL and MariaDB tests no longer skip on release.
 
-*Size:* M (fail when `CI` is set and the URL is not, per URL, plus a shared
-Go test job).
-
-**P2. Rust Postgres tests leak schemas and a role when an assert fails.**
-Eight test files drop their schema after their asserts, not in a `Drop`
-guard like `MysqlCleanup` (`axum/tests/common/mod.rs:22`):
-`referenced_by_partitioning.rs`, `structure_partitioning.rs`,
-`join_postgres.rs`, `table_listing_privileges.rs`, `nul_byte_identifiers.rs`,
-`schema_isolation.rs`, and `multi_source.rs` in both axum and actix-web. `table_listing_privileges.rs`
-also creates a role, which lives across the whole cluster. The devcontainer
-database holds a leftover `ashb_test_referenced_by_partitioning` schema from
-an older run; a leaked schema shows up in `/api/schemas` under `rust:dev`.
-`common/mod.rs` builds only with the `mysql` feature, so a Postgres guard
-needs its own module. Other ports' teardown was not audited. *Size:* S.
+**P2. Rust Postgres tests leak schemas and a role when an assert fails —
+DONE.** A `PgCleanup` drop guard (`axum/tests/pg_cleanup/mod.rs`, copied in
+`actix-web/tests/`) drops each test's schemas, and
+`table_listing_privileges.rs`'s role, on panic too. Other ports' teardown was
+not audited.
 
 **P3. Engine coverage per port is uneven.** Each port tests its own
 engines, but the topics differ. Partitioned tables: Rust, Go, Node, Flask,
@@ -488,19 +466,15 @@ for before-and-after checks on a change. *Size:* M.
 
 ## 5. Suggested order
 
-1. **H** and **D6**: stale docs, and make the Pages deploy wait for the demo
-   smoke. Small and safe.
-2. **P1** and **P2**: stop silent skips and schema leaks, so the later
-   additions are trusted.
-3. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
+1. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
    routes and per-route query counts. Neither depends on timing.
-4. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
+2. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
    **S6** on Postgres, in a new schema where possible to avoid C6's churn.
    These unblock stories 25, 51 and 55.
-5. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
-6. **E5**, then **E1**: a database client for e2e, then a chosen subset of
+3. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
+4. **E5**, then **E1**: a database client for e2e, then a chosen subset of
    specs on SQLite and MySQL.
-7. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
+5. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
    versions, one older Postgres, and the paging plan check.
-8. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
+6. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
    **Q5**: the larger fixture and contract work, alongside story 35.
