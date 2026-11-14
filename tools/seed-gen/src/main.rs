@@ -228,6 +228,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
     write_feature_flags(&mut out, rng);
     // feature_flags is deliberately excluded from analyze below.
     write_page_hits(&mut out);
+    write_typed_samples(&mut out);
 
     write_carriers(&mut out, rng);
     let shipped_offsets_mins = write_shipments(&mut out, rng, &orders);
@@ -254,6 +255,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
          analyze inventory_locations;\n\
          analyze inventory_counts;\n\
          analyze page_hits;\n\
+         analyze typed_samples;\n\
          analyze warehouse.carriers;\n\
          analyze warehouse.shipments;\n\
          analyze warehouse.shipment_events;\n\
@@ -297,6 +299,7 @@ fn write_header(out: &mut String) {
          -- New tables are dropped before the originals they reference — `cascade` handles\n\
          -- dependent constraints/views either way, but this keeps the drop order honest.\n\
          drop table if exists _conformance_meta cascade;\n\
+         drop table if exists typed_samples cascade;\n\
          drop table if exists page_hits cascade;\n\
          drop table if exists feature_flags cascade;\n\
          drop table if exists inventory_counts cascade;\n\
@@ -478,6 +481,22 @@ fn write_schema(out: &mut String) {
          create unique index page_hits_path_day on page_hits (path, day);\n\
          create unique index page_hits_a_top on page_hits (hits) where hits > 1000000;\n\
          create unique index page_hits_a_lower_path on page_hits (lower(path), day);\n\n\
+         -- Edge values of every type a filter compares in its own type: each\n\
+         -- cell's text must filter back to its row (spec/protocol.md §5.4.2).\n\
+         create table typed_samples (\n\
+         \x20   id integer primary key,\n\
+         \x20   smallint_v smallint,\n\
+         \x20   integer_v integer,\n\
+         \x20   bigint_v bigint,\n\
+         \x20   numeric_v numeric,\n\
+         \x20   real_v real,\n\
+         \x20   double_v double precision,\n\
+         \x20   date_v date,\n\
+         \x20   timestamp_v timestamp,\n\
+         \x20   timestamptz_v timestamptz,\n\
+         \x20   time_v time,\n\
+         \x20   timetz_v timetz\n\
+         );\n\n\
          -- Conformance sentinel (conformance/runner reads this when it isn't asked\n\
          -- to apply the seed itself) — see write_conformance_meta().\n\
          create table _conformance_meta (\n\
@@ -1415,6 +1434,20 @@ const PAGE_HITS_INSERT: &str = "insert into page_hits (path, day, hits, ref_code
     \x20   ('/docs', '2026-07-01', 12, null, null),\n\
     \x20   ('/home', '2026-07-01', 30, null, '{\"ms\": 9}'),\n\
     \x20   ('/pricing', '2026-07-02', 27, null, '{\"ms\": 27}');\n\n";
+
+fn write_typed_samples(out: &mut String) {
+    out.push_str(TYPED_SAMPLES_INSERT);
+}
+
+const TYPED_SAMPLES_INSERT: &str = "insert into typed_samples values\n\
+    \x20   (1, -32768, -2147483648, -9223372036854775808, -1234567890123456789012345678901234567890.5, '-3.4028235e38', '-1.7976931348623157e308', '0001-01-01 BC', '4713-01-01 00:00:00 BC', '0001-01-01 00:00:00+00 BC', '00:00:00', '00:00:00-15:59'),\n\
+    \x20   (2, 32767, 2147483647, 9223372036854775807, 0.000000000000000000000000000001, '3.4028235e38', '1.7976931348623157e308', '9999-12-31', '9999-12-31 23:59:59.999999', '9999-12-31 23:59:59.999999+00', '23:59:59.999999', '23:59:59.999999+15:59'),\n\
+    \x20   (3, 0, 0, 0, 'NaN', 'NaN', 'NaN', '10000-01-01', '294276-12-31 23:59:59', '2016-06-15 12:30:00+05:30', '24:00:00', '24:00:00+00'),\n\
+    \x20   (4, -1, 1, -1, 'Infinity', 'Infinity', 'Infinity', 'infinity', 'infinity', 'infinity', '12:30:00.5', '10:00:00+05:30'),\n\
+    \x20   (5, 1, -1, 1, '-Infinity', '-Infinity', '-Infinity', '-infinity', '-infinity', '-infinity', '00:00:00.000001', '12:00:00+00'),\n\
+    \x20   (6, 7, 7, 7, 1.50, '-0', '-0', '2016-02-29', '2016-02-29 00:00:00', '1900-01-01 00:00:00+00', '09:05:00', '09:05:00-03'),\n\
+    \x20   (7, 7, 7, 7, 0.1, '1e-38', '5e-324', '1970-01-01', '1970-01-01 00:00:00.123', '2038-01-19 03:14:07+00', '00:00:00', '00:00:00+00'),\n\
+    \x20   (8, null, null, null, null, null, null, null, null, null, null, null);\n\n";
 
 /// `feature_flags` — deliberately excluded from the `analyze` block in
 /// `main()`: the conformance fixture for a table with no planner statistics

@@ -38,10 +38,11 @@ that needs it. "n/a" means the engine has no such thing.
 | Enum | — | — (text + check) | 4 enum types (`seed.sql:54`) | — (varchar; no native `ENUM`) | n/a |
 | uuid | yes | yes | yes | — | — |
 | bytea / blob | — | — | thin: `inventory_counts.photo`, 10 bytes max | — | — |
-| Exact numeric with precision | — | `numeric(6,2)` | `numeric(5,2)`, `numeric(10,2)` | `decimal` | `REAL` only |
-| Timestamp with zone | yes | yes | yes | — (no `TIMESTAMP` column) | text |
-| Timestamp without zone | — | — | — | `datetime` | text |
-| time, interval, xml, geometric, money, range, bit | — | — | — | — | — |
+| Exact numeric with precision | — | `numeric(6,2)` | `numeric(5,2)`, `numeric(10,2)` | `decimal`, `decimal(65,30)` (`typed_samples`) | `REAL`; `NUMERIC` in `typed_samples` |
+| Timestamp with zone | yes | yes | yes | `timestamp(6)` (`typed_samples`) | text |
+| Timestamp without zone | — | — | `typed_samples` | `datetime` | text |
+| time | — | — | `time`, `timetz` (`typed_samples`) | `time(6)` (`typed_samples`) | `TIME` (`typed_samples`) |
+| interval, xml, geometric, money, range, bit | — | — | — | — | — |
 | Generated (computed) column | — | — | — | — | — |
 | Domain (over enum or json) | — | — | — | n/a | n/a |
 | Explicit column collation | — | — | — | — | — |
@@ -156,20 +157,23 @@ listing assertion on Postgres; M for all three seeds.
 **S2. Several column classes are never asserted.**
 `table_data::columns_report_their_column_class`
 (`conformance/runner/table_data.rs:538`) checks `number`, `uuid`, `enum`,
-`text`, `json`, `float`, `array` and `other`. No runner file names `boolean`,
-`temporal` (columns exist but are not asserted), `time`, `binary` (columns
-missing or too thin) or `untyped` (no SQLite column without a declared
-type). No seed has a domain, so the case where `type` and `enum_type`
+`text`, `json`, `float`, `array` and `other`.
+`filter_dsl::a_typed_cells_own_text_filters_back_to_its_row` asserts
+`temporal` and `time` on `typed_samples`. No runner file names `boolean`,
+`binary` (columns missing or too thin) or `untyped` (no SQLite column
+without a declared type). No seed has a domain, so the case where `type` and `enum_type`
 differ (spec §5.4.1) is untested. No seed has an explicit collation or a
 type without ordering, so `P5.11-COLLATION` and `P5.4-UNSORTABLE` are left
 to port tests (`conformance/runner/COVERAGE.md:234-235`). *Why it matters:*
 `class` drives the join check and the UI's type-aware rendering. *Size:* M.
 
 **S3. MySQL and SQLite seeds miss engine-specific types.** `seed.mysql.sql`
-has no native `ENUM` or `SET`, no `TIMESTAMP`, `TIME`, `YEAR`, `BLOB`,
-`BINARY`, `BIT`, `unsigned` or generated column, no MariaDB `uuid`, and no
+has no native `ENUM` or `SET`, no `YEAR`, `BLOB`, `BINARY`, `BIT` or
+generated column (`typed_samples` covers `TIMESTAMP`, `TIME` and
+`unsigned`), no MariaDB `uuid`, and no
 4-byte UTF-8 text (the case `utf8mb4` exists for). `seed.sqlite.sql` declares only `INTEGER`,
-`REAL` and `TEXT`: no `BLOB`, no `NUMERIC` affinity, no untyped column, no
+`REAL` and `TEXT`, plus `typed_samples`' `NUMERIC`, `DATE`, `DATETIME` and
+`TIME`: no `BLOB`, no untyped column, no
 `WITHOUT ROWID` or `STRICT` table. The conformance runner also lacks
 MySQL expression indexes on purpose (`conformance/runner/backend.rs:228-231`),
 though MySQL 8.0.13+ has them (`docs/adapter-decisions.md:259`). *Size:* M.
