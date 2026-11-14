@@ -29,9 +29,10 @@ version reaches end of life, the range below drops it.
 | MariaDB | 10.11 and later | 10.6, the long-term release before it, reached end of life in July 2026. |
 | SQLite | The library each port's driver bundles; Flask uses the Python build's own | The adapter needs 3.16 for table-valued pragmas. |
 
-CI runs Postgres 18, MySQL 8.4 and MariaDB 11 on every pull request, and
-Postgres 15 and MariaDB 10.11 on each push to `main`
-(`rust-axum-conformance.yml`, axum only).
+CI runs Postgres 18, MySQL 8.4 and MariaDB 11.8 on every pull request. On
+each push to `main` it also runs Postgres 15, MariaDB 10.11, MySQL 9 and
+MariaDB 12 (`rust-axum-conformance.yml`, axum only). Every image tag names
+an exact version, so the engine under test changes only with a commit.
 
 ## §5.3 / §5.4.4 — `approx_rows` / `total_approx`
 

@@ -363,18 +363,14 @@ Postgres 15 and later, and `rust-axum-conformance.yml` runs the kit on
 `postgres:15-alpine` on each push to `main`. Checked by hand on 2026-11-14:
 axum passes on 14 and 15, and the seed does not load on 13.
 
-**V2. MySQL and MariaDB tags float, and the stated minimums are untested.**
-CI and the devcontainer use `mysql:8` and `mariadb:11`
-(`docker-compose.yml:32,49`). `adapter-decisions.md:259` says the port
-needs MySQL 8.0.13 and that checks exist from 8.0.16 and MariaDB 10.2.
-Line 242 records a MariaDB 12.1+ change to FK name uniqueness. No job runs
-8.0.x, MySQL 9, or MariaDB 12. A floating tag also means CI can change
-engine version with no commit. *Size:* M (pin tags; add a min and a latest
-entry).
-*Part done with V1:* the range is stated (MySQL 8.4+, MariaDB 10.11+) and
-MariaDB 10.11 runs on each push to `main`. Checked by hand on 2026-11-14:
-axum passes on MySQL 8.4 and 9.7 and on MariaDB 10.11 and 12.3. Still open:
-pin the tags, and a job for the latest of each.
+**V2. MySQL and MariaDB tags float, and the stated minimums are untested —
+DONE.** Every workflow and the devcontainer now name an exact image version
+(`postgres:18.4-alpine`, `mysql:8.4.13`, `mariadb:11.8.8`). The stated
+range is MySQL 8.4+ and MariaDB 10.11+ (`docs/adapter-decisions.md`,
+"Supported engine versions"). `rust-axum-conformance.yml` runs the kit on
+MariaDB 10.11, MySQL 9 and MariaDB 12 on each push to `main`; MySQL 8.4,
+the minimum, runs on every pull request. Nothing bumps the pinned tags:
+Dependabot does not read workflow service images.
 
 **V3. Each port uses its own SQLite build.** Rust uses sqlx's bundled
 library, Go `modernc.org/sqlite`, Spring `xerial` sqlite-jdbc, Node the
@@ -498,8 +494,8 @@ another; size breaks ties.
 9. **E5**, then **E1**: a database client for e2e, then a chosen subset of
    specs on SQLite and MySQL, the second and third quick starts
    (`readme.md:113,174`).
-10. **V2** and **S2**: pinned MySQL and MariaDB versions, and the column
-    classes the grid renders but no test asserts.
+10. **V2** — DONE. **S2**: the column classes the grid renders but no test
+    asserts.
 11. **S5** and **Q4**: self-referencing FKs for FK navigation and "referenced
     by", which run on demand; a large opt-in schema for catalog cost on the
     boot routes.

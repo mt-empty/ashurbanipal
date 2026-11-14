@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 15
     services:
       db:
-        image: postgres:18-alpine
+        image: postgres:18.4-alpine
         env:
           POSTGRES_USER: ashurbanipal
           POSTGRES_PASSWORD: ashurbanipal
@@ -35,7 +35,7 @@ jobs:
           --health-retries 5
       # Each MySQL/MariaDB test creates its own database. Under CI a missing URL fails the test.
       mysql:
-        image: mysql:8
+        image: mysql:8.4.13
         env:
           MYSQL_ROOT_PASSWORD: ashurbanipal
           MYSQL_DATABASE: ashurbanipal
@@ -45,7 +45,7 @@ jobs:
           --health-cmd "mysqladmin ping -h 127.0.0.1 -pashurbanipal"
           --health-interval 10s --health-timeout 5s --health-retries 10
       mariadb:
-        image: mariadb:11
+        image: mariadb:11.8.8
         env:
           MARIADB_ROOT_PASSWORD: ashurbanipal
           MARIADB_DATABASE: ashurbanipal

@@ -110,9 +110,9 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-two-source-report
 
-  # The oldest engine versions docs/adapter-decisions.md states as supported.
-  # Runs on main only, so it never gates a pull request.
-  oldest-engine-conformance:
+  # The oldest engine versions docs/adapter-decisions.md states as supported, and the
+  # newest release of MySQL and MariaDB. Runs on main only, so it never gates a pull request.
+  engine-range-conformance:
     name: Rust — conformance kit (${{ matrix.engine.image }})
     if: github.event_name == 'push'
     needs: build-and-test
@@ -120,8 +120,10 @@ jobs:
       fail-fast: false
       matrix:
         engine:
-          - { backend: postgres, image: "postgres:15-alpine", env: "" }
-          - { backend: mariadb, image: "mariadb:10.11", env: "DB_BACKEND=mysql DATABASE_URL=$CONFORMANCE_MYSQL_URL" }
+          - { backend: postgres, image: "postgres:15.20-alpine", env: "" }
+          - { backend: mariadb, image: "mariadb:10.11.19", env: "DB_BACKEND=mysql DATABASE_URL=$CONFORMANCE_MYSQL_URL" }
+          - { backend: mysql, image: "mysql:9.7.4", env: "DB_BACKEND=mysql DATABASE_URL=$CONFORMANCE_MYSQL_URL" }
+          - { backend: mariadb, image: "mariadb:12.3.3", env: "DB_BACKEND=mysql DATABASE_URL=$CONFORMANCE_MYSQL_URL" }
     uses: ./.github/workflows/_conformance-behavior.yml
     with:
       backend: ${{ matrix.engine.backend }}
@@ -131,7 +133,7 @@ jobs:
       start-env: ${{ matrix.engine.env }}
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
-      report-name: conformance-oldest-${{ matrix.engine.backend }}-report
+      report-name: conformance-${{ strategy.job-index }}-${{ matrix.engine.backend }}-range-report
 
   schema-conformance:
     name: Rust — schema conformance
@@ -153,7 +155,7 @@ jobs:
     timeout-minutes: 20
     services:
       mysql:
-        image: mysql:8
+        image: mysql:8.4.13
         env:
           MYSQL_ROOT_PASSWORD: ashurbanipal
           MYSQL_DATABASE: ashurbanipal
@@ -163,7 +165,7 @@ jobs:
           --health-cmd "mysqladmin ping -h 127.0.0.1 -pashurbanipal"
           --health-interval 10s --health-timeout 5s --health-retries 10
       mariadb:
-        image: mariadb:11
+        image: mariadb:11.8.8
         env:
           MARIADB_ROOT_PASSWORD: ashurbanipal
           MARIADB_DATABASE: ashurbanipal

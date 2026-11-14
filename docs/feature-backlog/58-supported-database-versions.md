@@ -17,6 +17,15 @@ would have caught it.
 
 ## 2. Proposed range
 
+**Progress (2026-11-14, [[57-testing-environment-gaps]] V1 and V2):** work
+items 1 to 3 are done. `docs/adapter-decisions.md` ("Supported engine
+versions") states the range, every CI image names an exact version, and
+`rust-axum-conformance.yml` runs both ends on each push to `main`. The
+owner set the rule that a version leaves the range when its vendor drops
+it, so the stated minimums are Postgres 15 and MySQL 8.4, not the 14 and
+8.0.17 in the table below. axum still passes conformance on Postgres 14
+and MySQL 8.0.46. Items 4 and 5 are open.
+
 | Engine | Minimum | Newest tested | Why this minimum |
 |---|---|---|---|
 | Postgres | **14** (decided 2026-11-12) | 18 | Multiranges (`anymultirange`) arrived in 14. 13 lost vendor support in Nov 2025. |
