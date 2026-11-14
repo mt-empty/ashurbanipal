@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresSource } from "../src/db/postgres.js";
 import type { QueryOpts } from "../src/db/types.js";
 import { createRouter } from "../src/routes.js";
-import { getJson as sharedGetJson, startServer, type TestServer } from "./helpers.js";
+import { describeWithEnv, getJson as sharedGetJson, startServer, type TestServer } from "./helpers.js";
 
 // DB-backed coverage of resolveSchema against the devcontainer's seeded
 // Postgres (schemas: public, other_schema, warehouse — see
@@ -14,7 +14,7 @@ import { getJson as sharedGetJson, startServer, type TestServer } from "./helper
 // integration suites; conformance/runner also covers this cross-language,
 // but that suite runs separately from `pnpm test`.
 const databaseUrl = process.env.DATABASE_URL;
-const maybeDescribe = databaseUrl ? describe : describe.skip;
+const maybeDescribe = describeWithEnv("DATABASE_URL");
 
 maybeDescribe("multi-schema support (live db)", () => {
   let pool: Pool;

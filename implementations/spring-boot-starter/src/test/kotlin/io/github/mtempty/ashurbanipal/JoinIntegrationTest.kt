@@ -18,13 +18,13 @@ import kotlin.system.measureTimeMillis
  * of them race over one `create schema`.
  */
 class JoinIntegrationTest {
-    private val databaseUrl = System.getenv("DATABASE_URL")
-    private val uri get() = URI(databaseUrl)
+    private val databaseUrl = requireTestEnv("DATABASE_URL")
+    private val uri get() = URI(databaseUrl!!)
     private val credentials get() = (uri.userInfo ?: ":").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
     private val jdbcUrl get() = "jdbc:postgresql://${uri.host}:${uri.port}${uri.path}"
 
     private fun withAdminConnection(block: (Statement) -> Unit) {
-        org.junit.jupiter.api.Assumptions.assumeTrue(!databaseUrl.isNullOrBlank(), "DATABASE_URL not set")
+        org.junit.jupiter.api.Assumptions.assumeTrue(databaseUrl != null, "DATABASE_URL not set")
         DriverManager.getConnection(jdbcUrl, credentials.first, credentials.second).use { conn ->
             conn.createStatement().use(block)
         }

@@ -6,15 +6,19 @@ use ashurbanipal_axum::{DbError, DbSource, PgPoolSource};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 // One schema per test: they run concurrently, and a shared name races two
 // `create schema` calls against each other.
 const SCHEMA_PARTITIONS: &str = "ashb_test_structure_partitions";
 const SCHEMA_INDEXES: &str = "ashb_test_structure_indexes";
 const SCHEMA_FK_TARGET: &str = "ashb_test_structure_fk_to_partitioned";
 
-async fn setup(schema: &str, ddl: &str) -> PgPool {
+async fn setup(schema: &str, ddl: &str) -> (PgPool, PgCleanup) {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
+    let cleanup = PgCleanup::new(&database_url, &[schema], &[]);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(&database_url)
@@ -25,21 +29,13 @@ async fn setup(schema: &str, ddl: &str) -> PgPool {
     )))
     .await
     .expect("setup schema");
-    pool
-}
-
-async fn teardown(pool: &PgPool, schema: &str) {
-    pool.execute(sqlx::AssertSqlSafe(format!(
-        "drop schema if exists {schema} cascade;"
-    )))
-    .await
-    .ok();
+    (pool, cleanup)
 }
 
 #[tokio::test]
 async fn partitioned_parent_is_rejected_and_a_child_reports_its_own_copies() {
     let s = SCHEMA_PARTITIONS;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create table {s}.users (id int primary key); \
@@ -82,14 +78,12 @@ async fn partitioned_parent_is_rejected_and_a_child_reports_its_own_copies() {
         .unwrap_or_else(|| panic!("child FK missing: {:?}", child.constraints.foreign_keys));
     assert_eq!(fk.table, "users");
     assert!(fk.schema.is_none());
-
-    teardown(&pool, s).await;
 }
 
 #[tokio::test]
 async fn index_columns_exclude_include_columns_and_keep_expression_entries() {
     let s = SCHEMA_INDEXES;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create table {s}.items (id int primary key, email text, a int, b int, status text); \
@@ -129,14 +123,12 @@ async fn index_columns_exclude_include_columns_and_keep_expression_entries() {
         .as_deref()
         .is_some_and(|p| p.contains("open")));
     assert!(index("items_cover_idx").predicate.is_none());
-
-    teardown(&pool, s).await;
 }
 
 #[tokio::test]
 async fn fk_to_a_partitioned_table_is_reported_once_not_per_referenced_partition() {
     let s = SCHEMA_FK_TARGET;
-    let pool = setup(
+    let (pool, _cleanup) = setup(
         s,
         &format!(
             "create table {s}.events (id int primary key) partition by range (id); \
@@ -167,6 +159,4 @@ async fn fk_to_a_partitioned_table_is_reported_once_not_per_referenced_partition
         [("orders_event_fk", "events")],
         "Postgres clones the FK once per referenced partition; only the logical one counts"
     );
-
-    teardown(&pool, s).await;
 }

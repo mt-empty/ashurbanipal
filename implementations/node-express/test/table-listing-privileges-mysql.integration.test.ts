@@ -1,8 +1,9 @@
 import mysql, { type Pool } from "mysql2/promise";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { MySqlSource } from "../src/db/mysql.js";
 import type { QueryOpts } from "../src/db/types.js";
 import { NotAllowedError } from "../src/errors.js";
+import { describeWithEnv } from "./helpers.js";
 
 // MySQL/MariaDB equivalent of table-listing-privileges.integration.test.ts.
 //
@@ -29,7 +30,7 @@ function limitedUrl(baseUrl: string): string {
 
 function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL"): void {
   const baseUrl = process.env[envVar] ?? "";
-  const maybeDescribe = baseUrl ? describe : describe.skip;
+  const maybeDescribe = describeWithEnv(envVar);
 
   maybeDescribe(`table listing privilege gate — ${label} (live db)`, () => {
     let adminPool: Pool;

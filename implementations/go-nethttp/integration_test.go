@@ -34,7 +34,7 @@ var integrationServerURL string
 func TestMain(m *testing.M) {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		os.Exit(m.Run()) // every test using testServer(t) skips individually
+		os.Exit(m.Run()) // every test using testServer(t) skips, or fails under CI
 	}
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
@@ -53,9 +53,7 @@ func TestMain(m *testing.M) {
 
 func testServer(t *testing.T) string {
 	t.Helper()
-	if integrationServerURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	requireTestEnv(t, "DATABASE_URL")
 	return integrationServerURL
 }
 

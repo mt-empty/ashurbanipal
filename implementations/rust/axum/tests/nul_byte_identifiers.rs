@@ -12,6 +12,9 @@ use ashurbanipal_axum::{Condition, DbError, DbSource, FilterOp, PgPoolSource, Qu
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor;
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 const NUL_TABLE: &str = "ashb\0nul";
 const FILTER_SCHEMA: &str = "ashb_test_nul_byte_filter";
 
@@ -19,7 +22,8 @@ const FILTER_SCHEMA: &str = "ashb_test_nul_byte_filter";
 // job's Postgres service (unlike the conformance jobs') never loads
 // `.devcontainer/db/init/01-seed.sql`, so every sibling integration test
 // here brings its own schema/table instead of assuming seed data exists.
-async fn setup_filter_schema(database_url: &str) {
+async fn setup_filter_schema(database_url: &str) -> PgCleanup {
+    let cleanup = PgCleanup::new(database_url, &[FILTER_SCHEMA], &[]);
     let admin = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -38,20 +42,7 @@ async fn setup_filter_schema(database_url: &str) {
         )))
         .await
         .unwrap();
-}
-
-async fn teardown_filter_schema(database_url: &str) {
-    let admin = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(database_url)
-        .await
-        .expect("connect for schema teardown");
-    admin
-        .execute(sqlx::AssertSqlSafe(format!(
-            "drop schema if exists {FILTER_SCHEMA} cascade"
-        )))
-        .await
-        .ok();
+    cleanup
 }
 
 async fn source() -> PgPoolSource {
@@ -117,7 +108,7 @@ async fn nul_byte_table_name_is_rejected_as_not_allowed_not_a_500() {
 async fn nul_byte_filter_value_is_rejected_as_filter_parse_not_a_500() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
-    setup_filter_schema(&database_url).await;
+    let _cleanup = setup_filter_schema(&database_url).await;
 
     let source = source().await;
     let opts = QueryOpts {
@@ -139,6 +130,4 @@ async fn nul_byte_filter_value_is_rejected_as_filter_parse_not_a_500() {
         matches!(result, Err(DbError::FilterParse(_))),
         "a NUL byte in a filter value must be rejected as FilterParse, not reach the driver as a raw 500: got {result:?}"
     );
-
-    teardown_filter_schema(&database_url).await;
 }

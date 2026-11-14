@@ -5,10 +5,9 @@
 -- setup.sql for the same reason. Keep the table set, column names, comment
 -- placement and the conformance-relevant fixtures (composite PK/FK, the
 -- never-analyzed feature_flags table, the other_schema decoy) in step with
--- seed.sql; row counts differ on purpose. Nothing wires this file into the
--- conformance runner yet — the per-backend expected-value layer and a CI
--- job that would enforce parity against seed.sql are still to come, so
--- treat the "keep in step" note above as the only guard for now.
+-- seed.sql; row counts differ on purpose. The conformance runner applies
+-- this file for its mysql and mariadb backends, but nothing checks it
+-- against seed.sql, so the "keep in step" note above is the only guard.
 --
 -- Apply with: mysql --host=H --port=P --user=U --password=PW DB < this file
 -- Idempotent: drops and recreates its own tables (and the other_schema and

@@ -1,13 +1,13 @@
-"""PgSource integration tests against seeded Postgres; skips when `DATABASE_URL` is unset."""
+"""PgSource integration tests against seeded Postgres; skips locally when `DATABASE_URL` is unset."""
 
 from __future__ import annotations
 
 import json
-import os
 from contextlib import contextmanager
 
 import psycopg
 import pytest
+from _env import require_env
 from flask import Flask
 from psycopg.conninfo import make_conninfo
 
@@ -17,7 +17,7 @@ from ashurbanipal.db.postgres import PgSource
 from ashurbanipal.filter import Comparison
 from ashurbanipal.join import JoinOpts, parse_join
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = require_env("DATABASE_URL")
 pytestmark = [
     pytest.mark.postgres,
     pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),

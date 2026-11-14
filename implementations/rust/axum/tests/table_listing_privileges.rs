@@ -13,10 +13,14 @@ use ashurbanipal_axum::{DbError, DbSource, PgPoolSource, QueryOpts};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 const SCHEMA: &str = "ashb_test_table_privileges";
 const ROLE: &str = "ashb_test_table_privileges_role";
 
-async fn setup(database_url: &str) -> PgPool {
+async fn setup(database_url: &str) -> (PgPool, PgCleanup) {
+    let cleanup = PgCleanup::new(database_url, &[SCHEMA], &[ROLE]);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -42,15 +46,7 @@ async fn setup(database_url: &str) -> PgPool {
     )))
     .await
     .expect("setup schema/role");
-    pool
-}
-
-async fn teardown(pool: &PgPool) {
-    pool.execute(sqlx::AssertSqlSafe(format!(
-        "drop schema if exists {SCHEMA} cascade; drop role if exists {ROLE};"
-    )))
-    .await
-    .ok();
+    (pool, cleanup)
 }
 
 #[tokio::test]
@@ -58,7 +54,7 @@ async fn listing_and_allow_list_exclude_non_selectable_tables() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
-    let admin_pool = setup(&database_url).await;
+    let (_admin_pool, _cleanup) = setup(&database_url).await;
 
     let pool = PgPoolOptions::new()
         .max_connections(2)
@@ -122,6 +118,4 @@ async fn listing_and_allow_list_exclude_non_selectable_tables() {
         ),
         "a table the role has no privilege on must be rejected as NotAllowed"
     );
-
-    teardown(&admin_pool).await;
 }

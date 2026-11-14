@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +20,7 @@ import (
 
 func pgSource(t *testing.T, timeoutSecs int) *PostgresSource {
 	t.Helper()
-	db, err := sql.Open("pgx", os.Getenv("DATABASE_URL"))
+	db, err := sql.Open("pgx", requireTestEnv(t, "DATABASE_URL"))
 	if err != nil {
 		t.Fatal(err)
 	}

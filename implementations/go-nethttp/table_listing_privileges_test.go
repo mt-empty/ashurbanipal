@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -22,10 +21,7 @@ const (
 // Excludes non-selectable tables and maps residual SELECT denial to NotAllowed
 // (spec/protocol.md §5.2).
 func TestListingAndAllowListExcludeNonSelectableTables(t *testing.T) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	databaseURL := requireTestEnv(t, "DATABASE_URL")
 
 	setupDB, err := sql.Open("pgx", databaseURL)
 	if err != nil {

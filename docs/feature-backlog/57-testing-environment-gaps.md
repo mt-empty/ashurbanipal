@@ -131,11 +131,11 @@ open structure, switch source, and run one join (`demo-pages.demo.ts`). No
 test checks the "no estimate" count on `order_items` (`shop.sql:126-128`),
 the PK+FK table, the second schema, or common values. *Size:* S per test.
 
-**D6. A demo deploy does not wait for the demo tests.** `pages.yml` deploys
-on every push to `main` (`pages.yml:7-10`), and its only `needs:` is its own
-build job (`pages.yml:49`). `demo.yml` runs separately. A broken live demo
-can go out while `demo.yml` fails. *Size:* S (run the smoke in `pages.yml`
-before deploy, or trigger on `workflow_run`).
+**D6. A demo deploy does not wait for the demo tests — DONE.** `demo.yml`
+runs only when demo sources change, so `pages.yml`'s `deploy` now needs its
+own `smoke` job, which runs `frontend:test-demo` on every deploy. The smoke
+serves `docs/` through `demo-preview.mjs`, not the Jekyll-built artifact
+that deploys.
 
 ### S — Shared conformance seeds
 
@@ -208,13 +208,10 @@ order with no key, record previous/next, or the refresh highlight's row
 keying (story 55 lists "PK-less table" in its tests). It also can't show the
 unstable paging story 33 B1 describes. *Size:* S.
 
-**S7a. No test pages across a non-unique sort.** The seeds have many
-non-unique columns (`orders.status`, `events.event_type`). No conformance
-test pages through one and checks for repeated or skipped rows: the
-only offset tests ask for a page past the end
-(`conformance/runner/table_data.rs:338`, `join.rs:366`), and `tools/e2e-tests/tests/pagination.spec.ts:4`
-checks the buttons, not row identity. This is the test story 33 B1 needs
-once the spec decides the rule. *Size:* S after B1.
+**S7a. No test pages across a non-unique sort — DONE.** PR #279 added
+`paging_over_a_repeated_sort_column_returns_every_row_once`
+(`conformance/runner/table_data.rs:462`) and
+`paging_a_join_over_ties_returns_every_row_once` (`join.rs:226`).
 
 **S8. The role always reads everything.** Conformance, e2e and both demos
 connect as a role that can read every table. The privilege cases
@@ -334,24 +331,19 @@ re-proposed here. Recorded so the retry count is a known trade-off.
 
 ### P — Port tests
 
-**P1. Most ports skip MySQL tests when the URL is missing.** Go
-(`mysql_test.go:24`), Node (`test/db/mysql.test.ts:88`), Flask
-(`tests/test_mysql_integration.py:80`) and Spring
-(`TableListingPrivilegesMysqlTest.kt:35`, `MySqlSourceTest.kt:111`) skip.
-Rust fails instead (`core/src/db/mysql.rs:1031`). If a CI job loses or
-renames `MYSQL_TEST_URL` or `MARIADB_TEST_URL`, those tests disappear and CI
-stays green. The same holds for `DATABASE_URL` in Go's Postgres tests.
-*Size:* S per port (fail when `CI` is set and the URL is not).
+**P1. Port tests skip when a database URL is missing — DONE.** Each port's
+database tests skip a missing `DATABASE_URL`, `MYSQL_TEST_URL` or
+`MARIADB_TEST_URL` locally and fail it when `CI` is set, one URL at a time:
+Go `testenv_test.go`, Node `describeWithEnv` in `test/helpers.ts`, Flask
+`tests/_env.py`, Spring `TestEnv.kt`. Rust's axum tests fail on a missing URL
+everywhere. Go's release job now runs the same `_go-build-test.yml` as its
+pull requests, so its MySQL and MariaDB tests no longer skip on release.
 
-**P2. Rust Postgres tests leak schemas when an assert fails.** The
-partitioning tests call `teardown` after their asserts
-(`axum/tests/referenced_by_partitioning.rs:78,85`;
-`axum/tests/structure_partitioning.rs:57,86`), not in a `Drop` guard like
-`MysqlCleanup` (`axum/tests/common/mod.rs:27`). The devcontainer database
-holds a leftover `ashb_test_referenced_by_partitioning` schema today. That
-name is not in the current code, so it comes from an older version or a
-failed run. A leaked schema shows up in `/api/schemas` under `rust:dev`.
-Other ports' teardown was not audited. *Size:* S.
+**P2. Rust Postgres tests leak schemas and a role when an assert fails —
+DONE.** A `PgCleanup` drop guard (`axum/tests/pg_cleanup/mod.rs`, copied in
+`actix-web/tests/`) drops each test's schemas, and
+`table_listing_privileges.rs`'s role, on panic too. Other ports' teardown was
+not audited.
 
 **P3. Engine coverage per port is uneven.** Each port tests its own
 engines, but the topics differ. Partitioned tables: Rust, Go, Node, Flask,
@@ -452,7 +444,7 @@ worst cases. *Size:* M.
 and compares two runs, like `perf/compare.mjs`. It would stay out of CI,
 for before-and-after checks on a change. *Size:* M.
 
-### H — Stale docs found while checking
+### H — Stale docs found while checking — DONE
 
 - `conformance/seed/seed.mysql.sql:8-11` and `seed.sqlite.sql:11-12` say
   nothing wires the file into the runner. `_conformance-behavior.yml:97-128`
@@ -474,20 +466,15 @@ for before-and-after checks on a change. *Size:* M.
 
 ## 5. Suggested order
 
-1. **H** and **D6**: stale docs, and make the Pages deploy wait for the demo
-   smoke. Small and safe.
-2. **P1** and **P2**: stop silent skips and schema leaks, so the later
-   additions are trusted.
-3. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
+1. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
    routes and per-route query counts. Neither depends on timing.
-4. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
+2. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
    **S6** on Postgres, in a new schema where possible to avoid C6's churn.
-   These unblock stories 25, 51 and 55. Add **S7a** once story 33 B1
-   settles the paging rule.
-5. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
-6. **E5**, then **E1**: a database client for e2e, then a chosen subset of
+   These unblock stories 25, 51 and 55.
+3. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
+4. **E5**, then **E1**: a database client for e2e, then a chosen subset of
    specs on SQLite and MySQL.
-7. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
+5. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
    versions, one older Postgres, and the paging plan check.
-8. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
+6. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
    **Q5**: the larger fixture and contract work, alongside story 35.

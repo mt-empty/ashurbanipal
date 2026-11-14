@@ -6,16 +6,15 @@ Non-selectable tables are excluded and residual SELECT denial maps to NotAllowed
 
 from __future__ import annotations
 
-import os
-
 import psycopg
 import pytest
+from _env import require_env
 from psycopg.conninfo import make_conninfo
 
 from ashurbanipal.db import NotAllowed, QueryOpts
 from ashurbanipal.db.postgres import PgSource
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = require_env("DATABASE_URL")
 pytestmark = [
     pytest.mark.postgres,
     pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL not set"),

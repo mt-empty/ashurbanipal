@@ -141,9 +141,7 @@ async fn mysql_maps_select_denied_to_not_allowed() {
 
 #[tokio::test]
 async fn mariadb_maps_select_denied_to_not_allowed() {
-    let Ok(url) = std::env::var("MARIADB_TEST_URL") else {
-        eprintln!("MARIADB_TEST_URL not set — skipping");
-        return;
-    };
+    let url = std::env::var("MARIADB_TEST_URL")
+        .expect("MARIADB_TEST_URL must be set (the devcontainer sets it automatically)");
     run(&url).await;
 }

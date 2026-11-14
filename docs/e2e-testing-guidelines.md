@@ -117,7 +117,7 @@ uncommitted `docs/demo/live/`) and smokes them on all three browsers with
 Pages does, not a port. The demos answer `fetch` inside the page, so
 Playwright sees no network response for `/api/*`: wait on what the page
 shows. The `demo.yml` workflow runs it, plus the conformance kit against the
-live demo's backend.
+live demo's backend; `pages.yml` runs it again before every deploy.
 
 ## 6. Measure coverage on demand
 

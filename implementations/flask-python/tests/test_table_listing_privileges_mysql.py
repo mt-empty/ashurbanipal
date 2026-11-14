@@ -11,10 +11,9 @@ raised as `NotAllowed` (400), never a raw driver 500. Runs against both
 
 from __future__ import annotations
 
-import os
-
 import pymysql
 import pytest
+from _env import require_env
 
 from ashurbanipal.db import NotAllowed, QueryOpts
 from ashurbanipal.db.mysql import MySqlSource, connect_kwargs_from_url
@@ -25,7 +24,7 @@ SCHEMA = "ashb_test_table_privileges"
 USER = "ashb_test_table_privileges_user"
 PASSWORD = "ashb_test_pw"
 
-_URLS = {"mysql": os.environ.get("MYSQL_TEST_URL"), "mariadb": os.environ.get("MARIADB_TEST_URL")}
+_URLS = {"mysql": require_env("MYSQL_TEST_URL"), "mariadb": require_env("MARIADB_TEST_URL")}
 _AVAILABLE = [name for name, url in _URLS.items() if url]
 
 

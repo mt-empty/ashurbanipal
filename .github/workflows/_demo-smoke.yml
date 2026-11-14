@@ -1,0 +1,41 @@
+name: _demo-smoke
+
+# Shared by demo.yml (pull requests and pushes that touch the demos) and
+# pages.yml (every deploy), so both gates run the same smoke.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: name of the test-results artifact uploaded on failure
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-demo:
+    name: Playwright smoke of both demos (chromium, firefox, webkit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.7.13
+          install: false
+
+      - run: mise run frontend:test-e2e-install
+
+      - run: mise run frontend:test-demo
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: tools/e2e-tests/test-results/demo/
+          retention-days: 14

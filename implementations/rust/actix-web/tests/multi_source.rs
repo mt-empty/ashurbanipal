@@ -17,6 +17,9 @@ use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Executor;
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 const SOURCE_SCHEMA_ALPHA: &str = "ashb_test_actix_multi_source_alpha";
 const SOURCE_SCHEMA_BETA: &str = "ashb_test_actix_multi_source_beta";
 
@@ -71,27 +74,16 @@ async fn connect_plain_pool(database_url: &str) -> sqlx::PgPool {
         .expect("connect source pool")
 }
 
-async fn teardown_schemas(database_url: &str, schemas: &[&str]) {
-    let admin = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(database_url)
-        .await
-        .expect("connect for schema teardown");
-    for schema in schemas {
-        admin
-            .execute(sqlx::AssertSqlSafe(format!(
-                "drop schema if exists {schema} cascade"
-            )))
-            .await
-            .ok();
-    }
-}
-
 #[actix_web::test]
 async fn omitting_source_resolves_to_first_registered_and_explicit_source_reaches_its_own_data() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
+    let _cleanup = PgCleanup::new(
+        &database_url,
+        &[SOURCE_SCHEMA_ALPHA, SOURCE_SCHEMA_BETA],
+        &[],
+    );
     let (alpha, beta) = tokio::join!(
         build_pinned_source(&database_url, SOURCE_SCHEMA_ALPHA, "ALPHA"),
         build_pinned_source(&database_url, SOURCE_SCHEMA_BETA, "BETA"),
@@ -147,8 +139,6 @@ async fn omitting_source_resolves_to_first_registered_and_explicit_source_reache
         alpha_data, beta_data,
         "an explicit source param must actually reach that source's own data, not just be accepted"
     );
-
-    teardown_schemas(&database_url, &[SOURCE_SCHEMA_ALPHA, SOURCE_SCHEMA_BETA]).await;
 }
 
 #[actix_web::test]

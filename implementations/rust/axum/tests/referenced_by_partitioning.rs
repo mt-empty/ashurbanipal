@@ -8,6 +8,9 @@ use ashurbanipal_axum::{DbError, DbSource, PgPoolSource, QueryOpts};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 
+mod pg_cleanup;
+use pg_cleanup::PgCleanup;
+
 // Each test gets its own schema name — the two run concurrently (cargo
 // test's default), and a shared name races two `create schema` calls
 // against each other.
@@ -15,7 +18,8 @@ const SCHEMA_DUP: &str = "ashb_test_referenced_by_partitioning_dup";
 const SCHEMA_GATE: &str = "ashb_test_referenced_by_partitioning_gate";
 const SCHEMA_QUERY_TABLE_GATE: &str = "ashb_test_query_table_partitioning_gate";
 
-async fn setup(database_url: &str, schema: &str) -> PgPool {
+async fn setup(database_url: &str, schema: &str) -> (PgPool, PgCleanup) {
+    let cleanup = PgCleanup::new(database_url, &[schema], &[]);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -39,15 +43,7 @@ async fn setup(database_url: &str, schema: &str) -> PgPool {
     )))
     .await
     .expect("setup schema");
-    pool
-}
-
-async fn teardown(pool: &PgPool, schema: &str) {
-    pool.execute(sqlx::AssertSqlSafe(format!(
-        "drop schema if exists {schema} cascade;"
-    )))
-    .await
-    .ok();
+    (pool, cleanup)
 }
 
 #[tokio::test]
@@ -64,7 +60,7 @@ async fn referenced_by_excludes_a_partitioned_referrer_and_its_partition_copies(
     // `events*` entry.
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
-    let admin_pool = setup(&database_url, SCHEMA_DUP).await;
+    let (admin_pool, _cleanup) = setup(&database_url, SCHEMA_DUP).await;
     let source = PgPoolSource::new(admin_pool.clone());
 
     let refs = source
@@ -81,15 +77,13 @@ async fn referenced_by_excludes_a_partitioned_referrer_and_its_partition_copies(
          the parent `events`, conparentid = 0 drops the per-partition copies; \
          got {events:?}"
     );
-
-    teardown(&admin_pool, SCHEMA_DUP).await;
 }
 
 #[tokio::test]
 async fn referenced_by_rejects_a_partitioned_table_as_target_same_as_any_unlisted_table() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
-    let admin_pool = setup(&database_url, SCHEMA_GATE).await;
+    let (admin_pool, _cleanup) = setup(&database_url, SCHEMA_GATE).await;
     let source = PgPoolSource::new(admin_pool.clone());
 
     // spec/protocol.md §5.9 requires `table` to match a §5.2 (list_tables)
@@ -103,8 +97,6 @@ async fn referenced_by_rejects_a_partitioned_table_as_target_same_as_any_unliste
         ),
         "a partitioned table must be rejected as NotAllowed, matching §5.2's own listing"
     );
-
-    teardown(&admin_pool, SCHEMA_GATE).await;
 }
 
 #[tokio::test]
@@ -115,7 +107,7 @@ async fn query_table_rejects_a_partitioned_table_same_as_referenced_by_does() {
     // too, not silently queried.
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
-    let admin_pool = setup(&database_url, SCHEMA_QUERY_TABLE_GATE).await;
+    let (admin_pool, _cleanup) = setup(&database_url, SCHEMA_QUERY_TABLE_GATE).await;
     let source = PgPoolSource::new(admin_pool.clone());
 
     let opts = QueryOpts {
@@ -135,6 +127,4 @@ async fn query_table_rejects_a_partitioned_table_same_as_referenced_by_does() {
         ),
         "a partitioned table must be rejected as NotAllowed, matching list_tables' own listing"
     );
-
-    teardown(&admin_pool, SCHEMA_QUERY_TABLE_GATE).await;
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,10 +47,7 @@ func TestListSchemasReportsTheConnectionDefault(t *testing.T) {
 }
 
 func TestNoDefaultSchemaReportsNullAndRejectsAnAbsentSchema(t *testing.T) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	databaseURL := requireTestEnv(t, "DATABASE_URL")
 	// A search_path naming no existing schema makes current_schema() NULL.
 	connConfig, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
@@ -190,10 +186,7 @@ func mustExecIsolation(t *testing.T, db *sql.DB, stmt string) {
 // those steps could ever land on different pooled connections, a response
 // would mix shapes/values across schemas or fail outright.
 func TestQueryTableNeverMixesSchemasAcrossPooledConnections(t *testing.T) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set (the devcontainer sets it automatically)")
-	}
+	databaseURL := requireTestEnv(t, "DATABASE_URL")
 
 	setupDB, err := sql.Open("pgx", databaseURL)
 	if err != nil {

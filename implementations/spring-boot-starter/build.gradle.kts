@@ -104,9 +104,10 @@ tasks.withType<Test> {
     // (no Testcontainers/Docker available here, see PORTING.md) —
     // DATABASE_URL is set by the devcontainer.
     environment("DATABASE_URL", System.getenv("DATABASE_URL") ?: "")
-    // MySqlSourceTest skips cleanly (JUnit5 Assumptions) when neither is set.
+    // The MySQL tests skip a missing URL locally and fail it under CI (TestEnv.kt).
     environment("MYSQL_TEST_URL", System.getenv("MYSQL_TEST_URL") ?: "")
     environment("MARIADB_TEST_URL", System.getenv("MARIADB_TEST_URL") ?: "")
+    environment("CI", System.getenv("CI") ?: "")
     // Fixture and seed files live at the repo root, shared with every other
     // implementation's test suite rather than duplicated into
     // src/test/resources.
