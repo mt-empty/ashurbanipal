@@ -1,6 +1,6 @@
 # Server-side table joins
 
-> **Status:** DONE · **Area:** spec, ports, conformance, docs · **Ref:** implemented 2026-10-15 in spec §5.11 and all five ports; the conformance cases pass on all five ports against Postgres, plus Rust and Flask on MySQL and SQLite and Node on MySQL; every other port and engine pair is covered by the port tests
+> **Status:** DONE · **Area:** spec, ports, conformance, docs · **Ref:** implemented 2026-10-15 in spec §5.11 and all five ports; the conformance cases pass on all five ports against Postgres, MySQL, MariaDB and SQLite (actix-web on Postgres only)
 
 Read-only. The server builds a `SELECT` with joins from a structured
 description. No client text becomes SQL. The UI for building joins is

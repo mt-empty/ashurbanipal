@@ -208,13 +208,10 @@ order with no key, record previous/next, or the refresh highlight's row
 keying (story 55 lists "PK-less table" in its tests). It also can't show the
 unstable paging story 33 B1 describes. *Size:* S.
 
-**S7a. No test pages across a non-unique sort.** The seeds have many
-non-unique columns (`orders.status`, `events.event_type`). No conformance
-test pages through one and checks for repeated or skipped rows: the
-only offset tests ask for a page past the end
-(`conformance/runner/table_data.rs:338`, `join.rs:366`), and `tools/e2e-tests/tests/pagination.spec.ts:4`
-checks the buttons, not row identity. This is the test story 33 B1 needs
-once the spec decides the rule. *Size:* S after B1.
+**S7a. No test pages across a non-unique sort — DONE.** PR #279 added
+`paging_over_a_repeated_sort_column_returns_every_row_once`
+(`conformance/runner/table_data.rs:462`) and
+`paging_a_join_over_ties_returns_every_row_once` (`join.rs:226`).
 
 **S8. The role always reads everything.** Conformance, e2e and both demos
 connect as a role that can read every table. The privilege cases
@@ -334,24 +331,41 @@ re-proposed here. Recorded so the retry count is a known trade-off.
 
 ### P — Port tests
 
-**P1. Most ports skip MySQL tests when the URL is missing.** Go
-(`mysql_test.go:24`), Node (`test/db/mysql.test.ts:88`), Flask
-(`tests/test_mysql_integration.py:80`) and Spring
-(`TableListingPrivilegesMysqlTest.kt:35`, `MySqlSourceTest.kt:111`) skip.
-Rust fails instead (`core/src/db/mysql.rs:1031`). If a CI job loses or
-renames `MYSQL_TEST_URL` or `MARIADB_TEST_URL`, those tests disappear and CI
-stays green. The same holds for `DATABASE_URL` in Go's Postgres tests.
-*Size:* S per port (fail when `CI` is set and the URL is not).
+**P1. Port tests skip when a database URL is missing.** If a CI job loses
+or renames `DATABASE_URL`, `MYSQL_TEST_URL` or `MARIADB_TEST_URL`, the tests
+that need it disappear and CI stays green.
+- Go skips per test on each URL (`mysql_test.go:24,356,438`,
+  `mysql_privileges_test.go:118`, and 7 `DATABASE_URL` checks).
+  `source_integration_test.go:80` also skips when its test server fails to
+  start, which hides a real failure.
+- Node skips a whole `describe` per URL (`test/db/mysql.test.ts:88`,
+  `table-listing-privileges-mysql.integration.test.ts:32`, and 3 Postgres
+  files).
+- Flask and Spring skip only when *neither* MySQL URL is set
+  (`tests/test_mysql_integration.py:80`, `TableListingPrivilegesMysqlTest.kt:35`,
+  `MySqlSourceTest.kt:111`), so a single missing URL drops that engine
+  without notice. Both also skip on `DATABASE_URL`.
+- Rust fails on a missing `MYSQL_TEST_URL` (`core/src/db/mysql.rs:1036`)
+  but skips on a missing `MARIADB_TEST_URL`
+  (`axum/tests/table_listing_privileges_mysql.rs:144`).
+- Go's release job (`go-nethttp-publish.yml`) has no MySQL or MariaDB
+  service, so those tests have always skipped on release. Go is the only
+  port without a shared `_<port>-build-test.yml`.
 
-**P2. Rust Postgres tests leak schemas when an assert fails.** The
-partitioning tests call `teardown` after their asserts
-(`axum/tests/referenced_by_partitioning.rs:78,85`;
-`axum/tests/structure_partitioning.rs:57,86`), not in a `Drop` guard like
-`MysqlCleanup` (`axum/tests/common/mod.rs:27`). The devcontainer database
-holds a leftover `ashb_test_referenced_by_partitioning` schema today. That
-name is not in the current code, so it comes from an older version or a
-failed run. A leaked schema shows up in `/api/schemas` under `rust:dev`.
-Other ports' teardown was not audited. *Size:* S.
+*Size:* M (fail when `CI` is set and the URL is not, per URL, plus a shared
+Go test job).
+
+**P2. Rust Postgres tests leak schemas and a role when an assert fails.**
+Eight test files drop their schema after their asserts, not in a `Drop`
+guard like `MysqlCleanup` (`axum/tests/common/mod.rs:22`):
+`referenced_by_partitioning.rs`, `structure_partitioning.rs`,
+`join_postgres.rs`, `table_listing_privileges.rs`, `nul_byte_identifiers.rs`,
+`schema_isolation.rs`, and `multi_source.rs` in both axum and actix-web. `table_listing_privileges.rs`
+also creates a role, which lives across the whole cluster. The devcontainer
+database holds a leftover `ashb_test_referenced_by_partitioning` schema from
+an older run; a leaked schema shows up in `/api/schemas` under `rust:dev`.
+`common/mod.rs` builds only with the `mysql` feature, so a Postgres guard
+needs its own module. Other ports' teardown was not audited. *Size:* S.
 
 **P3. Engine coverage per port is uneven.** Each port tests its own
 engines, but the topics differ. Partitioned tables: Rust, Go, Node, Flask,
@@ -452,7 +466,7 @@ worst cases. *Size:* M.
 and compares two runs, like `perf/compare.mjs`. It would stay out of CI,
 for before-and-after checks on a change. *Size:* M.
 
-### H — Stale docs found while checking
+### H — Stale docs found while checking — DONE
 
 - `conformance/seed/seed.mysql.sql:8-11` and `seed.sqlite.sql:11-12` say
   nothing wires the file into the runner. `_conformance-behavior.yml:97-128`
@@ -482,8 +496,7 @@ for before-and-after checks on a change. *Size:* M.
    routes and per-route query counts. Neither depends on timing.
 4. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
    **S6** on Postgres, in a new schema where possible to avoid C6's churn.
-   These unblock stories 25, 51 and 55. Add **S7a** once story 33 B1
-   settles the paging rule.
+   These unblock stories 25, 51 and 55.
 5. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
 6. **E5**, then **E1**: a database client for e2e, then a chosen subset of
    specs on SQLite and MySQL.

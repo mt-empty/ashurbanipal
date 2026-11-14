@@ -8,8 +8,9 @@
 -- multi-schema fixtures (other_schema, warehouse, cross-schema FKs) and
 -- every comment are absent — the runner skips those assertions for a
 -- single-schema, comment-less backend (conformance/runner/backend.rs).
--- Row counts differ on purpose. Nothing wires this file into the runner
--- yet (see the seed.mysql.sql header).
+-- Row counts differ on purpose. The conformance runner applies this file
+-- for its sqlite backend; like seed.mysql.sql, nothing checks it against
+-- seed.sql.
 --
 -- Apply with: sqlite3 <db-file> < this file
 -- Idempotent: drops and recreates its own tables.

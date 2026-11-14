@@ -35,9 +35,8 @@ the same constraint.
 
 **Impact / constraints:**
 - `conformance/seed/VERSION` and `conformance/runner/tables.rs`'s
-  `SEEDED_TABLES` (`[&str; 15]`) are coupled to any seed table change; a
+  `SEEDED_TABLES` (`[&str; 17]`) are coupled to any seed table change; a
   pure FK-parity fix touches neither.
 - The dialect seeds also differ structurally on purpose (`seed.sqlite.sql`
-  has no `other_schema`/`warehouse`; `seed.mysql.sql` has no `warehouse`)
-  — parity here means the FK graph *within* the schemas each seed does
-  define, not identical files.
+  has no `other_schema`/`warehouse`) — parity here means the FK graph
+  *within* the schemas each seed does define, not identical files.
