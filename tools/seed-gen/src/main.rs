@@ -262,6 +262,13 @@ fn generate_postgres(rng: &mut StdRng) -> String {
          analyze warehouse.users;\n",
     );
 
+    out.push_str(
+        "\n-- Not base tables: /api/tables and its allow-list (spec §5.2) must leave both out.\n\
+         create view active_users as select id, email, full_name from users where is_active;\n\
+         create materialized view order_totals_by_status as\n\
+         \x20   select status, count(*) as order_count, sum(total_cents) as total_cents from orders group by status;\n",
+    );
+
     write_conformance_meta(&mut out);
 
     out
@@ -298,6 +305,8 @@ fn write_header(out: &mut String) {
          drop schema if exists warehouse cascade;\n\n\
          -- New tables are dropped before the originals they reference — `cascade` handles\n\
          -- dependent constraints/views either way, but this keeps the drop order honest.\n\
+         drop materialized view if exists order_totals_by_status;\n\
+         drop view if exists active_users;\n\
          drop table if exists _conformance_meta cascade;\n\
          drop table if exists typed_samples cascade;\n\
          drop table if exists page_hits cascade;\n\

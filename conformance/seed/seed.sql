@@ -31,6 +31,8 @@ drop schema if exists warehouse cascade;
 
 -- New tables are dropped before the originals they reference — `cascade` handles
 -- dependent constraints/views either way, but this keeps the drop order honest.
+drop materialized view if exists order_totals_by_status;
+drop view if exists active_users;
 drop table if exists _conformance_meta cascade;
 drop table if exists typed_samples cascade;
 drop table if exists page_hits cascade;
@@ -53627,4 +53629,9 @@ analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
 analyze warehouse.users;
-insert into _conformance_meta (seed_version, dialect, checksum) values ('8', 'postgres', 'c1f1de93188ad05d');
+
+-- Not base tables: /api/tables and its allow-list (spec §5.2) must leave both out.
+create view active_users as select id, email, full_name from users where is_active;
+create materialized view order_totals_by_status as
+    select status, count(*) as order_count, sum(total_cents) as total_cents from orders group by status;
+insert into _conformance_meta (seed_version, dialect, checksum) values ('9', 'postgres', 'ed7452298d7daabc');

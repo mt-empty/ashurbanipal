@@ -142,17 +142,16 @@ that deploys.
 Story 35 owns FK parity between the three conformance seeds. These gaps are
 about what all three lack.
 
-**S1. No view, materialized view or partitioned table in any seed.** No
-test in any port creates a view either (searched every port's tests for
-`create view` and `materialized`). So nothing checks that `/api/tables`
-lists base tables only (spec §5.2). A port that started listing views would
-pass every check. Partitioned tables are covered only by port-local
-Postgres tests (Rust `referenced_by_partitioning.rs`, `structure_partitioning.rs`;
-Go `referenced_by_partitioning_test.go`; Spring `StructureIntegrationTest.kt:48`;
-Node and Flask in their Postgres integration tests). Story 25 plans to add
-a view and a materialized view to the seed; this gap is the exclusion test,
-which is needed whether or not story 25 ships. *Size:* S for a view plus a
-listing assertion on Postgres; M for all three seeds.
+**S1. No view or materialized view in any seed — DONE.** Each conformance
+seed now defines an `active_users` view, and the Postgres seed also defines
+an `order_totals_by_status` materialized view. The exact table-list checks
+(`conformance/runner/tables.rs`, `schemas.rs`) fail if a port lists either,
+and `table_data::a_view_is_not_an_allowed_table` checks the allow-list.
+Partitioned tables stay port-local (Rust `referenced_by_partitioning.rs`,
+`structure_partitioning.rs`; Go `referenced_by_partitioning_test.go`;
+Spring `StructureIntegrationTest.kt:48`; Node and Flask in their Postgres
+integration tests): each partition is a base table, so a shared fixture
+would change every port's exact table list.
 
 **S2. Several column classes are never asserted.**
 `table_data::columns_report_their_column_class`
@@ -480,8 +479,7 @@ another; size breaks ties.
 
 1. **Q1**: set up `pg_stat_statements`, then check that `/api/table-counts`,
    which every page load calls, never runs `COUNT(*)`. Size S.
-2. **S1** on Postgres: a view and the base-tables-only assertion. Every page
-   load calls `/api/tables`. Unblocks story 25.
+2. **S1** — DONE.
 3. **V1**: state the supported Postgres range. It touches every host on the
    default backend, and stating it is size S.
 4. **E2**: one browser smoke spec per port. Five more ports serve the page

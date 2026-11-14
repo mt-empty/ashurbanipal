@@ -16,6 +16,7 @@
 -- Idempotent: drops and recreates its own tables.
 
 PRAGMA foreign_keys = OFF;
+DROP VIEW IF EXISTS active_users;
 DROP TABLE IF EXISTS _conformance_meta;
 DROP TABLE IF EXISTS typed_samples;
 DROP TABLE IF EXISTS page_hits;
@@ -388,5 +389,8 @@ INSERT INTO typed_samples VALUES
 
 ANALYZE;
 
+-- Not a base table: /api/tables and its allow-list (spec §5.2) must leave it out.
+CREATE VIEW active_users AS SELECT id, email, full_name FROM users WHERE is_active;
+
 INSERT INTO _conformance_meta (seed_version, dialect, checksum, generated_at)
-VALUES ('8', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
+VALUES ('9', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
