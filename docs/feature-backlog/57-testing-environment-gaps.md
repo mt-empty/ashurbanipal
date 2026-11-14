@@ -466,15 +466,58 @@ for before-and-after checks on a change. *Size:* M.
 
 ## 5. Suggested order
 
-1. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
-   routes and per-route query counts. Neither depends on timing.
-2. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
-   **S6** on Postgres, in a new schema where possible to avoid C6's churn.
-   These unblock stories 25, 51 and 55.
-3. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
-4. **E5**, then **E1**: a database client for e2e, then a chosen subset of
-   specs on SQLite and MySQL.
-5. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
-   versions, one older Postgres, and the paging plan check.
-6. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
-   **Q5**: the larger fixture and contract work, alongside story 35.
+Postgres ranks first: it is Rust's default feature
+(`implementations/rust/core/Cargo.toml:28`), the devcontainer and demo
+engine (`.devcontainer/docker-compose.yml:17`,
+`frontend/src/demo/sources.ts:6`), and the first quick start
+(`readme.md:57`). Every page load calls sources, schemas, tables, table
+counts and table data (`frontend/src/bootstrap/boot-prefetch.ts:18-25`),
+while structure, common values and joins run only on demand
+(`frontend/src/features/structure.ts:81`,
+`frontend/src/features/filter-ui.ts:206`). All seven ports ship to a
+registry (`docs/publishing-checklist.md:18-24`), so no port outranks
+another; size breaks ties.
+
+1. **Q1**: set up `pg_stat_statements`, then check that `/api/table-counts`,
+   which every page load calls, never runs `COUNT(*)`. Size S.
+2. **S1** on Postgres: a view and the base-tables-only assertion. Every page
+   load calls `/api/tables`. Unblocks story 25.
+3. **V1**: state the supported Postgres range. It touches every host on the
+   default backend, and stating it is size S.
+4. **E2**: one browser smoke spec per port. Five more ports serve the page
+   on every load, and only axum's CSP, caching and mount prefix are seen in
+   a browser.
+5. **S7** and **S6** on Postgres, in a new schema to avoid C6's churn. They
+   test paging, the grid and filter text on `/tables/data`, the route behind
+   every table view. They unblock stories 55 and 51.
+6. **Q3**, then **Q2**: the paging plan on `/tables/data`, then a query
+   bound per route, boot routes included. Both reuse Q1's set-up.
+7. **S4**: edge-case identifiers end to end. Catalog lookup and the filter
+   text sit on the core browse path, and real schemas have such names.
+8. **D4**'s sort fix, then **D1**: richer demo seeds. Visitors see the demo
+   first (`readme.md:9`), but no host runs it. D1's new PK-less and
+   composite tables need D4's fix first.
+9. **E5**, then **E1**: a database client for e2e, then a chosen subset of
+   specs on SQLite and MySQL, the second and third quick starts
+   (`readme.md:113,174`).
+10. **V2** and **S2**: pinned MySQL and MariaDB versions, and the column
+    classes the grid renders but no test asserts.
+11. **S5** and **Q4**: self-referencing FKs for FK navigation and "referenced
+    by", which run on demand; a large opt-in schema for catalog cost on the
+    boot routes.
+12. **E3** and **D5**: mocks checked against `spec/openapi.yaml`, and more
+    demo smoke tests.
+13. **S8**, **C1**, **C2**, **S3**: privilege cases, actix on MySQL and
+    SQLite (its Postgres runs exist), and contract and type coverage on the
+    other engines, alongside story 35.
+14. **C7**, **C4**, **C3**: MariaDB's structure route and engine
+    differences, and mixed-backend sources. Each guards an on-demand route
+    or a secondary feature.
+15. **P3**, **V3**, **D3**: per-port topic gaps, the SQLite build version,
+    and the synthetic demo's own `/tables/data`.
+16. **Q5** and **V4**: a backend timing tool and `mise run check`'s scope.
+    Both are tooling only.
+
+No work is planned for D2 (accepted), C5 (in `COVERAGE.md`), C6 (a
+constraint), E4 and E7 (recorded limits), E6 (follows S) or S9 (folded into
+story 35).
