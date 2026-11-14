@@ -45,7 +45,7 @@ class AshurbanipalIntegrationTest : AshurbanipalHttpTestBase() {
         val expected = listOf(
             "_conformance_meta", "audit_log", "events", "feature_flags", "inventory_counts",
             "inventory_locations", "order_extra", "orders", "page_hits", "payments", "products", "reviews",
-            "saved_reports", "sessions", "support_tickets", "users",
+            "saved_reports", "sessions", "support_tickets", "typed_samples", "users",
         )
         assertEquals(expected, names)
     }
