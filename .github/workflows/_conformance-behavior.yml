@@ -61,6 +61,14 @@ on:
         required: false
         type: string
         default: postgres
+      engine-image:
+        description: >-
+          Docker image to run instead of the backend's default, to test
+          another engine version (e.g. postgres:15-alpine, mariadb:10.11).
+          Applies to the postgres, postgres-readonly, mysql and mariadb backends.
+        required: false
+        type: string
+        default: ""
 
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
@@ -75,7 +83,8 @@ jobs:
     timeout-minutes: 15
     services:
       db:
-        image: postgres:18-alpine
+        # Tag-pinned like every other service image here; only same-repo callers set the input.
+        image: ${{ startsWith(inputs.backend, 'postgres') && inputs.engine-image || 'postgres:18-alpine' }} # zizmor: ignore[unpinned-images]
         env:
           POSTGRES_USER: ashurbanipal
           POSTGRES_PASSWORD: ashurbanipal
@@ -114,10 +123,10 @@ jobs:
         run: |
           if [ "${INPUTS_BACKEND}" = mysql ]; then
             docker run -d --name conformance-db -p 3306:3306 \
-              -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal mysql:8
+              -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal "${INPUTS_ENGINE_IMAGE:-mysql:8}"
           else
             docker run -d --name conformance-db -p 3306:3306 \
-              -e MARIADB_ROOT_PASSWORD=ashurbanipal -e MARIADB_DATABASE=ashurbanipal mariadb:11
+              -e MARIADB_ROOT_PASSWORD=ashurbanipal -e MARIADB_DATABASE=ashurbanipal "${INPUTS_ENGINE_IMAGE:-mariadb:11}"
           fi
           sudo apt-get update && sudo apt-get install -y default-mysql-client
           for _ in $(seq 1 60); do
@@ -131,6 +140,7 @@ jobs:
           } >> "$GITHUB_ENV"
         env:
           INPUTS_BACKEND: ${{ inputs.backend }}
+          INPUTS_ENGINE_IMAGE: ${{ inputs.engine-image }}
 
       - name: Apply the SQLite conformance seed
         if: inputs.backend == 'sqlite'

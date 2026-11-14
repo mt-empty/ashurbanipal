@@ -33,7 +33,7 @@ Ashurbanipal skips the whole chain by not needing a new connection: it runs insi
 - Browse tables: paginated rows, click-to-sort columns, primary/foreign-key and column-comment hints.
 - Filter rows with a subset of SQL `WHERE` syntax (no subqueries, no CTEs, no DML).
 - Join up to four tables with `INNER` or `LEFT` equality joins, built in a form or typed as restricted SQL text; the result is read-only and paged without a total.
-- Works with Postgres, MySQL/MariaDB, and SQLite.
+- Works with Postgres 15+, MySQL 8.4+, MariaDB 10.11+, and SQLite ([supported versions](docs/adapter-decisions.md#supported-engine-versions)).
 - Register more than one database, even of different types, and switch between them; browse across schemas where the engine has them.
 - Link sibling instances and see which are reachable.
 - Ships as one static file compiled into your binary; nothing extra to host or deploy.

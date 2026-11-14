@@ -110,6 +110,29 @@ jobs:
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-two-source-report
 
+  # The oldest engine versions docs/adapter-decisions.md states as supported.
+  # Runs on main only, so it never gates a pull request.
+  oldest-engine-conformance:
+    name: Rust — conformance kit (${{ matrix.engine.image }})
+    if: github.event_name == 'push'
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        engine:
+          - { backend: postgres, image: "postgres:15-alpine", env: "" }
+          - { backend: mariadb, image: "mariadb:10.11", env: "DB_BACKEND=mysql DATABASE_URL=$CONFORMANCE_MYSQL_URL" }
+    uses: ./.github/workflows/_conformance-behavior.yml
+    with:
+      backend: ${{ matrix.engine.backend }}
+      engine-image: ${{ matrix.engine.image }}
+      toolchain: rust
+      start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --features mysql,sqlite --example demo"
+      start-env: ${{ matrix.engine.env }}
+      health-url: "http://localhost:4000/health"
+      conformance-url: "http://localhost:4000/__ashurbanipal"
+      report-name: conformance-oldest-${{ matrix.engine.backend }}-report
+
   schema-conformance:
     name: Rust — schema conformance
     needs: build-and-test

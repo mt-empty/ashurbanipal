@@ -357,14 +357,11 @@ one was not built here.
 
 ### V — Engine versions and CI
 
-**V1. One Postgres version, and no stated supported range.** CI, the
-devcontainer and PGlite all run Postgres 18 (`postgres:18-alpine` in every
-workflow; `.devcontainer/docker-compose.yml:17`). No supported Postgres
-range is stated in `readme.md`, `docs/`, `PORTING.md` or the port READMEs.
-The catalog queries need at least Postgres 11: Rust's structure query reads
-`pg_index.indnkeyatts` (`core/src/db/postgres.rs:252`), added in 11. Nothing
-checks which other version limits the ports have. *Size:* S to state a range; M to
-add one older version to a CI matrix.
+**V1. One Postgres version, and no stated supported range — DONE.**
+`docs/adapter-decisions.md` ("Supported engine versions") now states
+Postgres 15 and later, and `rust-axum-conformance.yml` runs the kit on
+`postgres:15-alpine` on each push to `main`. Checked by hand on 2026-11-14:
+axum passes on 14 and 15, and the seed does not load on 13.
 
 **V2. MySQL and MariaDB tags float, and the stated minimums are untested.**
 CI and the devcontainer use `mysql:8` and `mariadb:11`
@@ -374,6 +371,10 @@ Line 242 records a MariaDB 12.1+ change to FK name uniqueness. No job runs
 8.0.x, MySQL 9, or MariaDB 12. A floating tag also means CI can change
 engine version with no commit. *Size:* M (pin tags; add a min and a latest
 entry).
+*Part done with V1:* the range is stated (MySQL 8.4+, MariaDB 10.11+) and
+MariaDB 10.11 runs on each push to `main`. Checked by hand on 2026-11-14:
+axum passes on MySQL 8.4 and 9.7 and on MariaDB 10.11 and 12.3. Still open:
+pin the tags, and a job for the latest of each.
 
 **V3. Each port uses its own SQLite build.** Rust uses sqlx's bundled
 library, Go `modernc.org/sqlite`, Spring `xerial` sqlite-jdbc, Node the
@@ -480,8 +481,7 @@ another; size breaks ties.
 1. **Q1**: set up `pg_stat_statements`, then check that `/api/table-counts`,
    which every page load calls, never runs `COUNT(*)`. Size S.
 2. **S1** — DONE.
-3. **V1**: state the supported Postgres range. It touches every host on the
-   default backend, and stating it is size S.
+3. **V1** — DONE.
 4. **E2**: one browser smoke spec per port. Five more ports serve the page
    on every load, and only axum's CSP, caching and mount prefix are seen in
    a browser.
