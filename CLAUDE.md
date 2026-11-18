@@ -85,7 +85,13 @@ the test table in `spec/filter-dsl.md`, not ad hoc cases.
 
 This is a devcontainer project; a Postgres instance (`db`, seeded via
 `.devcontainer/db/init/01-seed.sql`) is expected to be reachable at
-`DATABASE_URL` (set automatically by the devcontainer).
+`DATABASE_URL` (set automatically by the devcontainer). The MySQL/MariaDB
+services back `MYSQL_TEST_URL` / `MARIADB_TEST_URL`.
+
+`rust:lint` and `rust:test` build only the default `postgres` feature, so
+they never compile `core/src/db/sqlite.rs` or `core/src/db/mysql.rs`. After
+touching either file, or anything above `DbSource`, also run
+`rust:backends`.
 
 There's a `mise.toml` (tools, settings, and the top-level umbrella tasks)
 plus per-layer `mise-tasks/*.toml` (the namespaced `<layer>:*` subtasks) —
@@ -114,6 +120,8 @@ mise run rust:integration-test           # axum's Postgres-backed tests/*.rs —
 mise run rust:integration-test-actix     # actix-web's Postgres-backed tests/multi_source.rs — needs DATABASE_URL
 mise run rust:lint                       # cargo clippy -- -D warnings
 mise run rust:fmt-check
+mise run rust:backends                   # sqlite/mysql feature lint + unit + integration tests; not in `rust` or `check` — needs MYSQL_TEST_URL, MARIADB_TEST_URL
+mise run rust:dev-sqlite / rust:dev-mysql / rust:dev-mixed   # rust:dev on SQLite, MySQL, or Postgres + SQLite in one router
 mise run rust:demo                       # host demo app at http://localhost:4000/__ashurbanipal
 mise run rust:demo-sibling               # second instance on 4001, to demo sibling health-poll
 mise run rust:dev                        # demo app, auto-rebuild/restart on Rust sources or axum's vendored dbviewer.html (watchexec)
@@ -128,6 +136,7 @@ mise run frontend:sync-ports             # copy dbviewer.html into every port an
 mise run frontend:watch                  # build + sync-ports on every frontend/src/ change
 mise run frontend:dev                    # frontend:watch + the Node demo at http://localhost:4002/__ashurbanipal
 
+mise run conformance:test                # spawns the Rust implementation; set ASHURBANIPAL_CONFORMANCE_URL to target another port's running server
 mise run conformance:seed-gen            # regenerate .devcontainer/db/init/01-seed.sql and conformance/seed/seed.sql
 mise run conformance:seed-check          # verify both seed files still match tools/seed-gen's output
 mise run frontend:test-e2e-install       # one-time Playwright browser install (Chromium/Firefox/WebKit)
