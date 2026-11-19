@@ -68,8 +68,10 @@ jobs:
 
       - name: Seed database
         run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+          docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U ashurbanipal -d ashurbanipal < conformance/seed/seed.sql
+        env:
+          # The service container's own psql: the runner image has none, and apt mirrors are not reliable.
+          DB_CONTAINER: ${{ job.services.db.id }}
 
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
@@ -117,12 +119,12 @@ jobs:
         run: |
           docker run -d --name e2e-db -p 3306:3306 \
             -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal mysql:8
-          sudo apt-get update && sudo apt-get install -y default-mysql-client
+          # The container's own client, over TCP: the entrypoint's temporary init server listens on the socket only.
           for _ in $(seq 1 60); do
-            mysql --host=127.0.0.1 --user=root --password=ashurbanipal -e 'select 1' ashurbanipal >/dev/null 2>&1 && break
+            docker exec e2e-db mysql --host=127.0.0.1 --user=root --password=ashurbanipal -e 'select 1' ashurbanipal >/dev/null 2>&1 && break
             sleep 2
           done
-          mysql --host=127.0.0.1 --user=root --password=ashurbanipal ashurbanipal < conformance/seed/seed.mysql.sql
+          docker exec -i e2e-db mysql --host=127.0.0.1 --user=root --password=ashurbanipal ashurbanipal < conformance/seed/seed.mysql.sql
           echo "E2E_MYSQL_URL=mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal" >> "$GITHUB_ENV"
 
       - name: Install the sqlite3 CLI

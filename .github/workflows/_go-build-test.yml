@@ -63,8 +63,10 @@ jobs:
 
       - name: Apply the conformance seed
         run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+          docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U ashurbanipal -d ashurbanipal < conformance/seed/seed.sql
+        env:
+          # The service container's own psql: the runner image has none, and apt mirrors are not reliable.
+          DB_CONTAINER: ${{ job.services.db.id }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:

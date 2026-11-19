@@ -95,36 +95,43 @@ jobs:
       - name: Apply the conformance seed
         if: inputs.backend == 'postgres' || inputs.backend == 'postgres-readonly'
         run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+          docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U ashurbanipal -d ashurbanipal < conformance/seed/seed.sql
+        env:
+          # The service container's own psql: the runner image has none, and apt mirrors are not reliable.
+          DB_CONTAINER: ${{ job.services.db.id }}
 
       - name: Add the SELECT-only role
         if: inputs.backend == 'postgres-readonly'
         run: |
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/readonly-role.sql
+          docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U ashurbanipal -d ashurbanipal < conformance/seed/readonly-role.sql
           {
             echo "CONFORMANCE_PG_RO_USER=ashurbanipal_ro"
             echo "CONFORMANCE_PG_RO_PASSWORD=ashurbanipal_ro"
             echo "CONFORMANCE_PG_RO_URL=postgres://ashurbanipal_ro:ashurbanipal_ro@localhost:5432/ashurbanipal"
             echo "CONFORMANCE_EXPECT_READONLY_PROBE=1"
           } >> "$GITHUB_ENV"
+        env:
+          DB_CONTAINER: ${{ job.services.db.id }}
 
       - name: Start ${{ inputs.backend }} and apply the MySQL conformance seed
         if: inputs.backend == 'mysql' || inputs.backend == 'mariadb'
         run: |
+          # The container's own client (the runner image has none); mariadb:11 names it `mariadb`.
           if [ "${INPUTS_BACKEND}" = mysql ]; then
             docker run -d --name conformance-db -p 3306:3306 \
               -e MYSQL_ROOT_PASSWORD=ashurbanipal -e MYSQL_DATABASE=ashurbanipal mysql:8
+            client=mysql
           else
             docker run -d --name conformance-db -p 3306:3306 \
               -e MARIADB_ROOT_PASSWORD=ashurbanipal -e MARIADB_DATABASE=ashurbanipal mariadb:11
+            client=mariadb
           fi
-          sudo apt-get update && sudo apt-get install -y default-mysql-client
+          # TCP, not the socket: the entrypoint's temporary init server listens on the socket only.
           for _ in $(seq 1 60); do
-            mysql --host=127.0.0.1 --user=root --password=ashurbanipal -e 'select 1' ashurbanipal >/dev/null 2>&1 && break
+            docker exec conformance-db "$client" --host=127.0.0.1 --user=root --password=ashurbanipal -e 'select 1' ashurbanipal >/dev/null 2>&1 && break
             sleep 2
           done
-          mysql --host=127.0.0.1 --user=root --password=ashurbanipal ashurbanipal < conformance/seed/seed.mysql.sql
+          docker exec -i conformance-db "$client" --host=127.0.0.1 --user=root --password=ashurbanipal ashurbanipal < conformance/seed/seed.mysql.sql
           {
             echo "CONFORMANCE_MYSQL_URL=mysql://root:ashurbanipal@127.0.0.1:3306/ashurbanipal"
             echo "CONFORMANCE_JDBC_URL=jdbc:mysql://127.0.0.1:3306/ashurbanipal?allowPublicKeyRetrieval=true&useSSL=false"
@@ -135,8 +142,9 @@ jobs:
       - name: Apply the SQLite conformance seed
         if: inputs.backend == 'sqlite'
         run: |
-          sudo apt-get update && sudo apt-get install -y sqlite3
-          sqlite3 "$RUNNER_TEMP/conformance.sqlite" < conformance/seed/seed.sqlite.sql
+          # Python's sqlite3 module, so no apt install of the sqlite3 CLI.
+          python3 -c 'import sqlite3, sys; sqlite3.connect(sys.argv[1]).executescript(open(sys.argv[2]).read())' \
+            "$RUNNER_TEMP/conformance.sqlite" conformance/seed/seed.sqlite.sql
           {
             echo "CONFORMANCE_SQLITE_PATH=$RUNNER_TEMP/conformance.sqlite"
             echo "CONFORMANCE_JDBC_URL=jdbc:sqlite:$RUNNER_TEMP/conformance.sqlite"
