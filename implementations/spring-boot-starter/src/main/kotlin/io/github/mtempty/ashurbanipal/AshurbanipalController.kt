@@ -282,17 +282,15 @@ class AshurbanipalController(
             .contentType(MediaType.valueOf("application/problem+json"))
             .body(ProblemDetails(title = title, status = status.value(), code = code))
 
-    @ExceptionHandler(FilterException::class)
-    fun handleFilterError(e: FilterException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, "invalid_filter", e.message ?: "bad request")
-
-    @ExceptionHandler(BadParameterException::class)
-    fun handleBadParameter(e: BadParameterException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message ?: "bad request")
-
-    @ExceptionHandler(NotAllowedException::class)
-    fun handleNotAllowedError(e: NotAllowedException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, e.kind.code, e.message ?: "bad request")
+    @ExceptionHandler(
+        FilterException::class,
+        BadParameterException::class,
+        NotAllowedException::class,
+        BadJoinException::class,
+        UnsortableException::class,
+    )
+    fun handleRequestError(e: RuntimeException): ResponseEntity<ProblemDetails> =
+        problemResponse(HttpStatus.BAD_REQUEST, requestProblemCode(e), e.message ?: "bad request")
 
     @ExceptionHandler(MissingServletRequestParameterException::class)
     fun handleMissingParam(e: MissingServletRequestParameterException): ResponseEntity<ProblemDetails> =
@@ -301,14 +299,6 @@ class AshurbanipalController(
     @ExceptionHandler(MethodArgumentTypeMismatchException::class)
     fun handleTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ProblemDetails> =
         problemResponse(HttpStatus.BAD_REQUEST, "invalid_parameter", e.message)
-
-    @ExceptionHandler(BadJoinException::class)
-    fun handleBadJoin(e: BadJoinException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, "invalid_join", e.message ?: "bad request")
-
-    @ExceptionHandler(UnsortableException::class)
-    fun handleUnsortable(e: UnsortableException): ResponseEntity<ProblemDetails> =
-        problemResponse(HttpStatus.BAD_REQUEST, "unsortable_column", e.message ?: "bad request")
 
     @ExceptionHandler(DataAccessException::class)
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<ProblemDetails> =
@@ -364,4 +354,14 @@ internal fun healthUrl(baseUrl: String, healthPath: String): String? {
     } catch (e: Exception) {
         null
     }
+}
+
+/** The `spec/protocol.md` §2 code (always a 400) for an exception that rejects the request. */
+internal fun requestProblemCode(e: RuntimeException): String = when (e) {
+    is FilterException -> "invalid_filter"
+    is BadParameterException -> "invalid_parameter"
+    is NotAllowedException -> e.kind.code
+    is BadJoinException -> "invalid_join"
+    is UnsortableException -> "unsortable_column"
+    else -> throw e
 }

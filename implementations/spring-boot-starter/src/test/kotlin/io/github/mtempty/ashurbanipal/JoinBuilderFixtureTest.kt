@@ -79,16 +79,6 @@ class JoinBuilderFixtureTest {
             key to TableMeta(name, columns, schema.takeIf { engine.splicesSchema }, tieBreakKeys(columns, keys))
         }
 
-    /** The `spec/protocol.md` §2 code the controller's exception handlers give [e]. */
-    private fun code(e: RuntimeException): String = when (e) {
-        is BadJoinException -> "invalid_join"
-        is FilterException -> "invalid_filter"
-        is BadParameterException -> "invalid_parameter"
-        is NotAllowedException -> e.kind.code
-        is UnsortableException -> "unsortable_column"
-        else -> throw e
-    }
-
     /** The fixture's placeholders are `$n` (Postgres) or `?`; this port binds positional `?` everywhere. */
     private fun normalize(sql: String): String = sql.replace(Regex("\\$\\d+"), "?")
 
@@ -116,7 +106,7 @@ class JoinBuilderFixtureTest {
             val (sql, values) = buildJoinSelect(plan, engine.dialect)
             Outcome(sql = sql, values = values, labels = plan.labels)
         } catch (e: RuntimeException) {
-            Outcome(error = code(e))
+            Outcome(error = requestProblemCode(e))
         }
     }
 
