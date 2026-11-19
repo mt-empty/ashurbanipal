@@ -121,7 +121,7 @@ def _run(engine: Engine, case: dict[str, Any]) -> dict[str, Any]:
             sort=case.get("sort"),
             sort_join=case.get("sort_join"),
             descending=case.get("order") == "desc",
-            filter=conditions,
+            filter=conditions or None,
         )
         refs = spec.table_refs()
         schemas = table_schemas(refs, request, catalog["schemas"])

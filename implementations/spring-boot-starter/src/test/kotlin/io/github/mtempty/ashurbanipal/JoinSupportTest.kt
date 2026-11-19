@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Test
 import java.sql.SQLException
 import java.sql.SQLTimeoutException
 
-/** `spec/protocol.md` §5.11 parsing, planning and SQL building; no database needed. */
 /** Planning and SQL building are covered per engine by `spec/fixtures/join-builder-tests.json` ([JoinBuilderFixtureTest]). */
 class JoinSupportTest {
     private fun col(name: String, type: String, columnClass: ColumnClass) = ColMeta(name, type, columnClass)
@@ -219,4 +218,16 @@ class JoinSupportTest {
         assertFalse(isQueryTimeout(RuntimeException("boom")))
     }
 
+    @Test
+    fun `a MySQL zero date compares the column's text on the table route`() {
+        val d = ColMeta("d", "date", ColumnClass.TEMPORAL, compare = TypedCompare(ValueForm.MYSQL_DATE))
+        val table = TableMeta("t", listOf(d))
+        for ((cond, want) in listOf(
+            Condition(column = "d", op = "=", value = "2016-02-29") to " where (\"d\" = ?)",
+            Condition(column = "d", op = "=", value = "0000-00-00") to " where (\"d\"::text = ?)",
+            Condition(column = "d", op = "IN", value = listOf("2016-02-29", "0000-00-00")) to " where (\"d\"::text IN (?, ?))",
+        )) {
+            assertEquals(want, tableWhereClause(listOf(cond), table, PG_DIALECT).sql)
+        }
+    }
 }

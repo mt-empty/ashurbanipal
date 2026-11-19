@@ -61,9 +61,8 @@ Exactly one of `expect`/`expect_error` is present.
 
 ## `filter-builder-tests.json` — backend AST validation + WHERE building
 
-Consumed by every backend's fixture runner (reference:
-`implementations/rust/core/src/db/postgres.rs`'s `filter_builder_fixtures`)
-and, over HTTP, by the black-box suite (`conformance/runner/filter_dsl.rs`),
+Consumed by every backend's fixture runner and, over HTTP, by the
+black-box suite (`conformance/runner/filter_dsl.rs`),
 which JSON-encodes each case into a real `filter` query param.
 
 Top-level `tables` maps each seed table a case names to its columns, each
@@ -114,11 +113,13 @@ Each entry in `cases`:
 ## `join-builder-tests.json` — backend join planning + SQL building, per engine
 
 Consumed by every backend's unit runner, once per engine (Postgres, SQLite,
-MySQL/MariaDB), with no database: the reference is
-`implementations/rust/core/src/db/join_fixture.rs`. Each runner builds its
-tables from the catalog below through that engine's own type mapping and
-tie-break-key choice, then runs the case through the port's join parser,
-filter parser, schema resolution, planner and SQL builder.
+MySQL/MariaDB), with no database. Each runner turns a catalog row into a
+column the way that backend's catalog lookup does, calling the engine's own
+type-to-class and typed-comparison functions and the port's tie-break-key
+choice, then runs the case through the port's join parser, filter parser,
+schema resolution, planner and SQL builder. The row assembly itself is
+copied into each runner, so a backend-only adjustment to it (MariaDB's JSON
+columns) is not covered here.
 
 Top-level `catalogs` has one entry per engine, standing in for the live
 catalog lookup:

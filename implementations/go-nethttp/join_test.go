@@ -20,7 +20,7 @@ func textCol(name string) colMeta {
 
 func testOrdersUsers() []tableMeta {
 	return []tableMeta{
-		{schema: "public", name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id"), textCol("status"), {name: "tags", typeName: "ARRAY", class: classArray}}, orderKeys: []int{0}},
+		{schema: "public", name: "orders", columns: []colMeta{uuidCol("id"), uuidCol("user_id")}, orderKeys: []int{0}},
 		{schema: "public", name: "users", columns: []colMeta{uuidCol("id"), textCol("email")}, orderKeys: []int{0}},
 	}
 }
@@ -243,5 +243,25 @@ func TestParseFilterRejectsAKeyInAnotherCase(t *testing.T) {
 	}
 	if _, err := ParseFilter(`[{"column":"a","op":"IS NULL"}]`); err != nil {
 		t.Errorf("the documented keys must still parse: %v", err)
+	}
+}
+
+func TestAMySQLZeroDateComparesTheColumnsTextOnTheTableRoute(t *testing.T) {
+	table := tableMeta{name: "t", columns: []colMeta{{
+		name: "d", typeName: "date", class: classTemporal,
+		compare: &typedCompare{form: formMysqlDate},
+	}}}
+	for _, c := range []struct {
+		cond Condition
+		want string
+	}{
+		{Condition{Column: "d", Op: "=", Value: StringValue("2016-02-29")}, ` where ("d" = $3)`},
+		{Condition{Column: "d", Op: "=", Value: StringValue("0000-00-00")}, ` where ("d"::text = $3)`},
+		{Condition{Column: "d", Op: "IN", Value: &FilterValue{Items: []string{"2016-02-29", "0000-00-00"}, List: true}}, ` where ("d"::text IN ($3, $4))`},
+	} {
+		sql, _, err := tableWhereClause([]Condition{c.cond}, table, pgJoinDialect)
+		if err != nil || sql != c.want {
+			t.Errorf("%v: got %q, %v; want %q", c.cond.Value.Items, sql, err, c.want)
+		}
 	}
 }

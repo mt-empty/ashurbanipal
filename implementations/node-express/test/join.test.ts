@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pgColumnClass } from "../src/db/postgres.js";
+import { pgColumnClass, JOIN_DIALECT as pgDialect } from "../src/db/postgres.js";
 import { FilterError, isQueryTimeout } from "../src/errors.js";
 import { formAccepts, parseFilter, parseFilterForJoin, type ValueForm } from "../src/filter.js";
 import {
@@ -11,6 +11,7 @@ import {
   parseJoin,
   planJoin,
   type TableMeta,
+  tableWhereClause,
 } from "../src/join.js";
 
 // Planning and SQL building are covered per engine by spec/fixtures/join-builder-tests.json (join-fixture.test.ts).
@@ -21,7 +22,7 @@ const text = (name: string): ColMeta => ({ name, type: "text", class: { kind: "t
 const orders = (): TableMeta => ({
   schema: "public",
   name: "orders",
-  columns: [uuid("id"), uuid("user_id"), text("status"), { name: "tags", type: "ARRAY", class: { kind: "array" } }],
+  columns: [uuid("id"), uuid("user_id")],
   orderKeys: [0],
 });
 const users = (): TableMeta => ({
@@ -222,5 +223,24 @@ describe("pgColumnClass", () => {
     ] as const) {
       expect(pgColumnClass(t, "", "", false), t).toEqual({ kind });
     }
+  });
+});
+
+describe("a MySQL zero date on the table route", () => {
+  it("compares the column's text", () => {
+    const table: TableMeta = {
+      name: "t",
+      orderKeys: [],
+      columns: [{ name: "d", type: "date", class: { kind: "temporal" }, compare: { form: "mysql-date" } }],
+    };
+    for (const [value, want] of [
+      ["2016-02-29", ' where ("d" = $3)'],
+      ["0000-00-00", ' where ("d"::text = $3)'],
+    ] as const) {
+      expect(tableWhereClause([{ column: "d", op: "=", value }], table, pgDialect).where).toBe(want);
+    }
+    expect(
+      tableWhereClause([{ column: "d", op: "IN", value: ["2016-02-29", "0000-00-00"] }], table, pgDialect).where,
+    ).toBe(' where ("d"::text IN ($3, $4))');
   });
 });

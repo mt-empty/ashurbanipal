@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::{DbError, Ident};
-use crate::filter;
-use crate::join::{self, ColMeta, Dialect, JoinOpts, JoinSpec, TableMeta, UniqueKey};
+use crate::config::Limits;
+use crate::join::{self, ColMeta, Dialect, TableMeta, UniqueKey};
+use crate::protocol_wire::JoinParams;
 
 const FIXTURES: &str = include_str!("../../../../../spec/fixtures/join-builder-tests.json");
 
@@ -72,26 +73,25 @@ fn run_case(
     tables: &HashMap<String, TableMeta>,
     case: &Value,
 ) -> Outcome {
-    let raw = match (case.get("join_raw"), case.get("join")) {
+    let join = match (case.get("join_raw"), case.get("join")) {
         (Some(raw), _) => raw.as_str().unwrap().to_string(),
         (None, Some(j)) => j.to_string(),
         (None, None) => panic!("case {}: neither join nor join_raw", case["name"]),
     };
-    let spec = JoinSpec::parse(&raw).map_err(|_| "invalid_join".to_string())?;
-    let filter = case
-        .get("filter")
-        .map(|f| filter::parse_for_join(&f.to_string()))
-        .transpose()
-        .map_err(|_| "invalid_filter".to_string())?;
-    let opts = JoinOpts {
-        limit: 50,
-        offset: 0,
+    let params = JoinParams {
+        schema: None,
+        source: None,
+        join,
+        filter: case.get("filter").map(Value::to_string),
+        limit: None,
+        offset: None,
         sort: case.get("sort").map(|s| s.as_str().unwrap().to_string()),
-        sort_join: case.get("sort_join").map(|n| n.as_u64().unwrap() as usize),
-        descending: case.get("order").and_then(Value::as_str) == Some("desc"),
-        timeout_secs: 5,
-        filter,
+        sort_join: case.get("sort_join").map(Value::to_string),
+        order: case.get("order").map(|o| o.as_str().unwrap().to_string()),
     };
+    let (spec, opts) = params
+        .join_request(&Limits::default())
+        .map_err(|e| code(&e))?;
     let listed: Vec<String> = catalog["schemas"]
         .as_array()
         .unwrap()

@@ -1642,6 +1642,58 @@
       }
     },
     {
+      "name": "sort-by-part-of-a-composite-key",
+      "join": {
+        "table": "page_hits",
+        "joins": [{"type": "left", "table": "orders", "on": [{"left": {"join": 0, "column": "hits"}, "right": "total_cents"}]}],
+        "columns": [{"join": 0, "column": "path"}]
+      },
+      "sort": "day",
+      "order": "desc",
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"path\"::text as c0 from \"public\".\"page_hits\" t0 left join \"public\".\"orders\" t1 on t1.\"total_cents\" = t0.\"hits\" order by t0.\"day\" desc, t0.\"path\" desc, t1.\"id\" desc limit $1 offset $2",
+          "values": [],
+          "labels": ["path"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`path` AS CHAR) as c0 from `ashurbanipal`.`page_hits` t0 left join `ashurbanipal`.`orders` t1 on t1.`total_cents` = t0.`hits` order by t0.`day` desc, t0.`path` desc, t1.`id` desc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"path\" AS TEXT) as c0 from \"page_hits\" t0 left join \"orders\" t1 on t1.\"total_cents\" = t0.\"hits\" order by t0.\"day\" desc, t0.\"path\" desc, t1.\"id\" desc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        }
+      }
+    },
+    {
+      "name": "no-key-and-no-sort-has-no-order-by",
+      "join": {
+        "table": "keyless",
+        "joins": [{"type": "inner", "table": "keyless", "on": [{"left": {"join": 0, "column": "order_id"}, "right": "order_id"}]}],
+        "columns": [{"join": 0, "column": "note"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"note\"::text as c0 from \"public\".\"keyless\" t0 inner join \"public\".\"keyless\" t1 on t1.\"order_id\" = t0.\"order_id\" limit $1 offset $2",
+          "values": [],
+          "labels": ["note"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`note` AS CHAR) as c0 from `ashurbanipal`.`keyless` t0 inner join `ashurbanipal`.`keyless` t1 on t1.`order_id` = t0.`order_id` limit ? offset ?",
+          "values": [],
+          "labels": ["note"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"note\" AS TEXT) as c0 from \"keyless\" t0 inner join \"keyless\" t1 on t1.\"order_id\" = t0.\"order_id\" limit ? offset ?",
+          "values": [],
+          "labels": ["note"]
+        }
+      }
+    },
+    {
       "name": "sort-join-without-sort",
       "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
       "sort_join": 1,

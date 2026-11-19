@@ -142,6 +142,9 @@ function errorCode(err: unknown): string {
 }
 
 function runCase(engine: Engine, catalog: Catalog, tables: Map<string, TableMeta>, c: FixtureCase): Outcome {
+  const request = c.schema ?? catalog.default_schema;
+  if (!catalog.schemas.includes(request))
+    throw new Error(`request schema ${request} is not in the ${engine.name} catalog`);
   try {
     const spec = parseJoin(c.join_raw ?? JSON.stringify(c.join));
     const opts: JoinOpts = {
@@ -152,9 +155,6 @@ function runCase(engine: Engine, catalog: Catalog, tables: Map<string, TableMeta
       descending: c.order === "desc",
       filter: c.filter === undefined ? [] : parseFilterForJoin(JSON.stringify(c.filter)),
     };
-    const request = c.schema ?? catalog.default_schema;
-    if (!catalog.schemas.includes(request))
-      throw new Error(`request schema ${request} is not in the ${engine.name} catalog`);
     const refs = joinTableRefs(spec);
     const schemas = tableSchemas(refs, request, catalog.schemas);
     const metas = refs.map((r, i) => {
@@ -166,7 +166,8 @@ function runCase(engine: Engine, catalog: Catalog, tables: Map<string, TableMeta
     const { body, values } = buildJoinSelect(plan, engine.dialect);
     return { sql: body, values, labels: plan.labels };
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("request schema")) throw err;
+    // A 500 here is a bug in the planner, not a rejection the fixture can expect.
+    if (errorResult(err).status >= 500) throw err;
     return { error: errorCode(err) };
   }
 }

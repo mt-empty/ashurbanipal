@@ -1134,4 +1134,54 @@ mod tests {
         assert!(schemas.contains(&("orders".into(), None)));
         assert!(schemas.contains(&("users".into(), Some("warehouse".into()))));
     }
+
+    #[test]
+    fn a_mysql_zero_date_compares_the_columns_text_on_the_table_route() {
+        let dialect = Dialect {
+            quote: crate::db::quote_ident,
+            cast_text: |c| format!("{c}::text"),
+            cast_param: |p, t| format!("{p}::{t}"),
+            numbered: true,
+            ilike: IlikeStyle::Native,
+        };
+        let table = TableMeta {
+            schema: None,
+            name: Ident::for_test("t"),
+            columns: vec![ColMeta {
+                compare: Some(TypedCompare {
+                    form: Some(ValueForm::MysqlDate),
+                    cast: None,
+                    int_cast: None,
+                }),
+                ..col("d", "date", ColumnClass::Temporal)
+            }],
+            order_keys: Vec::new(),
+        };
+        let cond = |op, value| Condition {
+            logic: None,
+            not: false,
+            column: "d".into(),
+            op,
+            value: Some(value),
+            join: None,
+        };
+        let list = |v: &[&str]| FilterValue::List(v.iter().map(|s| s.to_string()).collect());
+        for (filter, want) in [
+            (
+                cond(FilterOp::Eq, "2016-02-29".into()),
+                " where (\"d\" = $3)",
+            ),
+            (
+                cond(FilterOp::Eq, "0000-00-00".into()),
+                " where (\"d\"::text = $3)",
+            ),
+            (
+                cond(FilterOp::In, list(&["2016-02-29", "0000-00-00"])),
+                " where (\"d\"::text IN ($3, $4))",
+            ),
+        ] {
+            let (sql, _) = table_where_clause(&[filter], &table, &dialect).unwrap();
+            assert_eq!(sql, want);
+        }
+    }
 }

@@ -1,5 +1,5 @@
-"""`GET /api/tables/join` (`spec/protocol.md` §5.11): parsing, planning, SQL
-building, and the route end to end against a temporary SQLite file.
+"""`GET /api/tables/join` (`spec/protocol.md` §5.11): what the shared join fixture
+cannot see, and the route end to end against a temporary SQLite file.
 """
 
 from __future__ import annotations
@@ -16,11 +16,14 @@ from flask import Flask
 
 from ashurbanipal.config import Config
 from ashurbanipal.db import BadJoin, QueryTimeout, wrap_driver_errors
+from ashurbanipal.db.postgres import _JOIN_DIALECT as pg_join_dialect
 from ashurbanipal.db.postgres import column_class as pg_column_class
 from ashurbanipal.db.sqlite import SqliteSource
 from ashurbanipal.db.sqlite import column_class as sqlite_column_class
 from ashurbanipal.filter import (
+    Comparison,
     FilterError,
+    ListComparison,
     form_accepts,
     parse,
     parse_for_join,
@@ -39,11 +42,13 @@ from ashurbanipal.join import (
     ColMeta,
     JoinOpts,
     TableMeta,
+    TypedCompare,
     UniqueKey,
     enum_class,
     group_unique_keys,
     parse_join,
     plan_join,
+    table_where_clause,
 )
 from ashurbanipal.routes import router
 
@@ -67,8 +72,6 @@ def _orders() -> TableMeta:
         [
             _col("id", "uuid", UUID),
             _col("user_id", "uuid", UUID),
-            _col("status", "text", TEXT),
-            _col("tags", "ARRAY", ARRAY),
         ],
         schema="public",
         order_keys=[0],
@@ -417,3 +420,17 @@ def test_a_table_in_another_schema_is_reported_under_it() -> None:
 def test_a_key_with_an_unusable_part_is_dropped() -> None:
     parts = [("a", False, "x", True), ("a", False, "y", False), ("b", False, "x", True)]
     assert group_unique_keys(parts) == [UniqueKey("b", False, ["x"])]
+
+
+def test_a_mysql_zero_date_compares_the_columns_text_on_the_table_route() -> None:
+    col = ColMeta(name="d", type_name="date", column_class=TEMPORAL, compare=TypedCompare("mysql-date"))
+    table = TableMeta("t", [col])
+    for cond, want in (
+        (Comparison(column="d", op="=", value="2016-02-29"), ' where ("d" = %s)'),
+        (Comparison(column="d", op="=", value="0000-00-00"), ' where ("d"::text = %s)'),
+        (
+            ListComparison(column="d", op="IN", value=("2016-02-29", "0000-00-00")),
+            ' where ("d"::text IN (%s, %s))',
+        ),
+    ):
+        assert table_where_clause([cond], table, pg_join_dialect)[0] == want
