@@ -1,6 +1,6 @@
 # Per-engine expectations for the filter-builder fixtures
 
-> **Status:** OPEN · **Area:** ports, conformance · **Ref:** follow-up to [59](59-join-builder-golden-sql-fixtures.md)
+> **Status:** DONE · **Area:** ports, conformance · **Ref:** `spec/fixtures/filter-builder-tests.json` over the shared `spec/fixtures/catalogs.json`, run per engine in all five ports; follow-up to [59](59-join-builder-golden-sql-fixtures.md)
 
 **Ask:** give `spec/fixtures/filter-builder-tests.json` one expected
 WHERE clause per engine (Postgres, SQLite, MySQL/MariaDB), the way
