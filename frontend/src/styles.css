@@ -45,6 +45,8 @@
   --type-date: light-dark(#3f7a5c, #8cc4a8);
   /* Transient wash on rows added since the last manual refresh. */
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
+  /* Transient wash on cells whose value changed since the last refresh. */
+  --cell-changed-bg: light-dark(#ddebfb, #1d3047);
   /* The scroller's layers, lowest first. #chrome is on top at rest and drops
      to the header's level once the header pins (features/sticky-header.ts),
      where the header wins by coming later: the filter's suggestion list
@@ -250,8 +252,10 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .375rem 
 #refresh-pop input { accent-color: CanvasText; }
 #refresh-pop-foot { margin: .3rem 0 0; padding: .4rem .5rem .15rem; border-top: 1px solid var(--rule);
           font-size: .75rem; line-height: 1.4; color: var(--text-muted); }
-#row-new-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
+#row-new-chip, #row-changed-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
           background: var(--row-new-bg); color: CanvasText; font-size: .75rem; }
+#row-changed-chip { background: var(--cell-changed-bg); }
+#row-new-chip:not([hidden]) + #row-changed-chip { margin-left: .25rem; }
 
 /* ==== Data table ==== */
 /* Scoped to #data-table so the Other services grid doesn't inherit these;
@@ -353,8 +357,13 @@ td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
    background of its own, so the tr wash shows through. */
 tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 @keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
+/* Same fade on a changed cell. It paints over the row's hover background
+   while it lasts; grid.ts drops the class once the fade ends. */
+tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
+@keyframes cell-changed-fade { from { background: var(--cell-changed-bg); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) {
   tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+  tbody td.cell-changed { animation: none; background: var(--cell-changed-bg); }
 }
 /* startViewTransition (table render, record dialog) cross-fades by default. */
 @media (prefers-reduced-motion: reduce) {

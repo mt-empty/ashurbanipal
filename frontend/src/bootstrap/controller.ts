@@ -5,9 +5,10 @@ import {
   commitRequest,
   currentRequest,
   dataParams,
-  diffNewRows,
+  diffRows,
   dropOneStaleInput,
   dropStaleSort,
+  hiddenColumns,
   markFilterVerified,
   markStoredSortVerified,
   markViewShown,
@@ -27,7 +28,7 @@ import {
   viewKey,
 } from "../core/state.js";
 import type { JoinDef, View, ViewData } from "../core/types.js";
-import { noteLoadOk, noteTickFailed, setFetching, setNewChip } from "../features/auto-refresh.js";
+import { noteLoadOk, noteTickFailed, setFetching, setRowChangeChips } from "../features/auto-refresh.js";
 import { rememberColumnWidths, useWidthScope, widthScopeOf } from "../features/column-widths.js";
 import { hideColumnNotes, renderColumnMenu, renderHeader, renderRows, updatePager } from "../features/grid.js";
 import { gridIsStale, syncGridLock } from "../features/grid-lock.js";
@@ -41,6 +42,7 @@ import { syncUrl } from "../features/view-history.js";
 import { syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
+import { changedRowsText } from "../lib/row-diff.js";
 import { distinctRefs } from "../lib/table-ref.js";
 import { isCurrentLoad, type LoadDataOpts, nextLoadToken } from "./reload.js";
 import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js";
@@ -295,7 +297,7 @@ async function runLoad({
   updateViewChrome();
 
   // Row keys come from primary keys, which a join of several tables does not have.
-  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
+  const changes = diffRows(data, highlightNew && view.kind === "table");
 
   $<HTMLButtonElement>("payload").disabled = false;
   $<HTMLButtonElement>("refresh").disabled = false;
@@ -313,7 +315,7 @@ async function runLoad({
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows(data, newRowKeys, pkNames);
+    renderRows(data, changes);
     rememberColumnWidths();
     renderColumnMenu();
     syncGridLock();
@@ -347,12 +349,14 @@ async function runLoad({
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }, scopeRef()), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
-  // Sighted users see the tint; announce the count for everyone else. The
+  // Sighted users see the tints; announce the counts for everyone else. The
   // next loadData clears #status the same way it clears "loading…".
-  setNewChip(newRowKeys?.size ?? 0);
-  if (newRowKeys?.size) {
-    setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys && !auto) {
+  const newCount = changes.newRowKeys?.size ?? 0;
+  const changedText = changedRowsText(changes.changedCells, new Set(hiddenColumns()));
+  setRowChangeChips(newCount, changedText);
+  if (newCount || changedText) {
+    setStatus([newCount ? `${newCount} new` : "", changedText].filter(Boolean).join(" · "));
+  } else if (highlightNew && changes.newRowKeys && !auto) {
     // Nothing new, so no tint: the icon's spin and the "updated" time are the
     // sighted cue; this line is for everyone else.
     setStatus("no changes");

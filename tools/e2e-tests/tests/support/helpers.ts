@@ -3,7 +3,7 @@ import { expect, type Page, type Request, type Route } from "@playwright/test";
 export const APP_PATH = "/__ashurbanipal";
 
 /** Waits for the current fetch and its render to settle (docs/e2e-testing-guidelines.md §2).
- * Spinners, the refresh-icon spin, the new-row wash and #load-bar outlast
+ * Spinners, the refresh-icon spin, the new-row and changed-cell washes and #load-bar outlast
  * the render, so their animations are not waited on. */
 export async function waitForIdle(page: Page) {
   await expect(page.locator("#data-table")).not.toHaveAttribute("aria-busy", "true");
@@ -18,7 +18,8 @@ export async function waitForIdle(page: Page) {
               target?.id !== "refresh-icon" &&
               !target?.closest("#load-bar") &&
               !cls?.contains("chip-spinner") &&
-              !cls?.contains("row-new")
+              !cls?.contains("row-new") &&
+              !cls?.contains("cell-changed")
             );
           }).length,
       ),
