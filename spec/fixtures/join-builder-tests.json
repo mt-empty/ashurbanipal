@@ -600,6 +600,51 @@
       "expect_error": "invalid_join"
     },
     {
+      "name": "parse-unknown-key-in-an-on-pair",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id", "op": ">"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-negative-position",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": -1, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-missing-table",
+      "join": {"joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-missing-right",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-trailing-data",
+      "join_raw": "{\"table\":\"orders\",\"joins\":[{\"type\":\"inner\",\"table\":\"users\",\"on\":[{\"left\":{\"join\":0,\"column\":\"user_id\"},\"right\":\"id\"}]}]} {}",
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-key-in-another-case",
+      "join": {"TABLE": "orders", "Joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-nested-key-in-another-case",
+      "join": {"table": "orders", "joins": [{"Type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-fractional-position",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0.5, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-boolean-position",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": true, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
       "name": "parse-wrong-json-type",
       "join": {"table": 5, "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
       "expect_error": "invalid_join"
@@ -610,8 +655,21 @@
       "expect_error": "invalid_join"
     },
     {
+      "name": "parse-joined-table-null-schema",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "schema": null, "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
       "name": "parse-schema-wrong-type",
       "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}], "schema": 5},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-joined-table-schema-wrong-type",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "schema": ["public"], "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]
+      },
       "expect_error": "invalid_join"
     },
     {"name": "parse-no-joins", "join": {"table": "orders", "joins": []}, "expect_error": "invalid_join"},
@@ -1251,6 +1309,32 @@
       }
     },
     {
+      "name": "filter-mixed-between-and-a-pattern-on-a-typed-column",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "total_cents", "op": "BETWEEN", "value": ["1", "9.5"]}, {"logic": "OR", "column": "total_cents", "op": "LIKE", "value": "1%"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" BETWEEN $3::int8 AND $4::numeric) OR (t0.\"total_cents\"::text LIKE $5) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["1", "9.5", "1%"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (t0.`total_cents` BETWEEN CAST(? AS DECIMAL(65,30)) AND CAST(? AS DECIMAL(65,30))) OR (CAST(t0.`total_cents` AS CHAR) LIKE ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["1", "9.5", "1%"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" BETWEEN ? AND ?) OR (CAST(t0.\"total_cents\" AS TEXT) LIKE ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["1", "9.5", "1%"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
       "name": "filter-ilike-per-engine",
       "join": {
         "table": "orders",
@@ -1373,6 +1457,54 @@
       }
     },
     {
+      "name": "filter-date-compares-in-its-own-type",
+      "join": {
+        "table": "typed_samples",
+        "joins": [{"type": "inner", "table": "typed_samples", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "date_v", "op": "=", "value": "2016-02-29"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"typed_samples\" t0 inner join \"public\".\"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" = $3::date) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["2016-02-29"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`typed_samples` t0 inner join `ashurbanipal`.`typed_samples` t1 on t1.`id` = t0.`id` where (t0.`date_v` = ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["2016-02-29"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"typed_samples\" t0 inner join \"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" = ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["2016-02-29"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-zero-date-in-a-list",
+      "join": {
+        "table": "typed_samples",
+        "joins": [{"type": "inner", "table": "typed_samples", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "date_v", "op": "IN", "value": ["2016-02-29", "0000-00-00"]}],
+      "expect": {
+        "postgres": {"error": "invalid_filter"},
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`typed_samples` t0 inner join `ashurbanipal`.`typed_samples` t1 on t1.`id` = t0.`id` where (CAST(t0.`date_v` AS CHAR) IN (?, ?)) order by t0.`id` asc limit ? offset ?",
+          "values": ["2016-02-29", "0000-00-00"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"typed_samples\" t0 inner join \"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" IN (?, ?)) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["2016-02-29", "0000-00-00"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
       "name": "filter-logic-on-first-condition",
       "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
       "filter": [{"logic": "AND", "column": "id", "op": "=", "value": "1"}],
@@ -1478,6 +1610,32 @@
         },
         "sqlite": {
           "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" desc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "order-without-sort-stays-ascending",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "order": "desc",
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit ? offset ?",
           "values": [],
           "labels": ["id"]
         }
