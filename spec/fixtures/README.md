@@ -59,70 +59,17 @@ Each entry in `cases`:
 
 Exactly one of `expect`/`expect_error` is present.
 
-## `filter-builder-tests.json` — backend AST validation + WHERE building
+## `catalogs.json` — engine-native catalogs for the builder fixtures
 
-Consumed by every backend's fixture runner and, over HTTP, by the
-black-box suite (`conformance/runner/filter_dsl.rs`),
-which JSON-encodes each case into a real `filter` query param.
-
-Top-level `tables` maps each seed table a case names to its columns, each
-with the Postgres `type` (`information_schema.columns.data_type`) and the
-`spec/protocol.md` §5.11.2 `class`. Unit runners use it in place of a live
-catalog: the class picks typed or text comparison, and the type picks the
-cast target.
-
-Each entry in `cases`:
-
-- `name` — stable case ID.
-- `table` — the seed-schema table whose live columns the case is
-  validated against (`.devcontainer/db/init/01-seed.sql`); unit runners
-  may substitute a static column list matching that table.
-- `conditions` — the decoded filter AST (the usual input), **or** `raw` —
-  a literal pre-URL-encoding `filter` param value, for cases that aren't
-  a valid conditions array at all (malformed JSON, DSL text).
-- `expect` — the case is valid; the resulting WHERE clause must match:
-  - `where` — the fragment in the Postgres shape: double-quoted column
-    identifiers, a `::text` cast on the column for a text comparison, a
-    cast on the placeholder for a typed one (`$1::numeric`), no cast for
-    `IS [NOT] NULL` on a typed column, `$n` placeholders numbered **from `$1` in condition
-    order** (an `IN` or `BETWEEN` takes one per item). Runners with a different
-    placeholder scheme (`?`, offset numbering — the Rust implementation
-    itself binds limit/offset first, so it checks against `$n+2`) normalize
-    before comparing; the operator spellings and parenthesization are
-    normative.
-  - `values` — the bind values, in placeholder order.
-- `engines` (optional) — the engines whose stored values include this
-  case's value (`NaN`, a ` BC` date), so the HTTP runner checks the case
-  only there; SQLite is listed because it skips the value check. Absent
-  means every engine.
-- `expect_error` — the case must be rejected (HTTP: 400). The kind names
-  *why*, and implies the stage:
-  - `unknown_column` — structurally valid AST, column fails the live
-    schema allow-list (builder stage).
-  - `invalid_value` — the column compares typed and a value does not
-    match its class's form (builder stage: it needs the column's class).
-  - `malformed`, `bad_op`, `bad_logic`, `missing_value`,
-    `unexpected_value`, `bad_value` (wrong value shape for the op: an
-    array where a string belongs, or a bad `IN`/`BETWEEN` list),
-    `missing_logic`, `unexpected_logic`, `too_many_conditions`,
-    `oversize` — structural validation, rejected before any schema
-    access. Error message text is
-    implementation-defined (`spec/protocol.md` §2); only the rejection
-    is asserted.
-
-## `join-builder-tests.json` — backend join planning + SQL building, per engine
-
-Consumed by every backend's unit runner, once per engine (Postgres, SQLite,
-MySQL/MariaDB), with no database. Each runner turns a catalog row into a
-column the way that backend's catalog lookup does, calling the engine's own
-type-to-class and typed-comparison functions and the port's tie-break-key
-choice, then runs the case through the port's join parser, filter parser,
-schema resolution, planner and SQL builder. The row assembly itself is
+Shared by `filter-builder-tests.json` and `join-builder-tests.json`. Each
+runner turns a catalog row into a column the way that backend's catalog
+lookup does, calling the engine's own type-to-class and typed-comparison
+functions and the port's tie-break-key choice. The row assembly itself is
 copied into each runner, so a backend-only adjustment to it (MariaDB's JSON
-columns) is not covered here.
+columns) is not covered by either fixture.
 
-Top-level `catalogs` has one entry per engine, standing in for the live
-catalog lookup:
+Top-level `catalogs` has one entry per engine (`postgres`, `mysql`,
+`sqlite`), standing in for the live catalog lookup:
 
 - `schemas` — the §5.7 list; `default_schema` — the request's schema when a
   case names none. SQLite's only schema is `main`, never spliced into SQL.
@@ -138,6 +85,60 @@ catalog lookup:
 - Tables mirror the conformance seeds (`conformance/seed/`). A table the
   seeds lack, kept for a shape no seed table has (a collation clash, no
   unique key, a label collision), carries `"synthetic": true`.
+
+## `filter-builder-tests.json` — backend AST validation + table-route WHERE building, per engine
+
+Consumed by every backend's unit runner, once per engine (Postgres, SQLite,
+MySQL/MariaDB), with no database, and over HTTP by the black-box suite
+(`conformance/runner/filter_dsl.rs`), which JSON-encodes each case into a
+real `filter` query param and asserts 200 where the engine under test builds
+it and 400 where it rejects it. A unit runner builds the case's table from
+the engine's catalog in `catalogs.json`, parses the conditions with the
+port's filter parser and builds the WHERE clause with the engine's dialect.
+
+Each entry in `cases`:
+
+- `name` — stable case ID.
+- `table` — the table the case is validated against, looked up as
+  `<default_schema>.<table>` in each engine's catalog.
+- `conditions` — the decoded filter AST (the usual input), **or** `raw` —
+  a literal pre-URL-encoding `filter` param value, for cases that aren't
+  a valid conditions array at all (malformed JSON, DSL text).
+- `expect_error` — every engine rejects the case. The kind names *why*,
+  and implies the stage:
+  - `unknown_column` — structurally valid AST, column fails the schema
+    allow-list (builder stage).
+  - `malformed`, `bad_op`, `bad_logic`, `missing_value`,
+    `unexpected_value`, `bad_value` (wrong value shape for the op: an
+    array where a string belongs, or a bad `IN`/`BETWEEN` list),
+    `missing_logic`, `unexpected_logic`, `too_many_conditions`,
+    `oversize` — structural validation, rejected before any schema
+    access. A unit runner asserts only that the parse fails, not which
+    kind; error message text is implementation-defined
+    (`spec/protocol.md` §2).
+
+  **Or** `expect` — one entry per engine the case applies to, either
+  `{"error": "invalid_value"}` (the column compares typed there and a value
+  does not match its class's form; SQLite skips the check) or:
+  - `where` — the fragment after ` where `, exactly as built: the engine's
+    identifier quoting and casts, a text comparison's cast on the column, a
+    typed comparison's cast (or none) on the placeholder, and its native
+    placeholders — Postgres `$3` onward, because limit and offset bind
+    first; SQLite and MySQL `?`. `IN` and `BETWEEN` take one placeholder
+    per item. A runner whose driver uses another placeholder spelling
+    (`%s`, `?` on Postgres) substitutes it before comparing; everything
+    else is normative. An empty `where` means no WHERE clause.
+  - `values` — the bind values, in placeholder order.
+
+  An engine missing from `expect` doesn't run the case (no such column
+  there).
+
+## `join-builder-tests.json` — backend join planning + SQL building, per engine
+
+Consumed by every backend's unit runner, once per engine (Postgres, SQLite,
+MySQL/MariaDB), with no database. Each runner builds every table from the
+engine's catalog in `catalogs.json`, then runs the case through the port's
+join parser, filter parser, schema resolution, planner and SQL builder.
 
 Each entry in `cases`:
 

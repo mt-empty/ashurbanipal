@@ -1,1007 +1,453 @@
 {
-  "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/protocol.md §5.4.2.",
-  "tables": {
-    "users": {
-      "id": {"type": "uuid", "class": "uuid"},
-      "email": {"type": "text", "class": "text"},
-      "full_name": {"type": "text", "class": "text"},
-      "age": {"type": "smallint", "class": "number"},
-      "is_active": {"type": "boolean", "class": "boolean"},
-      "login_count": {"type": "integer", "class": "number"},
-      "metadata": {"type": "jsonb", "class": "json"},
-      "last_login_at": {"type": "timestamp with time zone", "class": "temporal"},
-      "created_at": {"type": "timestamp with time zone", "class": "temporal"}
-    },
-    "orders": {
-      "id": {"type": "uuid", "class": "uuid"},
-      "user_id": {"type": "uuid", "class": "uuid"},
-      "status": {"type": "USER-DEFINED", "class": "enum"},
-      "total_cents": {"type": "integer", "class": "number"},
-      "discount_pct": {"type": "numeric", "class": "number"},
-      "tags": {"type": "ARRAY", "class": "array"},
-      "line_items": {"type": "jsonb", "class": "json"},
-      "created_at": {"type": "timestamp with time zone", "class": "temporal"}
-    },
-    "products": {
-      "id": {"type": "bigint", "class": "number"},
-      "sku": {"type": "character varying", "class": "text"},
-      "name": {"type": "text", "class": "text"},
-      "category": {"type": "USER-DEFINED", "class": "enum"},
-      "price": {"type": "numeric", "class": "number"},
-      "weight_kg": {"type": "real", "class": "float"},
-      "in_stock": {"type": "boolean", "class": "boolean"},
-      "description": {"type": "text", "class": "text"},
-      "created_on": {"type": "date", "class": "temporal"}
-    }
-  },
+  "$schema_note": "Table-route filter validation + WHERE building, per engine. Catalogs: catalogs.json. Schema: spec/fixtures/README.md. Source of truth: spec/protocol.md §5.4.2.",
   "cases": [
     {
       "name": "eq-single",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "status",
-          "op": "=",
-          "value": "completed"
-        }
-      ],
+      "conditions": [{"column": "status", "op": "=", "value": "completed"}],
       "expect": {
-        "where": "(\"status\"::text = $1)",
-        "values": [
-          "completed"
-        ]
+        "postgres": {"where": "(\"status\"::text = $3)", "values": ["completed"]},
+        "mysql": {"where": "(CAST(`status` AS CHAR) = ?)", "values": ["completed"]},
+        "sqlite": {"where": "(CAST(\"status\" AS TEXT) = ?)", "values": ["completed"]}
       }
     },
     {
       "name": "and-pair",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "total_cents",
-          "op": ">=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "discount_pct",
-          "op": "<=",
-          "value": "100"
-        }
-      ],
+      "conditions": [{"column": "total_cents", "op": ">=", "value": "1"}, {"logic": "AND", "column": "discount_pct", "op": "<=", "value": "100"}],
       "expect": {
-        "where": "(\"total_cents\" >= $1::int8) AND (\"discount_pct\" <= $2::numeric)",
-        "values": [
-          "1",
-          "100"
-        ]
+        "postgres": {"where": "(\"total_cents\" >= $3::int8) AND (\"discount_pct\" <= $4::numeric)", "values": ["1", "100"]},
+        "mysql": {"where": "(`total_cents` >= CAST(? AS DECIMAL(65,30))) AND (`discount_pct` <= CAST(? AS DECIMAL(65,30)))", "values": ["1", "100"]},
+        "sqlite": {"where": "(\"total_cents\" >= ?) AND (\"discount_pct\" <= ?)", "values": ["1", "100"]}
       }
     },
     {
       "name": "or-pair",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "status",
-          "op": "=",
-          "value": "completed"
-        },
-        {
-          "logic": "OR",
-          "column": "status",
-          "op": "=",
-          "value": "pending"
-        }
-      ],
+      "conditions": [{"column": "status", "op": "=", "value": "completed"}, {"logic": "OR", "column": "status", "op": "=", "value": "pending"}],
       "expect": {
-        "where": "(\"status\"::text = $1) OR (\"status\"::text = $2)",
-        "values": [
-          "completed",
-          "pending"
-        ]
+        "postgres": {"where": "(\"status\"::text = $3) OR (\"status\"::text = $4)", "values": ["completed", "pending"]},
+        "mysql": {"where": "(CAST(`status` AS CHAR) = ?) OR (CAST(`status` AS CHAR) = ?)", "values": ["completed", "pending"]},
+        "sqlite": {"where": "(CAST(\"status\" AS TEXT) = ?) OR (CAST(\"status\" AS TEXT) = ?)", "values": ["completed", "pending"]}
       }
     },
     {
       "name": "precedence-and-or",
       "table": "products",
       "conditions": [
-        {
-          "column": "category",
-          "op": "=",
-          "value": "electronics"
-        },
-        {
-          "logic": "AND",
-          "column": "created_on",
-          "op": ">",
-          "value": "2016-01-01"
-        },
-        {
-          "logic": "OR",
-          "column": "sku",
-          "op": "=",
-          "value": "TOYS-1001"
-        }
+        {"column": "category", "op": "=", "value": "electronics"},
+        {"logic": "AND", "column": "created_on", "op": ">", "value": "2016-01-01"},
+        {"logic": "OR", "column": "sku", "op": "=", "value": "TOYS-1001"}
       ],
       "expect": {
-        "where": "(\"category\"::text = $1) AND (\"created_on\" > $2::date) OR (\"sku\"::text = $3)",
-        "values": [
-          "electronics",
-          "2016-01-01",
-          "TOYS-1001"
-        ]
+        "postgres": {"where": "(\"category\"::text = $3) AND (\"created_on\" > $4::date) OR (\"sku\"::text = $5)", "values": ["electronics", "2016-01-01", "TOYS-1001"]},
+        "mysql": {"where": "(CAST(`category` AS CHAR) = ?) AND (`created_on` > ?) OR (CAST(`sku` AS CHAR) = ?)", "values": ["electronics", "2016-01-01", "TOYS-1001"]},
+        "sqlite": {
+          "where": "(CAST(\"category\" AS TEXT) = ?) AND (CAST(\"created_on\" AS TEXT) > ?) OR (CAST(\"sku\" AS TEXT) = ?)",
+          "values": ["electronics", "2016-01-01", "TOYS-1001"]
+        }
       }
     },
     {
       "name": "not-wraps-fragment",
       "table": "orders",
-      "conditions": [
-        {
-          "not": true,
-          "column": "status",
-          "op": "=",
-          "value": "completed"
-        }
-      ],
+      "conditions": [{"not": true, "column": "status", "op": "=", "value": "completed"}],
       "expect": {
-        "where": "(NOT (\"status\"::text = $1))",
-        "values": [
-          "completed"
-        ]
+        "postgres": {"where": "(NOT (\"status\"::text = $3))", "values": ["completed"]},
+        "mysql": {"where": "(NOT (CAST(`status` AS CHAR) = ?))", "values": ["completed"]},
+        "sqlite": {"where": "(NOT (CAST(\"status\" AS TEXT) = ?))", "values": ["completed"]}
       }
     },
     {
       "name": "is-null",
       "table": "users",
-      "conditions": [
-        {
-          "column": "last_login_at",
-          "op": "IS NULL"
-        }
-      ],
+      "conditions": [{"column": "last_login_at", "op": "IS NULL"}],
       "expect": {
-        "where": "(\"last_login_at\" IS NULL)",
-        "values": []
+        "postgres": {"where": "(\"last_login_at\" IS NULL)", "values": []},
+        "mysql": {"where": "(`last_login_at` IS NULL)", "values": []},
+        "sqlite": {"where": "(CAST(\"last_login_at\" AS TEXT) IS NULL)", "values": []}
       }
     },
     {
       "name": "is-not-null",
       "table": "users",
-      "conditions": [
-        {
-          "column": "last_login_at",
-          "op": "IS NOT NULL"
-        }
-      ],
+      "conditions": [{"column": "last_login_at", "op": "IS NOT NULL"}],
       "expect": {
-        "where": "(\"last_login_at\" IS NOT NULL)",
-        "values": []
+        "postgres": {"where": "(\"last_login_at\" IS NOT NULL)", "values": []},
+        "mysql": {"where": "(`last_login_at` IS NOT NULL)", "values": []},
+        "sqlite": {"where": "(CAST(\"last_login_at\" AS TEXT) IS NOT NULL)", "values": []}
       }
     },
     {
       "name": "not-is-null",
       "table": "users",
-      "conditions": [
-        {
-          "not": true,
-          "column": "last_login_at",
-          "op": "IS NULL"
-        }
-      ],
+      "conditions": [{"not": true, "column": "last_login_at", "op": "IS NULL"}],
       "expect": {
-        "where": "(NOT (\"last_login_at\" IS NULL))",
-        "values": []
+        "postgres": {"where": "(NOT (\"last_login_at\" IS NULL))", "values": []},
+        "mysql": {"where": "(NOT (`last_login_at` IS NULL))", "values": []},
+        "sqlite": {"where": "(NOT (CAST(\"last_login_at\" AS TEXT) IS NULL))", "values": []}
       }
     },
     {
       "name": "is-null-on-a-text-compared-column-tests-its-text",
       "table": "users",
-      "conditions": [
-        {
-          "column": "metadata",
-          "op": "IS NULL"
-        }
-      ],
+      "conditions": [{"column": "metadata", "op": "IS NULL"}],
       "expect": {
-        "where": "(\"metadata\"::text IS NULL)",
-        "values": []
+        "postgres": {"where": "(\"metadata\"::text IS NULL)", "values": []},
+        "mysql": {"where": "(CAST(`metadata` AS CHAR) IS NULL)", "values": []},
+        "sqlite": {"where": "(CAST(\"metadata\" AS TEXT) IS NULL)", "values": []}
       }
     },
     {
       "name": "pg-date-infinity",
-      "engines": [
-        "postgres",
-        "sqlite"
-      ],
       "table": "products",
-      "conditions": [
-        {
-          "column": "created_on",
-          "op": "<",
-          "value": "infinity"
-        }
-      ],
+      "conditions": [{"column": "created_on", "op": "<", "value": "infinity"}],
       "expect": {
-        "where": "(\"created_on\" < $1::date)",
-        "values": [
-          "infinity"
-        ]
+        "postgres": {"where": "(\"created_on\" < $3::date)", "values": ["infinity"]},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(CAST(\"created_on\" AS TEXT) < ?)", "values": ["infinity"]}
       }
     },
     {
       "name": "pg-date-bc",
-      "engines": [
-        "postgres",
-        "sqlite"
-      ],
       "table": "products",
-      "conditions": [
-        {
-          "column": "created_on",
-          "op": "=",
-          "value": "0044-03-15 BC"
-        }
-      ],
+      "conditions": [{"column": "created_on", "op": "=", "value": "0044-03-15 BC"}],
       "expect": {
-        "where": "(\"created_on\" = $1::date)",
-        "values": [
-          "0044-03-15 BC"
-        ]
+        "postgres": {"where": "(\"created_on\" = $3::date)", "values": ["0044-03-15 BC"]},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(CAST(\"created_on\" AS TEXT) = ?)", "values": ["0044-03-15 BC"]}
       }
     },
     {
       "name": "pg-date-year-above-9999",
-      "engines": [
-        "postgres",
-        "sqlite"
-      ],
       "table": "products",
-      "conditions": [
-        {
-          "column": "created_on",
-          "op": "=",
-          "value": "12000-01-01"
-        }
-      ],
+      "conditions": [{"column": "created_on", "op": "=", "value": "12000-01-01"}],
       "expect": {
-        "where": "(\"created_on\" = $1::date)",
-        "values": [
-          "12000-01-01"
-        ]
+        "postgres": {"where": "(\"created_on\" = $3::date)", "values": ["12000-01-01"]},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(CAST(\"created_on\" AS TEXT) = ?)", "values": ["12000-01-01"]}
       }
     },
     {
       "name": "like",
       "table": "users",
-      "conditions": [
-        {
-          "column": "full_name",
-          "op": "LIKE",
-          "value": "%Dach%"
-        }
-      ],
+      "conditions": [{"column": "full_name", "op": "LIKE", "value": "%Dach%"}],
       "expect": {
-        "where": "(\"full_name\"::text LIKE $1)",
-        "values": [
-          "%Dach%"
-        ]
+        "postgres": {"where": "(\"full_name\"::text LIKE $3)", "values": ["%Dach%"]},
+        "mysql": {"where": "(CAST(`full_name` AS CHAR) LIKE ?)", "values": ["%Dach%"]},
+        "sqlite": {"where": "(CAST(\"full_name\" AS TEXT) LIKE ?)", "values": ["%Dach%"]}
       }
     },
     {
       "name": "ilike",
       "table": "users",
-      "conditions": [
-        {
-          "column": "full_name",
-          "op": "ILIKE",
-          "value": "%dach%"
-        }
-      ],
+      "conditions": [{"column": "full_name", "op": "ILIKE", "value": "%dach%"}],
       "expect": {
-        "where": "(\"full_name\"::text ILIKE $1)",
-        "values": [
-          "%dach%"
-        ]
+        "postgres": {"where": "(\"full_name\"::text ILIKE $3)", "values": ["%dach%"]},
+        "mysql": {"where": "(LOWER(CAST(`full_name` AS CHAR)) LIKE LOWER(?))", "values": ["%dach%"]},
+        "sqlite": {"where": "(CAST(\"full_name\" AS TEXT) LIKE ?)", "values": ["%dach%"]}
       }
     },
     {
       "name": "remaining-comparison-ops",
       "table": "orders",
       "conditions": [
-        {
-          "column": "total_cents",
-          "op": "!=",
-          "value": "0"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": ">",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "<",
-          "value": "999999"
-        }
+        {"column": "total_cents", "op": "!=", "value": "0"},
+        {"logic": "AND", "column": "total_cents", "op": ">", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "<", "value": "999999"}
       ],
       "expect": {
-        "where": "(\"total_cents\" != $1::int8) AND (\"total_cents\" > $2::int8) AND (\"total_cents\" < $3::int8)",
-        "values": [
-          "0",
-          "1",
-          "999999"
-        ]
+        "postgres": {"where": "(\"total_cents\" != $3::int8) AND (\"total_cents\" > $4::int8) AND (\"total_cents\" < $5::int8)", "values": ["0", "1", "999999"]},
+        "mysql": {
+          "where": "(`total_cents` != CAST(? AS DECIMAL(65,30))) AND (`total_cents` > CAST(? AS DECIMAL(65,30))) AND (`total_cents` < CAST(? AS DECIMAL(65,30)))",
+          "values": ["0", "1", "999999"]
+        },
+        "sqlite": {"where": "(\"total_cents\" != ?) AND (\"total_cents\" > ?) AND (\"total_cents\" < ?)", "values": ["0", "1", "999999"]}
       }
     },
     {
       "name": "injection-value-is-bound",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "status",
-          "op": "=",
-          "value": "'; DROP TABLE users; --"
-        }
-      ],
+      "conditions": [{"column": "status", "op": "=", "value": "'; DROP TABLE users; --"}],
       "expect": {
-        "where": "(\"status\"::text = $1)",
-        "values": [
-          "'; DROP TABLE users; --"
-        ]
+        "postgres": {"where": "(\"status\"::text = $3)", "values": ["'; DROP TABLE users; --"]},
+        "mysql": {"where": "(CAST(`status` AS CHAR) = ?)", "values": ["'; DROP TABLE users; --"]},
+        "sqlite": {"where": "(CAST(\"status\" AS TEXT) = ?)", "values": ["'; DROP TABLE users; --"]}
       }
     },
     {
       "name": "empty-string-value",
       "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "=",
-          "value": ""
-        }
-      ],
+      "conditions": [{"column": "email", "op": "=", "value": ""}],
       "expect": {
-        "where": "(\"email\"::text = $1)",
-        "values": [
-          ""
-        ]
+        "postgres": {"where": "(\"email\"::text = $3)", "values": [""]},
+        "mysql": {"where": "(CAST(`email` AS CHAR) = ?)", "values": [""]},
+        "sqlite": {"where": "(CAST(\"email\" AS TEXT) = ?)", "values": [""]}
       }
     },
     {
       "name": "empty-array-is-no-filter",
       "table": "users",
       "conditions": [],
-      "expect": {
-        "where": "",
-        "values": []
-      }
+      "expect": {"postgres": {"where": "", "values": []}, "mysql": {"where": "", "values": []}, "sqlite": {"where": "", "values": []}}
     },
     {
       "name": "ten-conditions-at-limit",
       "table": "orders",
       "conditions": [
-        {
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        }
+        {"column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"}
       ],
       "expect": {
-        "where": "(\"total_cents\" = $1::int8) AND (\"total_cents\" = $2::int8) AND (\"total_cents\" = $3::int8) AND (\"total_cents\" = $4::int8) AND (\"total_cents\" = $5::int8) AND (\"total_cents\" = $6::int8) AND (\"total_cents\" = $7::int8) AND (\"total_cents\" = $8::int8) AND (\"total_cents\" = $9::int8) AND (\"total_cents\" = $10::int8)",
-        "values": [
-          "1",
-          "1",
-          "1",
-          "1",
-          "1",
-          "1",
-          "1",
-          "1",
-          "1",
-          "1"
-        ]
+        "postgres": {
+          "where": "(\"total_cents\" = $3::int8) AND (\"total_cents\" = $4::int8) AND (\"total_cents\" = $5::int8) AND (\"total_cents\" = $6::int8) AND (\"total_cents\" = $7::int8) AND (\"total_cents\" = $8::int8) AND (\"total_cents\" = $9::int8) AND (\"total_cents\" = $10::int8) AND (\"total_cents\" = $11::int8) AND (\"total_cents\" = $12::int8)",
+          "values": ["1", "1", "1", "1", "1", "1", "1", "1", "1", "1"]
+        },
+        "mysql": {
+          "where": "(`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30))) AND (`total_cents` = CAST(? AS DECIMAL(65,30)))",
+          "values": ["1", "1", "1", "1", "1", "1", "1", "1", "1", "1"]
+        },
+        "sqlite": {
+          "where": "(\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?) AND (\"total_cents\" = ?)",
+          "values": ["1", "1", "1", "1", "1", "1", "1", "1", "1", "1"]
+        }
       }
     },
     {
       "name": "typed-number-order",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "total_cents",
-          "op": ">",
-          "value": "9"
-        }
-      ],
+      "conditions": [{"column": "total_cents", "op": ">", "value": "9"}],
       "expect": {
-        "where": "(\"total_cents\" > $1::int8)",
-        "values": [
-          "9"
-        ]
+        "postgres": {"where": "(\"total_cents\" > $3::int8)", "values": ["9"]},
+        "mysql": {"where": "(`total_cents` > CAST(? AS DECIMAL(65,30)))", "values": ["9"]},
+        "sqlite": {"where": "(\"total_cents\" > ?)", "values": ["9"]}
       }
     },
     {
       "name": "typed-numeric-equality",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "discount_pct",
-          "op": "=",
-          "value": "1"
-        }
-      ],
+      "conditions": [{"column": "discount_pct", "op": "=", "value": "1"}],
       "expect": {
-        "where": "(\"discount_pct\" = $1::numeric)",
-        "values": [
-          "1"
-        ]
+        "postgres": {"where": "(\"discount_pct\" = $3::numeric)", "values": ["1"]},
+        "mysql": {"where": "(`discount_pct` = CAST(? AS DECIMAL(65,30)))", "values": ["1"]},
+        "sqlite": {"where": "(\"discount_pct\" = ?)", "values": ["1"]}
       }
     },
     {
       "name": "typed-float",
       "table": "products",
-      "conditions": [
-        {
-          "column": "weight_kg",
-          "op": "<=",
-          "value": "1.5e1"
-        }
-      ],
+      "conditions": [{"column": "weight_kg", "op": "<=", "value": "1.5e1"}],
       "expect": {
-        "where": "(\"weight_kg\" <= $1::real)",
-        "values": [
-          "1.5e1"
-        ]
+        "postgres": {"where": "(\"weight_kg\" <= $3::real)", "values": ["1.5e1"]},
+        "mysql": {"where": "(`weight_kg` <= CAST(? AS FLOAT))", "values": ["1.5e1"]},
+        "sqlite": {"where": "(\"weight_kg\" <= ?)", "values": ["1.5e1"]}
       }
     },
     {
       "name": "typed-date",
       "table": "products",
-      "conditions": [
-        {
-          "column": "created_on",
-          "op": ">=",
-          "value": "2016-02-29"
-        }
-      ],
+      "conditions": [{"column": "created_on", "op": ">=", "value": "2016-02-29"}],
       "expect": {
-        "where": "(\"created_on\" >= $1::date)",
-        "values": [
-          "2016-02-29"
-        ]
+        "postgres": {"where": "(\"created_on\" >= $3::date)", "values": ["2016-02-29"]},
+        "mysql": {"where": "(`created_on` >= ?)", "values": ["2016-02-29"]},
+        "sqlite": {"where": "(CAST(\"created_on\" AS TEXT) >= ?)", "values": ["2016-02-29"]}
       }
     },
     {
       "name": "typed-timestamptz",
       "table": "users",
-      "conditions": [
-        {
-          "column": "created_at",
-          "op": "<",
-          "value": "2016-01-01T10:30:00.5"
-        }
-      ],
+      "conditions": [{"column": "created_at", "op": "<", "value": "2016-01-01T10:30:00.5"}],
       "expect": {
-        "where": "(\"created_at\" < $1::timestamptz)",
-        "values": [
-          "2016-01-01T10:30:00.5"
-        ]
+        "postgres": {"where": "(\"created_at\" < $3::timestamptz)", "values": ["2016-01-01T10:30:00.5"]},
+        "mysql": {"where": "(`created_at` < ?)", "values": ["2016-01-01T10:30:00.5"]},
+        "sqlite": {"where": "(CAST(\"created_at\" AS TEXT) < ?)", "values": ["2016-01-01T10:30:00.5"]}
       }
     },
     {
       "name": "like-on-typed-column-stays-text",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "total_cents",
-          "op": "LIKE",
-          "value": "1%"
-        }
-      ],
+      "conditions": [{"column": "total_cents", "op": "LIKE", "value": "1%"}],
       "expect": {
-        "where": "(\"total_cents\"::text LIKE $1)",
-        "values": [
-          "1%"
-        ]
+        "postgres": {"where": "(\"total_cents\"::text LIKE $3)", "values": ["1%"]},
+        "mysql": {"where": "(CAST(`total_cents` AS CHAR) LIKE ?)", "values": ["1%"]},
+        "sqlite": {"where": "(CAST(\"total_cents\" AS TEXT) LIKE ?)", "values": ["1%"]}
       }
     },
     {
       "name": "in-typed",
       "table": "products",
-      "conditions": [
-        {
-          "column": "id",
-          "op": "IN",
-          "value": [
-            "1",
-            "2",
-            "3"
-          ]
-        }
-      ],
+      "conditions": [{"column": "id", "op": "IN", "value": ["1", "2", "3"]}],
       "expect": {
-        "where": "(\"id\" IN ($1::int8, $2::int8, $3::int8))",
-        "values": [
-          "1",
-          "2",
-          "3"
-        ]
+        "postgres": {"where": "(\"id\" IN ($3::int8, $4::int8, $5::int8))", "values": ["1", "2", "3"]},
+        "mysql": {"where": "(`id` IN (CAST(? AS DECIMAL(65,30)), CAST(? AS DECIMAL(65,30)), CAST(? AS DECIMAL(65,30))))", "values": ["1", "2", "3"]},
+        "sqlite": {"where": "(\"id\" IN (?, ?, ?))", "values": ["1", "2", "3"]}
       }
     },
     {
       "name": "in-text",
       "table": "products",
-      "conditions": [
-        {
-          "column": "sku",
-          "op": "IN",
-          "value": [
-            "a",
-            "b"
-          ]
-        }
-      ],
+      "conditions": [{"column": "sku", "op": "IN", "value": ["a", "b"]}],
       "expect": {
-        "where": "(\"sku\"::text IN ($1, $2))",
-        "values": [
-          "a",
-          "b"
-        ]
+        "postgres": {"where": "(\"sku\"::text IN ($3, $4))", "values": ["a", "b"]},
+        "mysql": {"where": "(CAST(`sku` AS CHAR) IN (?, ?))", "values": ["a", "b"]},
+        "sqlite": {"where": "(CAST(\"sku\" AS TEXT) IN (?, ?))", "values": ["a", "b"]}
       }
     },
     {
       "name": "not-in-enum",
       "table": "orders",
-      "conditions": [
-        {
-          "not": true,
-          "column": "status",
-          "op": "IN",
-          "value": [
-            "pending"
-          ]
-        }
-      ],
+      "conditions": [{"not": true, "column": "status", "op": "IN", "value": ["pending"]}],
       "expect": {
-        "where": "(NOT (\"status\"::text IN ($1)))",
-        "values": [
-          "pending"
-        ]
+        "postgres": {"where": "(NOT (\"status\"::text IN ($3)))", "values": ["pending"]},
+        "mysql": {"where": "(NOT (CAST(`status` AS CHAR) IN (?)))", "values": ["pending"]},
+        "sqlite": {"where": "(NOT (CAST(\"status\" AS TEXT) IN (?)))", "values": ["pending"]}
       }
     },
     {
       "name": "between-typed",
       "table": "products",
-      "conditions": [
-        {
-          "column": "price",
-          "op": "BETWEEN",
-          "value": [
-            "10",
-            "20.5"
-          ]
-        },
-        {
-          "logic": "AND",
-          "column": "sku",
-          "op": "=",
-          "value": "x"
-        }
-      ],
+      "conditions": [{"column": "price", "op": "BETWEEN", "value": ["10", "20.5"]}, {"logic": "AND", "column": "sku", "op": "=", "value": "x"}],
       "expect": {
-        "where": "(\"price\" BETWEEN $1::numeric AND $2::numeric) AND (\"sku\"::text = $3)",
-        "values": [
-          "10",
-          "20.5",
-          "x"
-        ]
+        "postgres": {"where": "(\"price\" BETWEEN $3::numeric AND $4::numeric) AND (\"sku\"::text = $5)", "values": ["10", "20.5", "x"]},
+        "mysql": {"where": "(`price` BETWEEN CAST(? AS DECIMAL(65,30)) AND CAST(? AS DECIMAL(65,30))) AND (CAST(`sku` AS CHAR) = ?)", "values": ["10", "20.5", "x"]},
+        "sqlite": {"where": "(\"price\" BETWEEN ? AND ?) AND (CAST(\"sku\" AS TEXT) = ?)", "values": ["10", "20.5", "x"]}
       }
     },
     {
       "name": "between-reversed-is-legal",
       "table": "products",
-      "conditions": [
-        {
-          "column": "price",
-          "op": "BETWEEN",
-          "value": [
-            "20",
-            "10"
-          ]
-        }
-      ],
+      "conditions": [{"column": "price", "op": "BETWEEN", "value": ["20", "10"]}],
       "expect": {
-        "where": "(\"price\" BETWEEN $1::numeric AND $2::numeric)",
-        "values": [
-          "20",
-          "10"
-        ]
+        "postgres": {"where": "(\"price\" BETWEEN $3::numeric AND $4::numeric)", "values": ["20", "10"]},
+        "mysql": {"where": "(`price` BETWEEN CAST(? AS DECIMAL(65,30)) AND CAST(? AS DECIMAL(65,30)))", "values": ["20", "10"]},
+        "sqlite": {"where": "(\"price\" BETWEEN ? AND ?)", "values": ["20", "10"]}
       }
     },
     {
       "name": "not-between-timestamp",
       "table": "orders",
-      "conditions": [
-        {
-          "not": true,
-          "column": "created_at",
-          "op": "BETWEEN",
-          "value": [
-            "2016-01-01",
-            "2016-12-31 23:59:59"
-          ]
-        }
-      ],
+      "conditions": [{"not": true, "column": "created_at", "op": "BETWEEN", "value": ["2016-01-01", "2016-12-31 23:59:59"]}],
       "expect": {
-        "where": "(NOT (\"created_at\" BETWEEN $1::timestamptz AND $2::timestamptz))",
-        "values": [
-          "2016-01-01",
-          "2016-12-31 23:59:59"
-        ]
+        "postgres": {"where": "(NOT (\"created_at\" BETWEEN $3::timestamptz AND $4::timestamptz))", "values": ["2016-01-01", "2016-12-31 23:59:59"]},
+        "mysql": {"where": "(NOT (`created_at` BETWEEN ? AND ?))", "values": ["2016-01-01", "2016-12-31 23:59:59"]},
+        "sqlite": {"where": "(NOT (CAST(\"created_at\" AS TEXT) BETWEEN ? AND ?))", "values": ["2016-01-01", "2016-12-31 23:59:59"]}
       }
     },
     {
       "name": "in-single-item",
       "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "IN",
-          "value": [
-            "30"
-          ]
-        }
-      ],
+      "conditions": [{"column": "age", "op": "IN", "value": ["30"]}],
       "expect": {
-        "where": "(\"age\" IN ($1::int8))",
-        "values": [
-          "30"
-        ]
+        "postgres": {"where": "(\"age\" IN ($3::int8))", "values": ["30"]},
+        "mysql": {"where": "(`age` IN (CAST(? AS DECIMAL(65,30))))", "values": ["30"]},
+        "sqlite": {"where": "(\"age\" IN (?))", "values": ["30"]}
       }
     },
-    {
-      "name": "unknown-column",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "pg_sleep",
-          "op": "=",
-          "value": "1"
-        }
-      ],
-      "expect_error": "unknown_column"
-    },
+    {"name": "unknown-column", "table": "users", "conditions": [{"column": "pg_sleep", "op": "=", "value": "1"}], "expect_error": "unknown_column"},
     {
       "name": "not-does-not-bypass-allow-list",
       "table": "users",
-      "conditions": [
-        {
-          "not": true,
-          "column": "pg_sleep",
-          "op": "=",
-          "value": "1"
-        }
-      ],
+      "conditions": [{"not": true, "column": "pg_sleep", "op": "=", "value": "1"}],
       "expect_error": "unknown_column"
     },
-    {
-      "name": "known-column-wrong-table",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        }
-      ],
-      "expect_error": "unknown_column"
-    },
+    {"name": "known-column-wrong-table", "table": "users", "conditions": [{"column": "total_cents", "op": "=", "value": "1"}], "expect_error": "unknown_column"},
     {
       "name": "invalid-number",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "total_cents",
-          "op": ">",
-          "value": "abc"
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"column": "total_cents", "op": ">", "value": "abc"}],
+      "expect": {"postgres": {"error": "invalid_value"}, "mysql": {"error": "invalid_value"}, "sqlite": {"where": "(\"total_cents\" > ?)", "values": ["abc"]}}
     },
     {
       "name": "invalid-number-exponent",
       "table": "orders",
-      "conditions": [
-        {
-          "column": "total_cents",
-          "op": "=",
-          "value": "1e3"
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"column": "total_cents", "op": "=", "value": "1e3"}],
+      "expect": {"postgres": {"error": "invalid_value"}, "mysql": {"error": "invalid_value"}, "sqlite": {"where": "(\"total_cents\" = ?)", "values": ["1e3"]}}
     },
     {
       "name": "pg-numeric-has-no-digit-cap",
-      "engines": [
-        "postgres",
-        "sqlite"
-      ],
       "table": "orders",
-      "conditions": [
-        {
-          "column": "discount_pct",
-          "op": "=",
-          "value": "111111111111111111111111111111111111"
-        }
-      ],
+      "conditions": [{"column": "discount_pct", "op": "=", "value": "111111111111111111111111111111111111"}],
       "expect": {
-        "where": "(\"discount_pct\" = $1::numeric)",
-        "values": [
-          "111111111111111111111111111111111111"
-        ]
+        "postgres": {"where": "(\"discount_pct\" = $3::numeric)", "values": ["111111111111111111111111111111111111"]},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(\"discount_pct\" = ?)", "values": ["111111111111111111111111111111111111"]}
       }
     },
     {
       "name": "pg-float-nan",
-      "engines": [
-        "postgres",
-        "sqlite"
-      ],
       "table": "products",
-      "conditions": [
-        {
-          "column": "weight_kg",
-          "op": "=",
-          "value": "NaN"
-        }
-      ],
+      "conditions": [{"column": "weight_kg", "op": "=", "value": "NaN"}],
       "expect": {
-        "where": "(\"weight_kg\" = $1::real)",
-        "values": [
-          "NaN"
-        ]
+        "postgres": {"where": "(\"weight_kg\" = $3::real)", "values": ["NaN"]},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(\"weight_kg\" = ?)", "values": ["NaN"]}
       }
     },
     {
       "name": "invalid-date",
       "table": "products",
-      "conditions": [
-        {
-          "column": "created_on",
-          "op": "=",
-          "value": "2016-02-30"
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"column": "created_on", "op": "=", "value": "2016-02-30"}],
+      "expect": {
+        "postgres": {"error": "invalid_value"},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(CAST(\"created_on\" AS TEXT) = ?)", "values": ["2016-02-30"]}
+      }
     },
     {
       "name": "time-part-on-date-column",
       "table": "products",
-      "conditions": [
-        {
-          "column": "created_on",
-          "op": ">",
-          "value": "2016-01-01 10:00"
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"column": "created_on", "op": ">", "value": "2016-01-01 10:00"}],
+      "expect": {
+        "postgres": {"error": "invalid_value"},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(CAST(\"created_on\" AS TEXT) > ?)", "values": ["2016-01-01 10:00"]}
+      }
     },
     {
       "name": "invalid-item-in-list",
       "table": "products",
-      "conditions": [
-        {
-          "column": "id",
-          "op": "IN",
-          "value": [
-            "1",
-            "x"
-          ]
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"column": "id", "op": "IN", "value": ["1", "x"]}],
+      "expect": {"postgres": {"error": "invalid_value"}, "mysql": {"error": "invalid_value"}, "sqlite": {"where": "(\"id\" IN (?, ?))", "values": ["1", "x"]}}
     },
     {
       "name": "invalid-between-bound",
       "table": "products",
-      "conditions": [
-        {
-          "column": "price",
-          "op": "BETWEEN",
-          "value": [
-            "1",
-            "ten"
-          ]
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"column": "price", "op": "BETWEEN", "value": ["1", "ten"]}],
+      "expect": {"postgres": {"error": "invalid_value"}, "mysql": {"error": "invalid_value"}, "sqlite": {"where": "(\"price\" BETWEEN ? AND ?)", "values": ["1", "ten"]}}
     },
     {
       "name": "not-does-not-skip-value-check",
       "table": "orders",
-      "conditions": [
-        {
-          "not": true,
-          "column": "total_cents",
-          "op": "=",
-          "value": "abc"
-        }
-      ],
-      "expect_error": "invalid_value"
+      "conditions": [{"not": true, "column": "total_cents", "op": "=", "value": "abc"}],
+      "expect": {"postgres": {"error": "invalid_value"}, "mysql": {"error": "invalid_value"}, "sqlite": {"where": "(NOT (\"total_cents\" = ?))", "values": ["abc"]}}
     },
-    {
-      "name": "bad-op",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": ";DROP",
-          "value": "x"
-        }
-      ],
-      "expect_error": "bad_op"
-    },
-    {
-      "name": "bad-op-case-sensitive",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "like",
-          "value": "x"
-        }
-      ],
-      "expect_error": "bad_op"
-    },
+    {"name": "bad-op", "table": "users", "conditions": [{"column": "email", "op": ";DROP", "value": "x"}], "expect_error": "bad_op"},
+    {"name": "bad-op-case-sensitive", "table": "users", "conditions": [{"column": "email", "op": "like", "value": "x"}], "expect_error": "bad_op"},
     {
       "name": "bad-logic",
       "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "=",
-          "value": "a"
-        },
-        {
-          "logic": "XOR",
-          "column": "email",
-          "op": "=",
-          "value": "b"
-        }
-      ],
+      "conditions": [{"column": "email", "op": "=", "value": "a"}, {"logic": "XOR", "column": "email", "op": "=", "value": "b"}],
       "expect_error": "bad_logic"
     },
-    {
-      "name": "missing-value",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "="
-        }
-      ],
-      "expect_error": "missing_value"
-    },
+    {"name": "missing-value", "table": "users", "conditions": [{"column": "email", "op": "="}], "expect_error": "missing_value"},
     {
       "name": "unexpected-value",
       "table": "users",
-      "conditions": [
-        {
-          "column": "last_login_at",
-          "op": "IS NULL",
-          "value": "x"
-        }
-      ],
+      "conditions": [{"column": "last_login_at", "op": "IS NULL", "value": "x"}],
       "expect_error": "unexpected_value"
     },
-    {
-      "name": "in-empty-list",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "IN",
-          "value": []
-        }
-      ],
-      "expect_error": "bad_value"
-    },
-    {
-      "name": "in-string-value",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "IN",
-          "value": "1"
-        }
-      ],
-      "expect_error": "bad_value"
-    },
-    {
-      "name": "in-non-string-item",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "IN",
-          "value": [
-            "1",
-            2
-          ]
-        }
-      ],
-      "expect_error": "bad_value"
-    },
-    {
-      "name": "in-null-item",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "IN",
-          "value": [
-            "1",
-            null
-          ]
-        }
-      ],
-      "expect_error": "bad_value"
-    },
+    {"name": "in-empty-list", "table": "users", "conditions": [{"column": "age", "op": "IN", "value": []}], "expect_error": "bad_value"},
+    {"name": "in-string-value", "table": "users", "conditions": [{"column": "age", "op": "IN", "value": "1"}], "expect_error": "bad_value"},
+    {"name": "in-non-string-item", "table": "users", "conditions": [{"column": "age", "op": "IN", "value": ["1", 2]}], "expect_error": "bad_value"},
+    {"name": "in-null-item", "table": "users", "conditions": [{"column": "age", "op": "IN", "value": ["1", null]}], "expect_error": "bad_value"},
     {
       "name": "in-over-1000-items",
       "table": "users",
@@ -2016,175 +1462,43 @@
       ],
       "expect_error": "bad_value"
     },
-    {
-      "name": "between-one-bound",
-      "table": "products",
-      "conditions": [
-        {
-          "column": "price",
-          "op": "BETWEEN",
-          "value": [
-            "1"
-          ]
-        }
-      ],
-      "expect_error": "bad_value"
-    },
+    {"name": "between-one-bound", "table": "products", "conditions": [{"column": "price", "op": "BETWEEN", "value": ["1"]}], "expect_error": "bad_value"},
     {
       "name": "between-three-bounds",
       "table": "products",
-      "conditions": [
-        {
-          "column": "price",
-          "op": "BETWEEN",
-          "value": [
-            "1",
-            "2",
-            "3"
-          ]
-        }
-      ],
+      "conditions": [{"column": "price", "op": "BETWEEN", "value": ["1", "2", "3"]}],
       "expect_error": "bad_value"
     },
-    {
-      "name": "array-value-for-eq",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "=",
-          "value": [
-            "a"
-          ]
-        }
-      ],
-      "expect_error": "bad_value"
-    },
-    {
-      "name": "number-value-for-eq",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "=",
-          "value": 5
-        }
-      ],
-      "expect_error": "bad_value"
-    },
-    {
-      "name": "not-in-is-not-an-op",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "age",
-          "op": "NOT IN",
-          "value": [
-            "1"
-          ]
-        }
-      ],
-      "expect_error": "bad_op"
-    },
+    {"name": "array-value-for-eq", "table": "users", "conditions": [{"column": "email", "op": "=", "value": ["a"]}], "expect_error": "bad_value"},
+    {"name": "number-value-for-eq", "table": "users", "conditions": [{"column": "age", "op": "=", "value": 5}], "expect_error": "bad_value"},
+    {"name": "not-in-is-not-an-op", "table": "users", "conditions": [{"column": "age", "op": "NOT IN", "value": ["1"]}], "expect_error": "bad_op"},
     {
       "name": "missing-logic",
       "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "=",
-          "value": "a"
-        },
-        {
-          "column": "email",
-          "op": "=",
-          "value": "b"
-        }
-      ],
+      "conditions": [{"column": "email", "op": "=", "value": "a"}, {"column": "email", "op": "=", "value": "b"}],
       "expect_error": "missing_logic"
     },
     {
       "name": "unexpected-logic-on-first",
       "table": "users",
-      "conditions": [
-        {
-          "logic": "AND",
-          "column": "email",
-          "op": "=",
-          "value": "a"
-        }
-      ],
+      "conditions": [{"logic": "AND", "column": "email", "op": "=", "value": "a"}],
       "expect_error": "unexpected_logic"
     },
     {
       "name": "eleven-conditions",
       "table": "orders",
       "conditions": [
-        {
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        },
-        {
-          "logic": "AND",
-          "column": "total_cents",
-          "op": "=",
-          "value": "1"
-        }
+        {"column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"},
+        {"logic": "AND", "column": "total_cents", "op": "=", "value": "1"}
       ],
       "expect_error": "too_many_conditions"
     },
@@ -2200,42 +1514,140 @@
       ],
       "expect_error": "oversize"
     },
+    {"name": "unknown-field", "table": "users", "conditions": [{"column": "email", "op": "=", "value": "a", "extra": "x"}], "expect_error": "malformed"},
+    {"name": "dsl-text-not-json", "table": "users", "raw": "status = completed", "expect_error": "malformed"},
+    {"name": "json-object-not-array", "table": "users", "raw": "{\"column\":\"email\",\"op\":\"=\",\"value\":\"a\"}", "expect_error": "malformed"},
+    {"name": "truncated-json", "table": "users", "raw": "[{\"column\":\"email\",", "expect_error": "malformed"},
+    {"name": "null-array-elements", "table": "users", "raw": "[null,null,null]", "expect_error": "malformed"},
     {
-      "name": "unknown-field",
-      "table": "users",
-      "conditions": [
-        {
-          "column": "email",
-          "op": "=",
-          "value": "a",
-          "extra": "x"
-        }
-      ],
-      "expect_error": "malformed"
+      "name": "zero-date-compares-the-columns-text",
+      "table": "typed_samples",
+      "conditions": [{"column": "date_v", "op": "=", "value": "0000-00-00"}],
+      "expect": {
+        "postgres": {"error": "invalid_value"},
+        "mysql": {"where": "(CAST(`date_v` AS CHAR) = ?)", "values": ["0000-00-00"]},
+        "sqlite": {"where": "(\"date_v\" = ?)", "values": ["0000-00-00"]}
+      }
     },
     {
-      "name": "dsl-text-not-json",
-      "table": "users",
-      "raw": "status = completed",
-      "expect_error": "malformed"
+      "name": "zero-date-in-a-list",
+      "table": "typed_samples",
+      "conditions": [{"column": "date_v", "op": "IN", "value": ["0000-00-00", "2020-01-01"]}],
+      "expect": {
+        "postgres": {"error": "invalid_value"},
+        "mysql": {"where": "(CAST(`date_v` AS CHAR) IN (?, ?))", "values": ["0000-00-00", "2020-01-01"]},
+        "sqlite": {"where": "(\"date_v\" IN (?, ?))", "values": ["0000-00-00", "2020-01-01"]}
+      }
     },
     {
-      "name": "json-object-not-array",
-      "table": "users",
-      "raw": "{\"column\":\"email\",\"op\":\"=\",\"value\":\"a\"}",
-      "expect_error": "malformed"
+      "name": "date-between",
+      "table": "typed_samples",
+      "conditions": [{"column": "date_v", "op": "BETWEEN", "value": ["2020-01-01", "2020-12-31"]}],
+      "expect": {
+        "postgres": {"where": "(\"date_v\" BETWEEN $3::date AND $4::date)", "values": ["2020-01-01", "2020-12-31"]},
+        "mysql": {"where": "(`date_v` BETWEEN ? AND ?)", "values": ["2020-01-01", "2020-12-31"]},
+        "sqlite": {"where": "(\"date_v\" BETWEEN ? AND ?)", "values": ["2020-01-01", "2020-12-31"]}
+      }
     },
     {
-      "name": "truncated-json",
-      "table": "users",
-      "raw": "[{\"column\":\"email\",",
-      "expect_error": "malformed"
+      "name": "time-compares-in-its-own-type",
+      "table": "typed_samples",
+      "conditions": [{"column": "time_v", "op": "<", "value": "12:30:00"}],
+      "expect": {
+        "postgres": {"where": "(\"time_v\" < $3::time)", "values": ["12:30:00"]},
+        "mysql": {"where": "(`time_v` < ?)", "values": ["12:30:00"]},
+        "sqlite": {"where": "(\"time_v\" < ?)", "values": ["12:30:00"]}
+      }
     },
     {
-      "name": "null-array-elements",
+      "name": "timestamp-without-zone",
+      "table": "typed_samples",
+      "conditions": [{"column": "timestamp_v", "op": ">=", "value": "2020-01-01 00:00:00"}],
+      "expect": {
+        "postgres": {"where": "(\"timestamp_v\" >= $3::timestamp)", "values": ["2020-01-01 00:00:00"]},
+        "mysql": {"where": "(`timestamp_v` >= ?)", "values": ["2020-01-01 00:00:00"]}
+      }
+    },
+    {
+      "name": "double-compares-in-its-own-type",
+      "table": "typed_samples",
+      "conditions": [{"column": "double_v", "op": ">", "value": "0.5"}],
+      "expect": {"postgres": {"where": "(\"double_v\" > $3::float8)", "values": ["0.5"]}, "mysql": {"where": "(`double_v` > CAST(? AS DOUBLE))", "values": ["0.5"]}}
+    },
+    {
+      "name": "datetime-with-a-fraction",
+      "table": "typed_samples",
+      "conditions": [{"column": "datetime_v", "op": ">", "value": "2020-01-01 10:00:00.5"}],
+      "expect": {
+        "mysql": {"where": "(`datetime_v` > ?)", "values": ["2020-01-01 10:00:00.5"]},
+        "sqlite": {"where": "(\"datetime_v\" > ?)", "values": ["2020-01-01 10:00:00.5"]}
+      }
+    },
+    {
+      "name": "mysql-unsigned-bigint-at-its-maximum",
+      "table": "typed_samples",
+      "conditions": [{"column": "unsigned_v", "op": "=", "value": "18446744073709551615"}],
+      "expect": {"mysql": {"where": "(`unsigned_v` = CAST(? AS DECIMAL(65,30)))", "values": ["18446744073709551615"]}}
+    },
+    {
+      "name": "mysql-float",
+      "table": "typed_samples",
+      "conditions": [{"column": "float_v", "op": "<=", "value": "1.5"}],
+      "expect": {"mysql": {"where": "(`float_v` <= CAST(? AS FLOAT))", "values": ["1.5"]}}
+    },
+    {
+      "name": "mysql-tinyint",
+      "table": "typed_samples",
+      "conditions": [{"column": "tinyint_v", "op": "=", "value": "1"}],
+      "expect": {"mysql": {"where": "(`tinyint_v` = CAST(? AS DECIMAL(65,30)))", "values": ["1"]}}
+    },
+    {
+      "name": "mysql-decimal",
+      "table": "typed_samples",
+      "conditions": [{"column": "decimal_v", "op": "=", "value": "1.5"}],
+      "expect": {"mysql": {"where": "(`decimal_v` = CAST(? AS DECIMAL(65,30)))", "values": ["1.5"]}}
+    },
+    {
+      "name": "numeric-declared-type",
+      "table": "typed_samples",
+      "conditions": [{"column": "numeric_v", "op": "=", "value": "1.5"}],
+      "expect": {"postgres": {"where": "(\"numeric_v\" = $3::numeric)", "values": ["1.5"]}, "sqlite": {"where": "(\"numeric_v\" = ?)", "values": ["1.5"]}}
+    },
+    {
+      "name": "real-declared-type",
+      "table": "typed_samples",
+      "conditions": [{"column": "real_v", "op": "<", "value": "2"}],
+      "expect": {"postgres": {"where": "(\"real_v\" < $3::real)", "values": ["2"]}, "sqlite": {"where": "(\"real_v\" < ?)", "values": ["2"]}}
+    },
+    {
+      "name": "boolean-compare",
       "table": "users",
-      "raw": "[null,null,null]",
-      "expect_error": "malformed"
+      "conditions": [{"column": "is_active", "op": "=", "value": "true"}],
+      "expect": {
+        "postgres": {"where": "(\"is_active\"::text = $3)", "values": ["true"]},
+        "mysql": {"error": "invalid_value"},
+        "sqlite": {"where": "(\"is_active\" = ?)", "values": ["true"]}
+      }
+    },
+    {
+      "name": "boolean-compare-as-one",
+      "table": "users",
+      "conditions": [{"column": "is_active", "op": "=", "value": "1"}],
+      "expect": {
+        "postgres": {"where": "(\"is_active\"::text = $3)", "values": ["1"]},
+        "mysql": {"where": "(`is_active` = CAST(? AS DECIMAL(65,30)))", "values": ["1"]},
+        "sqlite": {"where": "(\"is_active\" = ?)", "values": ["1"]}
+      }
+    },
+    {
+      "name": "json-column-compares-as-text",
+      "table": "page_hits",
+      "conditions": [{"column": "detail", "op": "LIKE", "value": "%x%"}],
+      "expect": {
+        "postgres": {"where": "(\"detail\"::text LIKE $3)", "values": ["%x%"]},
+        "mysql": {"where": "(CAST(`detail` AS CHAR) LIKE ?)", "values": ["%x%"]},
+        "sqlite": {"where": "(CAST(\"detail\" AS TEXT) LIKE ?)", "values": ["%x%"]}
+      }
     }
   ]
 }

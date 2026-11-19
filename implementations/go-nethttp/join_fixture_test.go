@@ -4,32 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 )
 
 // Consumes spec/fixtures/join-builder-tests.json (schema: spec/fixtures/README.md).
 
 type joinFixtureFile struct {
-	Catalogs map[string]joinFixtureCatalog `json:"catalogs"`
-	Cases    []map[string]json.RawMessage  `json:"cases"`
-}
-
-type joinFixtureCatalog struct {
-	Schemas       []string `json:"schemas"`
-	DefaultSchema string   `json:"default_schema"`
-	Tables        map[string]struct {
-		Columns    []map[string]any `json:"columns"`
-		UniqueKeys []struct {
-			Name    string   `json:"name"`
-			Primary bool     `json:"primary"`
-			Columns []string `json:"columns"`
-		} `json:"unique_keys"`
-	} `json:"tables"`
+	Cases []map[string]json.RawMessage `json:"cases"`
 }
 
 type joinFixtureOutcome struct {
@@ -37,27 +20,6 @@ type joinFixtureOutcome struct {
 	Values []string `json:"values"`
 	Labels []string `json:"labels"`
 	Error  string   `json:"error"`
-}
-
-// joinFixtureEngine is one engine's half of the fixture: how a catalog column
-// row becomes a colMeta, as that backend's tableMeta builds it.
-type joinFixtureEngine struct {
-	name          string
-	dialect       joinDialect
-	splicesSchema bool // SQLite has no schema above the database.
-	column        func(map[string]any) colMeta
-}
-
-func fixtureString(c map[string]any, key string) string {
-	s, _ := c[key].(string)
-	return s
-}
-
-func fixtureCollation(c map[string]any) *string {
-	if s, ok := c["collation"].(string); ok {
-		return &s
-	}
-	return nil
 }
 
 // joinFixtureCode is the spec/protocol.md §2 code writeError gives err.
@@ -74,28 +36,7 @@ func joinFixtureCode(t *testing.T, err error) string {
 	return body.Code
 }
 
-func joinFixtureTables(e joinFixtureEngine, cat joinFixtureCatalog) map[string]tableMeta {
-	out := map[string]tableMeta{}
-	for key, tbl := range cat.Tables {
-		schema, name, _ := strings.Cut(key, ".")
-		meta := tableMeta{name: name}
-		if e.splicesSchema {
-			meta.schema = schema
-		}
-		for _, c := range tbl.Columns {
-			meta.columns = append(meta.columns, e.column(c))
-		}
-		var keys []uniqueKey
-		for _, k := range tbl.UniqueKeys {
-			keys = append(keys, uniqueKey{name: k.Name, primary: k.Primary, columns: k.Columns})
-		}
-		meta.orderKeys = tieBreakKeys(meta.columns, keys)
-		out[key] = meta
-	}
-	return out
-}
-
-func runJoinFixtureCase(t *testing.T, cat joinFixtureCatalog, tables map[string]tableMeta, e joinFixtureEngine,
+func runJoinFixtureCase(t *testing.T, cat fixtureCatalog, tables map[string]tableMeta, e fixtureEngine,
 	c map[string]json.RawMessage) joinFixtureOutcome {
 	t.Helper()
 	fail := func(err error) joinFixtureOutcome { return joinFixtureOutcome{Error: joinFixtureCode(t, err)} }
@@ -160,18 +101,10 @@ func runJoinFixtureCase(t *testing.T, cat joinFixtureCatalog, tables map[string]
 	return joinFixtureOutcome{SQL: sql, Values: values, Labels: plan.labels}
 }
 
-func runJoinFixture(t *testing.T, e joinFixtureEngine) {
-	path := filepath.Join(repoRoot(t), "spec", "fixtures", "join-builder-tests.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading fixture file %s: %v", path, err)
-	}
+func runJoinFixture(t *testing.T, e fixtureEngine) {
 	var file joinFixtureFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		t.Fatalf("parsing fixture file: %v", err)
-	}
-	cat := file.Catalogs[e.name]
-	tables := joinFixtureTables(e, cat)
+	readFixture(t, "join-builder-tests.json", &file)
+	cat, tables := loadCatalogFixture(t, e)
 	ran := 0
 	for _, c := range file.Cases {
 		var name string
@@ -202,16 +135,5 @@ func runJoinFixture(t *testing.T, e joinFixtureEngine) {
 }
 
 func TestJoinBuilderFixturesPostgres(t *testing.T) {
-	runJoinFixture(t, joinFixtureEngine{
-		name: "postgres", dialect: pgJoinDialect, splicesSchema: true,
-		column: func(c map[string]any) colMeta {
-			isEnum, _ := c["is_enum"].(bool)
-			return colMeta{
-				name: fixtureString(c, "name"), typeName: fixtureString(c, "type"),
-				class:     pgColumnClass(fixtureString(c, "data_type"), fixtureString(c, "udt_schema"), fixtureString(c, "udt_name"), isEnum),
-				compare:   pgTypedCompare(fixtureString(c, "data_type")),
-				collation: fixtureCollation(c),
-			}
-		},
-	})
+	runJoinFixture(t, pgFixtureEngine)
 }

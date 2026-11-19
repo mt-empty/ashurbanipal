@@ -1378,7 +1378,7 @@ mod tests {
         }
     }
 
-    fn join_fixture_column(c: &serde_json::Value) -> ColMeta {
+    fn fixture_column(c: &serde_json::Value) -> ColMeta {
         let declared = c["declared"].as_str().unwrap();
         let class = column_class(declared);
         ColMeta {
@@ -1397,13 +1397,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn join_builder_fixtures() {
-        super::super::join_fixture::run(super::super::join_fixture::Engine {
+    fn fixture_engine() -> super::super::catalog_fixture::Engine {
+        super::super::catalog_fixture::Engine {
             name: "sqlite",
             dialect: &DIALECT,
             splices_schema: false,
-            column: join_fixture_column,
-        });
+            column: fixture_column,
+        }
+    }
+
+    #[test]
+    fn join_builder_fixtures() {
+        super::super::join_fixture::run(&fixture_engine());
+    }
+
+    #[test]
+    fn filter_builder_fixtures() {
+        super::super::filter_fixture::run(&fixture_engine());
     }
 }

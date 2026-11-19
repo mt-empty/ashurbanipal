@@ -1,67 +1,62 @@
-"""Fixture-driven Postgres filter tests (`spec/fixtures/README.md`).
-
-Fixtures use `$N` placeholders; psycopg uses `%s`, so `_normalize` compares bind order.
-"""
+"""Table-route filter fixtures, per engine (`spec/fixtures/README.md`)."""
 
 from __future__ import annotations
 
 import json
-import re
-from pathlib import Path
+from typing import Any
 
 import pytest
+from _catalog_fixture import CATALOGS, ENGINES, FIXTURES_DIR, TABLES, Engine, native_placeholders
 
 from ashurbanipal import filter as filter_module
 from ashurbanipal.db import FilterParseError, NotAllowed
-from ashurbanipal.db.postgres import _JOIN_DIALECT, column_class, typed_compare
-from ashurbanipal.join import ColMeta, TableMeta, table_where_clause
+from ashurbanipal.join import table_where_clause
 
-FIXTURES_PATH = Path(__file__).resolve().parents[3] / "spec" / "fixtures" / "filter-builder-tests.json"
-FIXTURES = json.loads(FIXTURES_PATH.read_text())
+FIXTURES = json.loads((FIXTURES_DIR / "filter-builder-tests.json").read_text())
 
-
-def _seed_table(table: str) -> TableMeta:
-    """The fixture's tables map in place of the live catalog lookup (spec/fixtures/README.md)."""
-    columns = [
-        ColMeta(
-            name=name,
-            type_name=c["type"],
-            column_class=column_class(c["type"], "", "", False),
-            compare=typed_compare(c["type"]),
-        )
-        for name, c in FIXTURES["tables"][table].items()
-    ]
-    return TableMeta(name=table, columns=columns)
+# Structural kinds all fail the parse before any schema access, so they compare as one.
+_STRUCTURAL = "structural"
 
 
-_PLACEHOLDER_RE = re.compile(r"\$\d+")
+def _kind(kind: str) -> str:
+    return kind if kind in ("unknown_column", "invalid_value") else _STRUCTURAL
 
 
-def _normalize(where_text: str) -> str:
-    return _PLACEHOLDER_RE.sub("%s", where_text)
+def _expected(engine: Engine, case: dict[str, Any]) -> dict[str, Any] | None:
+    if "expect_error" in case:
+        return {"error": _kind(case["expect_error"])}
+    want = case["expect"].get(engine.name)
+    if want is None:
+        return None
+    if "error" in want:
+        return {"error": _kind(want["error"])}
+    return {**want, "where": native_placeholders(engine, want["where"])}
 
 
-@pytest.mark.parametrize("case", FIXTURES["cases"], ids=lambda c: c["name"])
-def test_filter_builder_fixture(case: dict) -> None:
-    name = case["name"]
-    raw = case.get("raw")
-    if raw is None:
-        raw = json.dumps(case["conditions"])
-
-    expect = case.get("expect")
-    expect_error = case.get("expect_error")
-    assert (expect is None) != (expect_error is None), f"case {name}: exactly one of expect/expect_error required"
-
-    if expect is not None:
+def _run(engine: Engine, case: dict[str, Any]) -> dict[str, Any]:
+    raw = case["raw"] if "raw" in case else json.dumps(case["conditions"])
+    try:
         conditions = filter_module.parse(raw)
-        where_clause, values = table_where_clause(conditions, _seed_table(case["table"]), _JOIN_DIALECT)
-        expected_where = f" where {_normalize(expect['where'])}" if expect["where"] else ""
-        assert where_clause == expected_where, f"case {name}: WHERE mismatch"
-        assert values == expect["values"], f"case {name}: bind values mismatch"
-    elif expect_error in ("unknown_column", "invalid_value"):
-        conditions = filter_module.parse(raw)
-        with pytest.raises(NotAllowed if expect_error == "unknown_column" else FilterParseError):
-            table_where_clause(conditions, _seed_table(case["table"]), _JOIN_DIALECT)
-    else:
-        with pytest.raises(filter_module.FilterError):
-            filter_module.parse(raw)
+    except filter_module.FilterError:
+        return {"error": _STRUCTURAL}
+    table = TABLES[engine.name][f"{CATALOGS[engine.name]['default_schema']}.{case['table']}"]
+    try:
+        where, values = table_where_clause(conditions, table, engine.dialect)
+    except NotAllowed:
+        return {"error": "unknown_column"}
+    except FilterParseError:
+        return {"error": "invalid_value"}
+    return {"where": where.removeprefix(" where "), "values": values}
+
+
+PARAMS = [
+    pytest.param(engine, case, id=f"{engine.name}-{case['name']}")
+    for engine in ENGINES
+    for case in FIXTURES["cases"]
+    if _expected(engine, case) is not None
+]
+
+
+@pytest.mark.parametrize(("engine", "case"), PARAMS)
+def test_filter_builder_fixture(engine: Engine, case: dict[str, Any]) -> None:
+    assert _run(engine, case) == _expected(engine, case)

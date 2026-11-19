@@ -3,170 +3,109 @@ package ashurbanipal
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strconv"
+	"reflect"
+	"strings"
 	"testing"
 )
 
-// Consumes the shared filter fixtures (spec/fixtures/README.md).
+// Consumes spec/fixtures/filter-builder-tests.json (schema: spec/fixtures/README.md).
 
-type fixtureFile struct {
-	Tables map[string]map[string]fixtureColumn `json:"tables"`
-	Cases  []fixtureCase                       `json:"cases"`
+type filterFixtureCase struct {
+	Name        string                          `json:"name"`
+	Table       string                          `json:"table"`
+	Conditions  json.RawMessage                 `json:"conditions"`
+	Raw         *string                         `json:"raw"`
+	Expect      map[string]filterFixtureOutcome `json:"expect"`
+	ExpectError *string                         `json:"expect_error"`
 }
 
-type fixtureColumn struct {
-	Type string `json:"type"`
-}
-
-type fixtureCase struct {
-	Name        string          `json:"name"`
-	Table       string          `json:"table"`
-	Conditions  json.RawMessage `json:"conditions"`
-	Raw         *string         `json:"raw"`
-	Expect      *fixtureExpect  `json:"expect"`
-	ExpectError *string         `json:"expect_error"`
-}
-
-type fixtureExpect struct {
+type filterFixtureOutcome struct {
 	Where  string   `json:"where"`
 	Values []string `json:"values"`
+	Error  string   `json:"error"`
 }
 
-// repoRoot resolves from this test file's own location (two directories
-// up from implementations/go-nethttp) rather than the working directory
-// `go test` happens to be invoked from.
-func repoRoot(t *testing.T) string {
+// Structural kinds all fail the parse before any schema access, so they compare as one.
+const filterFixtureStructural = "structural"
+
+func filterFixtureKind(kind string) string {
+	if kind == "unknown_column" || kind == "invalid_value" {
+		return kind
+	}
+	return filterFixtureStructural
+}
+
+func runFilterFixtureCase(t *testing.T, e fixtureEngine, table tableMeta, tc filterFixtureCase) filterFixtureOutcome {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed to resolve this test file's path")
+	raw := string(tc.Conditions)
+	if tc.Raw != nil {
+		raw = *tc.Raw
 	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..")
-}
-
-// seedTable substitutes the fixture's tables map for the live catalog
-// (spec/fixtures/README.md).
-func seedTable(t *testing.T, file fixtureFile, table string) tableMeta {
-	t.Helper()
-	columns, ok := file.Tables[table]
-	if !ok {
-		t.Fatalf("fixture references unmapped table %q", table)
-	}
-	out := make([]colMeta, 0, len(columns))
-	for name, c := range columns {
-		out = append(out, colMeta{
-			name: name, typeName: c.Type, class: pgColumnClass(c.Type, "", "", false),
-			compare: pgTypedCompare(c.Type),
-		})
-	}
-	return tableMeta{name: table, columns: out}
-}
-
-var placeholderRe = regexp.MustCompile(`\$(\d+)`)
-
-// shiftPlaceholders re-numbers the fixture's $1-based placeholders to
-// match tableWhereClause's real numbering, which starts at $3 in
-// production (QueryTable binds limit/offset as $1/$2 first) —
-// spec/fixtures/README.md: "Runners with a different placeholder scheme
-// ... normalize before comparing", mirroring db.rs's own
-// shift_placeholders test helper exactly (shift by 2, not renumber to a
-// scheme-agnostic token) since Go's driver also uses $N positional
-// parameters.
-func shiftPlaceholders(fragment string, by int) string {
-	return placeholderRe.ReplaceAllStringFunc(fragment, func(m string) string {
-		n, _ := strconv.Atoi(m[1:])
-		return "$" + strconv.Itoa(n+by)
-	})
-}
-
-func TestFilterBuilderFixtures(t *testing.T) {
-	path := filepath.Join(repoRoot(t), "spec", "fixtures", "filter-builder-tests.json")
-	data, err := os.ReadFile(path)
+	conditions, err := ParseFilter(raw)
 	if err != nil {
-		t.Fatalf("reading fixture file %s: %v", path, err)
+		return filterFixtureOutcome{Error: filterFixtureStructural}
 	}
-	var file fixtureFile
-	if err := json.Unmarshal(data, &file); err != nil {
-		t.Fatalf("parsing fixture file: %v", err)
-	}
-	if len(file.Cases) == 0 {
-		t.Fatal("fixture file has no cases")
-	}
-
-	for _, tc := range file.Cases {
-		tc := tc
-		t.Run(tc.Name, func(t *testing.T) {
-			var raw string
-			switch {
-			case tc.Raw != nil:
-				raw = *tc.Raw
-			case tc.Conditions != nil:
-				raw = string(tc.Conditions)
-			default:
-				t.Fatalf("case %s: neither raw nor conditions present", tc.Name)
-			}
-
-			switch {
-			case tc.Expect != nil:
-				conditions, err := ParseFilter(raw)
-				if err != nil {
-					t.Fatalf("case %s: parse failed: %v", tc.Name, err)
-				}
-				where, values, err := tableWhereClause(conditions, seedTable(t, file, tc.Table), pgJoinDialect)
-				if err != nil {
-					t.Fatalf("case %s: build failed: %v", tc.Name, err)
-				}
-				expectedWhere := ""
-				if tc.Expect.Where != "" {
-					expectedWhere = " where " + shiftPlaceholders(tc.Expect.Where, 2)
-				}
-				if where != expectedWhere {
-					t.Errorf("case %s: WHERE mismatch:\n got: %q\nwant: %q", tc.Name, where, expectedWhere)
-				}
-				if !equalStrings(values, tc.Expect.Values) {
-					t.Errorf("case %s: bind values mismatch: got %v want %v", tc.Name, values, tc.Expect.Values)
-				}
-
-			case tc.ExpectError != nil && (*tc.ExpectError == "unknown_column" || *tc.ExpectError == "invalid_value"):
-				conditions, err := ParseFilter(raw)
-				if err != nil {
-					t.Fatalf("case %s: should parse (rejection is builder-stage): %v", tc.Name, err)
-				}
-				_, _, err = tableWhereClause(conditions, seedTable(t, file, tc.Table), pgJoinDialect)
-				var notAllowed *NotAllowedError
-				var filterError *FilterError
-				switch {
-				case *tc.ExpectError == "unknown_column" && !errors.As(err, &notAllowed):
-					t.Fatalf("case %s: expected NotAllowedError, got %T: %v", tc.Name, err, err)
-				case *tc.ExpectError == "invalid_value" && !errors.As(err, &filterError):
-					t.Fatalf("case %s: expected FilterError, got %T: %v", tc.Name, err, err)
-				}
-
-			case tc.ExpectError != nil:
-				_, err := ParseFilter(raw)
-				if err == nil {
-					t.Fatalf("case %s: expected structural rejection (%s), but it parsed", tc.Name, *tc.ExpectError)
-				}
-
-			default:
-				t.Fatalf("case %s: neither expect nor expect_error present", tc.Name)
-			}
-		})
+	where, values, err := tableWhereClause(conditions, table, e.dialect)
+	var notAllowed *NotAllowedError
+	var filterError *FilterError
+	switch {
+	case err == nil:
+		if values == nil {
+			values = []string{}
+		}
+		return filterFixtureOutcome{Where: strings.TrimPrefix(where, " where "), Values: values}
+	case errors.As(err, &notAllowed):
+		return filterFixtureOutcome{Error: "unknown_column"}
+	case errors.As(err, &filterError):
+		return filterFixtureOutcome{Error: "invalid_value"}
+	default:
+		t.Fatalf("unexpected error %T: %v", err, err)
+		return filterFixtureOutcome{}
 	}
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
+// filterFixtureWant is the case's expectation on engine, or false when the case doesn't run there.
+func filterFixtureWant(tc filterFixtureCase, engine string) (filterFixtureOutcome, bool) {
+	if tc.ExpectError != nil {
+		return filterFixtureOutcome{Error: filterFixtureKind(*tc.ExpectError)}, true
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+	want, ok := tc.Expect[engine]
+	if ok && want.Error != "" {
+		want.Error = filterFixtureKind(want.Error)
+	}
+	return want, ok
+}
+
+func runFilterFixture(t *testing.T, e fixtureEngine) {
+	var file struct {
+		Cases []filterFixtureCase `json:"cases"`
+	}
+	readFixture(t, "filter-builder-tests.json", &file)
+	cat, tables := loadCatalogFixture(t, e)
+	ran := 0
+	for _, tc := range file.Cases {
+		want, ok := filterFixtureWant(tc, e.name)
+		if !ok {
+			continue
 		}
+		key := cat.DefaultSchema + "." + tc.Table
+		table, ok := tables[key]
+		if !ok {
+			t.Fatalf("case %s: no %s in the %s catalog", tc.Name, key, e.name)
+		}
+		ran++
+		t.Run(tc.Name, func(t *testing.T) {
+			got := runFilterFixtureCase(t, e, table, tc)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("\nwant %+v\ngot  %+v", want, got)
+			}
+		})
 	}
-	return true
+	if ran == 0 {
+		t.Fatalf("no filter fixture cases ran for %s", e.name)
+	}
+}
+
+func TestFilterBuilderFixturesPostgres(t *testing.T) {
+	runFilterFixture(t, pgFixtureEngine)
 }

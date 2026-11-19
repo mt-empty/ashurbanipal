@@ -28,13 +28,15 @@ a port is a peer, not a lesser copy.
   + sha256 + `NOTICE` (see "Vendoring the frontend" below). This also
   means reusing the one and only filter-grammar parser implementation;
   no port writes its own.
-- **The filter fixtures** — `spec/fixtures/filter-builder-tests.json` (the
-  AST → WHERE-fragment cases every backend, reference and ports alike, is
-  tested against). `spec/fixtures/parser-tests.json` is frontend-only —
+- **The filter fixtures** — `spec/fixtures/filter-builder-tests.json`
+  (filter AST + catalog → the table route's WHERE fragment and bind
+  values, per engine). `spec/fixtures/parser-tests.json` is frontend-only —
   no port consumes it, since no port parses DSL text.
 - **The join fixtures** — `spec/fixtures/join-builder-tests.json` (join
   object + catalog → SQL, bind values and labels, per engine). Every port
-  runs it once per engine it supports, with no database.
+  runs both builder fixtures once per engine it supports, with no
+  database, against the engine-native catalogs in
+  `spec/fixtures/catalogs.json`.
 - **The conformance seed + runner** — `conformance/seed/seed.sql` (apply
   once against your target database) and `conformance/runner` (drives
   HTTP assertions at your running instance). See "How to run conformance"

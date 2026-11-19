@@ -1,0 +1,92 @@
+//! Runner over `spec/fixtures/filter-builder-tests.json` (schema:
+//! `spec/fixtures/README.md`), shared by each backend's test module.
+
+use serde_json::Value;
+
+use super::catalog_fixture::{self, Engine};
+use super::DbError;
+use crate::filter;
+use crate::join;
+
+const FIXTURES: &str = include_str!("../../../../../spec/fixtures/filter-builder-tests.json");
+
+/// `(where fragment, values)`, or the rejection's kind. Structural kinds all
+/// fail the parse before any schema access, so they compare as one.
+type Outcome = Result<(String, Vec<String>), String>;
+
+const STRUCTURAL: &str = "structural";
+
+fn kind(kind: &str) -> String {
+    match kind {
+        "unknown_column" | "invalid_value" => kind.to_string(),
+        _ => STRUCTURAL.to_string(),
+    }
+}
+
+fn run_case(engine: &Engine, table: &join::TableMeta, case: &Value) -> Outcome {
+    let raw = match (case.get("raw"), case.get("conditions")) {
+        (Some(raw), _) => raw.as_str().unwrap().to_string(),
+        (None, Some(conditions)) => conditions.to_string(),
+        (None, None) => panic!("case {}: neither raw nor conditions", case["name"]),
+    };
+    let conditions = filter::parse(&raw).map_err(|_| STRUCTURAL.to_string())?;
+    match join::table_where_clause(&conditions, table, engine.dialect) {
+        Ok((clause, values)) => {
+            let fragment = clause.strip_prefix(" where ").unwrap_or(&clause);
+            Ok((fragment.to_string(), values))
+        }
+        Err(DbError::NotAllowed(_)) => Err("unknown_column".to_string()),
+        Err(DbError::FilterParse(_)) => Err("invalid_value".to_string()),
+        Err(other) => panic!("case {}: unexpected error {other:?}", case["name"]),
+    }
+}
+
+fn expected(case: &Value, engine: &str) -> Option<Outcome> {
+    if let Some(k) = case.get("expect_error") {
+        return Some(Err(kind(k.as_str().unwrap())));
+    }
+    let e = case["expect"].get(engine)?;
+    if let Some(k) = e.get("error") {
+        return Some(Err(kind(k.as_str().unwrap())));
+    }
+    let values = e["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_string())
+        .collect();
+    Some(Ok((e["where"].as_str().unwrap().to_string(), values)))
+}
+
+pub(crate) fn run(engine: &Engine) {
+    let file: Value = serde_json::from_str(FIXTURES).unwrap();
+    let catalog = catalog_fixture::catalog(engine);
+    let tables = catalog_fixture::tables(engine, &catalog);
+    let schema = catalog["default_schema"].as_str().unwrap();
+    let cases = file["cases"].as_array().unwrap();
+    let mut failures = Vec::new();
+    let mut ran = 0;
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let Some(want) = expected(case, engine.name) else {
+            continue;
+        };
+        let key = format!("{schema}.{}", case["table"].as_str().unwrap());
+        let table = tables
+            .get(&key)
+            .unwrap_or_else(|| panic!("case {name}: no {key} in the {} catalog", engine.name));
+        let actual = run_case(engine, table, case);
+        ran += 1;
+        if actual != want {
+            failures.push(format!("case {name}:\n  want {want:?}\n  got  {actual:?}"));
+        }
+    }
+    assert!(ran > 0, "no cases ran for {}", engine.name);
+    assert!(
+        failures.is_empty(),
+        "{} of {ran} {} filter fixture cases failed:\n{}",
+        failures.len(),
+        engine.name,
+        failures.join("\n")
+    );
+}

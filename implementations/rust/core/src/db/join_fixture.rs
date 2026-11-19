@@ -5,66 +5,19 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::{DbError, Ident};
+use super::catalog_fixture::{self, Engine};
+use super::DbError;
 use crate::config::Limits;
-use crate::join::{self, ColMeta, Dialect, TableMeta, UniqueKey};
+use crate::join::{self, TableMeta};
 use crate::protocol_wire::JoinParams;
 
 const FIXTURES: &str = include_str!("../../../../../spec/fixtures/join-builder-tests.json");
-
-/// One engine's half of the fixture: its catalog key, dialect, and how a
-/// catalog column row becomes a [`ColMeta`], as that backend builds it.
-pub(crate) struct Engine {
-    pub name: &'static str,
-    pub dialect: &'static Dialect,
-    /// SQLite has no schema above the database, so none is spliced.
-    pub splices_schema: bool,
-    pub column: fn(&Value) -> ColMeta,
-}
 
 /// `(sql, values, labels)`, or the `spec/protocol.md` §2 code of the rejection.
 type Outcome = Result<(String, Vec<String>, Vec<String>), String>;
 
 fn code(e: &DbError) -> String {
     e.problem().1.to_string()
-}
-
-fn catalog_tables(engine: &Engine, catalog: &Value) -> HashMap<String, TableMeta> {
-    let tables = catalog["tables"].as_object().expect("catalog tables");
-    tables
-        .iter()
-        .map(|(key, t)| {
-            let (schema, name) = key.split_once('.').expect("tables are keyed schema.table");
-            let columns: Vec<ColMeta> = t["columns"]
-                .as_array()
-                .expect("columns")
-                .iter()
-                .map(engine.column)
-                .collect();
-            let keys: Vec<UniqueKey> = t["unique_keys"]
-                .as_array()
-                .expect("unique_keys")
-                .iter()
-                .map(|k| UniqueKey {
-                    name: k["name"].as_str().unwrap().to_string(),
-                    primary: k["primary"].as_bool().unwrap(),
-                    columns: k["columns"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|c| c.as_str().unwrap().to_string())
-                        .collect(),
-                })
-                .collect();
-            let meta = TableMeta {
-                schema: engine.splices_schema.then(|| Ident::for_test(schema)),
-                name: Ident::for_test(name),
-                order_keys: join::tie_break_keys(&columns, &keys),
-                columns,
-            };
-            (key.clone(), meta)
-        })
-        .collect()
 }
 
 fn run_case(
@@ -149,10 +102,10 @@ fn expected(case: &Value, engine: &str) -> Option<Outcome> {
     )))
 }
 
-pub(crate) fn run(engine: Engine) {
+pub(crate) fn run(engine: &Engine) {
     let file: Value = serde_json::from_str(FIXTURES).unwrap();
-    let catalog = &file["catalogs"][engine.name];
-    let tables = catalog_tables(&engine, catalog);
+    let catalog = &catalog_fixture::catalog(engine);
+    let tables = catalog_fixture::tables(engine, catalog);
     let cases = file["cases"].as_array().unwrap();
     assert!(!cases.is_empty());
     let mut failures = Vec::new();
@@ -164,7 +117,7 @@ pub(crate) fn run(engine: Engine) {
         if !applies {
             continue;
         }
-        let actual = run_case(&engine, catalog, &tables, case);
+        let actual = run_case(engine, catalog, &tables, case);
         ran += 1;
         let want = expected(case, engine.name).unwrap();
         if actual != want {
