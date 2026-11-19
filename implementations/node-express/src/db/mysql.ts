@@ -60,7 +60,7 @@ export function quoteIdentMysql(ident: string): string {
   return `\`${ident.replace(/`/g, "``")}\``;
 }
 
-const JOIN_DIALECT: JoinDialect = {
+export const JOIN_DIALECT: JoinDialect = {
   quote: quoteIdentMysql,
   castText: (expr) => `CAST(${expr} AS CHAR)`,
   castParam: (p, target) => `CAST(${p} AS ${target})`,

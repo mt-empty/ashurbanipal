@@ -40,7 +40,7 @@ private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyL
     }
 }
 
-private val JOIN_DIALECT = JoinDialect(
+internal val SQLITE_DIALECT = JoinDialect(
     quote = ::quoteIdent,
     castText = { "CAST($it AS TEXT)" },
     castParam = { ph, target -> "CAST($ph AS $target)" },
@@ -239,7 +239,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
 
             // The statement is built from catalog names and generated aliases
             // only; every value is a bound parameter.
-            val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
+            val (body, values) = buildJoinSelect(plan, SQLITE_DIALECT)
             val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
             val rows = query(conn, "select $body", bindArgs) { rs ->
                 List(plan.labels.size) { i -> readCell(rs, i + 1) }
@@ -261,7 +261,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { tableWhereClause(it, meta, JOIN_DIALECT) } ?: WhereClause("", emptyList())
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta, SQLITE_DIALECT) } ?: WhereClause("", emptyList())
         val quotedTable = quoteIdent(realTable)
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }

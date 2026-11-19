@@ -1,56 +1,98 @@
-# Shared WASM core for the filter/response logic across language ports
+# Shared WASM core for the filter, join and response logic across language ports
 
-> **Status:** OPEN · **Area:** ports
+> **Status:** OPEN · **Area:** ports · **Ref:** deferred 2026-11-18 in favour of shared golden-SQL fixtures ([59](59-join-builder-golden-sql-fixtures.md))
 
-**Ask:** instead of every `implementations/*` port hand-reimplementing the
-filter AST validation + operator→SQL mapping and response/metadata shaping, compile that logic once
-and embed it via a WASM runtime (e.g. wasmtime/wasmer bindings) in each host
-language, so a bug fix or new operator lands everywhere on one version bump
-instead of N synced PRs.
+**Decision, 2026-11-18:** deferred. More ports in popular languages are
+planned, but the likely targets (C#/.NET, PHP, Ruby) would all need a
+native WASM runtime (wasmtime-dotnet, a PHP extension, wasmtime-rb), and
+PHP hosting often can't load extensions. Fixtures pin behaviour across
+ports without that cost or a canonical implementation. Revisit if fixture
+coverage still lets ports drift, or if the per-change cost across ports
+becomes the main bottleneck.
 
-**Impact / constraints:**
-- Scope would be narrow, not a rewrite of `DbSource`: only the pure,
-  I/O-free logic is a good WASM candidate — the filter AST structural
-  validator (`implementations/rust/core/src/filter.rs`) plus each
-  backend's operator→SQL-fragment mapping (`db/*.rs`, verified against
-  `spec/fixtures/filter-builder-tests.json`), and the
-  `spec/protocol.md`-shaped response/metadata JSON envelope. Everything
-  else stays native per port: DB connection/pool/query execution, HTTP
-  routing into the host framework, and config/kill-switch loading all
-  depend on host-specific drivers and conventions that WASM can't (and
-  per the `DbSource` invariant, shouldn't) absorb.
-- DB I/O through WASM is possible now, just not the way that helps here:
-  Fermyon Spin ships a pooled outbound-Postgres SDK for components, and
-  wasmCloud has a pluggable Postgres capability provider (multiplexing
-  multiple DB roles behind one interface as of its 2026-07 release);
-  WasmEdge's own native driver is still in progress
-  ([WasmEdge#1432](https://github.com/WasmEdge/WasmEdge/issues/1432)). But
-  in both shipped cases the *runtime* brokers the connection under its own
-  capability grant, not the host app's existing pool — which breaks the
-  "no separate credentials, reuse what the host already has" pitch and the
-  `DbSource`-is-the-only-seam invariant. Getting DB I/O into WASM this way
-  means the host stops being "a library your app embeds via
-  `app.merge`/mount" and becomes "a component that runs inside Spin's or
-  wasmCloud's runtime" — a deployment-model change, not an implementation
-  detail, and a separate decision from this one. Also note: true async I/O
-  (WASI Preview 3) is still RC as of Spin 3.5 (Nov 2025), so a component
-  serving concurrent DB-browsing requests today blocks per-component under
-  Preview 2 semantics — a real concurrency ceiling for a multi-user web UI.
-- Real cost to weigh against the dedup win, for the in-scope (pure-logic)
-  version of this: every host gains a WASM runtime as a dependency (extra
-  native artifact per platform, worse story on unusual targets), each port
-  becomes less inspectable/idiomatic (a thin shim over a binary blob
-  instead of real Go/Kotlin/TS), and some ecosystems' SCA/vuln-scanning
-  tooling doesn't handle vendored WASM blobs well — friction for a tool
-  whose whole pitch is being safe to embed.
-- Prior art worth checking before designing the ABI: Extism (generic
-  host-SDK-per-language + host-functions-as-callback pattern), OPA's
-  WASM-compiled Rego SDKs (same shape, narrower domain), and DuckDB-Wasm
-  (single C++ core, native FFI per language, WASM only for the
-  browser/no-FFI leg — a hybrid, not WASM-everywhere). None of them solve
-  introspection + async external-DB access through the boundary; this
-  project would be first for that specific combination.
-- Before committing to this for real: spike just the filter compiler +
-  response shaper as a WASM module against one existing port (Go is
-  probably the best test bed) and measure the marshaling overhead and
-  binary-size hit before deciding it's worth doing everywhere.
+**Ask:** each `implementations/*` port hand-writes the same pure logic.
+Compile that logic once to WebAssembly and embed it in each host language,
+so a bug fix or new operator is written and reviewed once, not five times.
+
+**What would move into the core.** Only pure, I/O-free logic:
+- The filter AST check (`spec/protocol.md` §5.4.2), including the typed
+  value check and the IN/BETWEEN operators.
+- The join planner and its SQL builder (`spec/join-dsl.md`). This is now
+  the largest duplicated piece: about 600–1,000 lines per port, against
+  about 230–570 for the filter. In Rust it is already a pure seam:
+  `join::plan` takes the spec plus each table's catalog metadata and
+  returns a `Plan`, and `join::build_select` turns a plan plus a `Dialect`
+  into SQL text and bound parameters
+  (`implementations/rust/core/src/join.rs`).
+- The operator→SQL mapping for all three engines (Postgres, SQLite,
+  MySQL/MariaDB), which each port now carries three times over.
+- Sort tie-breaking on the table's key, and the response envelope
+  (`implementations/rust/core/src/protocol_wire.rs`).
+
+Everything else stays native: connections, pools and query execution,
+catalog queries, HTTP routing, and config/kill-switch loading. These
+depend on host drivers and conventions, and the `DbSource` invariant keeps
+them there.
+
+**What drift costs today.** A cross-port change already lands as one PR
+touching all five ports — nine behaviour changes did so between 2026-08
+and 2026-11 (#153, #154, #123, #234, #248, #279, #281, #282, #283). Drift
+is held back by the shared fixtures in `spec/fixtures/`, which every port
+tests against, and by each port's conformance CI. So the win is less
+writing and review per change, not fewer PRs to keep in sync.
+
+**Open conflicts with current design:**
+- **Peer ports.** `PORTING.md` says a port is a peer, not a lesser copy,
+  and `docs/design.md` §4.2 says no implementation gets special treatment.
+  A core compiled from Rust makes Rust the canonical source of the most
+  complex logic. It also gives up a benefit of independent ports: separate
+  implementations expose spec gaps (#283 was found this way, by a typed
+  round-trip conformance test). Adopting the core needs a governance
+  change, not just a build change.
+- **The identifier guarantee.** In Rust, only a catalog lookup can build a
+  `db::Ident`, so no unchecked name reaches SQL. Across a WASM boundary the
+  host passes plain strings. The core would have to do the exact catalog
+  match itself, against metadata the host supplies, and each host would
+  have to pass the full live catalog, not a pre-filtered list. The
+  guarantee would then rest on the core's checks plus correct host input,
+  not on the host's type system.
+- **Dialect quirks found by real engines.** Many recent fixes were
+  engine-specific (MySQL zero dates, #283). Moving the dialect mapping
+  into the core does not remove those; it moves where they are fixed.
+
+**Runtime cost per host:**
+- Go: wazero, pure Go, no cgo.
+- Kotlin/JVM: Chicory, pure Java.
+- Node: built-in `WebAssembly`. The live demo, which runs node-express in
+  the browser, keeps working.
+- Python: wasmtime-py, which ships native wheels per platform — the one
+  host that gains a native artifact.
+- Rust: none; it links the core directly.
+
+Shipping a vendored blob with a checksum pin is a pattern the repo already
+uses for `frontend/dbviewer.html` (`PORTING.md`). Remaining costs: each
+port's in-scope code becomes a thin shim over a binary, harder to read and
+debug in the host language; JSON (or similar) marshaling on every request;
+and some SCA/vuln-scanning tools handle vendored WASM blobs poorly —
+friction for a tool whose pitch is being safe to embed.
+
+**Out of scope: DB I/O inside WASM.** Spin and wasmCloud can broker
+outbound Postgres connections, but the runtime owns the connection under
+its own capability grant, not the host app's pool. That breaks the "no
+extra credentials, reuse what the host has" pitch and the `DbSource`
+invariant, and turns Ashurbanipal from an embedded library into a
+component running inside another runtime. That is a deployment-model
+decision, separate from this one. (Status of these runtimes and of WASI
+Preview 3 async was last checked in 2025-11 and needs a fresh look before
+it is cited.)
+
+**Prior art:** Extism (a host SDK per language, host functions as
+callbacks), OPA's WASM-compiled Rego SDKs (same shape, narrower domain),
+DuckDB-Wasm (native FFI per language, WASM only where FFI is missing).
+
+**Before committing:** spike `join::plan` + `join::build_select` + the
+filter check as one WASM module, embedded in the Go port via wazero.
+Measure binary size, per-request marshaling time on a large join, and how
+much of the Go port's `filter.go`/`join.go` the shim actually replaces.
+Decide the governance question above before writing the spike, since a
+"no" there makes the numbers moot.

@@ -1,9 +1,9 @@
-# Shared filter fixtures
+# Shared fixtures
 
 Machine-readable fixture sets, generated from the normative docs they
 mirror (`spec/filter-dsl.md` §5, `spec/join-dsl.md` §5 and
-`spec/protocol.md` §5.4.2). The docs
-remain the human-readable source of truth; a change to either doc and its
+`spec/protocol.md` §5.4.2 and §5.11). The docs
+remain the human-readable source of truth; a change to a doc and its
 fixture file ships in the same PR.
 
 ## `parser-tests.json` — frontend DSL parser (DSL text → AST)
@@ -61,9 +61,8 @@ Exactly one of `expect`/`expect_error` is present.
 
 ## `filter-builder-tests.json` — backend AST validation + WHERE building
 
-Consumed by every backend's fixture runner (reference:
-`implementations/rust/core/src/db/postgres.rs`'s `filter_builder_fixtures`)
-and, over HTTP, by the black-box suite (`conformance/runner/filter_dsl.rs`),
+Consumed by every backend's fixture runner and, over HTTP, by the
+black-box suite (`conformance/runner/filter_dsl.rs`),
 which JSON-encodes each case into a real `filter` query param.
 
 Top-level `tables` maps each seed table a case names to its columns, each
@@ -110,3 +109,60 @@ Each entry in `cases`:
     access. Error message text is
     implementation-defined (`spec/protocol.md` §2); only the rejection
     is asserted.
+
+## `join-builder-tests.json` — backend join planning + SQL building, per engine
+
+Consumed by every backend's unit runner, once per engine (Postgres, SQLite,
+MySQL/MariaDB), with no database. Each runner turns a catalog row into a
+column the way that backend's catalog lookup does, calling the engine's own
+type-to-class and typed-comparison functions and the port's tie-break-key
+choice, then runs the case through the port's join parser, filter parser,
+schema resolution, planner and SQL builder. The row assembly itself is
+copied into each runner, so a backend-only adjustment to it (MariaDB's JSON
+columns) is not covered here.
+
+Top-level `catalogs` has one entry per engine, standing in for the live
+catalog lookup:
+
+- `schemas` — the §5.7 list; `default_schema` — the request's schema when a
+  case names none. SQLite's only schema is `main`, never spliced into SQL.
+- `tables`, keyed `schema.table`. Each has `columns` in catalog order, as the
+  engine's catalog query returns them, and `unique_keys` (`name`, `primary`,
+  `columns`) as that query reports them: already limited to keys whose parts
+  are plain `NOT NULL` columns. Column fields are engine-native:
+  - `postgres`: `name`, `data_type`, `udt_schema`, `udt_name`, `is_enum`,
+    `type` (the full spelling, from `format_type`), optional `collation`
+    (absent for the default collation).
+  - `mysql`: `name`, `data_type`, `column_type`, optional `collation`.
+  - `sqlite`: `name`, `declared` (may be empty).
+- Tables mirror the conformance seeds (`conformance/seed/`). A table the
+  seeds lack, kept for a shape no seed table has (a collation clash, no
+  unique key, a label collision), carries `"synthetic": true`.
+
+Each entry in `cases`:
+
+- `name` — stable case ID.
+- `join` — the decoded `join` object, **or** `join_raw` — a literal string,
+  for a value that isn't valid JSON or exceeds the byte bound.
+- Optional `filter` (the decoded array, §5.11.3), `sort`, `sort_join` (an
+  integer), `order` (`asc`/`desc`), `schema` (the request's). Request-level
+  checks (`order` spelling, a non-integer `sort_join`, limit clamping) are
+  left to the HTTP conformance suite.
+- `expect_error` — every engine rejects the case with this
+  `spec/protocol.md` §2 code (`invalid_join`, `invalid_filter`,
+  `invalid_parameter`, `unknown_column`); **or**
+- `expect` — one entry per engine the case applies to, either
+  `{"error": code}` or:
+  - `sql` — the statement after `select`, exactly as built: generated
+    `t{n}` table and `c{n}` column aliases, the engine's quoting and casts,
+    and its native placeholders — Postgres `$1`/`$2` for limit and offset
+    with filter values from `$3`; SQLite and MySQL `?`, filter values first.
+    A runner whose driver uses another placeholder spelling (`%s`, `?` on
+    Postgres) substitutes it before comparing; everything else is
+    normative.
+  - `values` — the filter's bind values in placeholder order (limit and
+    offset are not listed).
+  - `labels` — the response column labels, in order (§5.11.4).
+
+  An engine missing from `expect` doesn't run the case (no such table
+  there, or a type that engine lacks).

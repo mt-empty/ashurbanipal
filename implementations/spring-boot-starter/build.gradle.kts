@@ -112,6 +112,8 @@ tasks.withType<Test> {
     // implementation's test suite rather than duplicated into
     // src/test/resources.
     systemProperty("ashurbanipal.repoRoot", rootDir.parentFile.parentFile.absolutePath)
+    // Outside the project, so Gradle would otherwise skip the tests as up to date after a fixture edit.
+    inputs.dir(rootDir.parentFile.parentFile.resolve("spec/fixtures")).withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // ---- Frontend vendoring (PORTING.md hardening item 3) ----

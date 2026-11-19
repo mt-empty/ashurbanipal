@@ -1130,4 +1130,36 @@ mod tests {
             }
         }
     }
+
+    fn join_fixture_column(c: &serde_json::Value) -> ColMeta {
+        let s = |k: &str| c[k].as_str().unwrap();
+        ColMeta {
+            name: Ident::for_test(s("name")),
+            type_name: s("type").to_string(),
+            class: column_class(
+                s("data_type"),
+                s("udt_schema"),
+                s("udt_name"),
+                c["is_enum"].as_bool().unwrap(),
+            ),
+            compare: typed_compare(s("data_type")),
+            collation: c
+                .get("collation")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            key: None,
+            references: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn join_builder_fixtures() {
+        super::super::join_fixture::run(super::super::join_fixture::Engine {
+            name: "postgres",
+            dialect: &DIALECT,
+            splices_schema: true,
+            column: join_fixture_column,
+        });
+    }
 }

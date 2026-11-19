@@ -1,4 +1,6 @@
 mod ident;
+#[cfg(test)]
+mod join_fixture;
 #[cfg(feature = "mysql")]
 mod mysql;
 #[cfg(feature = "postgres")]

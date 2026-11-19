@@ -1015,6 +1015,9 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
 mod tests {
     use super::*;
 
+    // Planning and SQL building are covered per engine by
+    // spec/fixtures/join-builder-tests.json (db::join_fixture).
+
     fn col(name: &str, ty: &str, class: ColumnClass) -> ColMeta {
         ColMeta {
             name: Ident::for_test(name),
@@ -1035,16 +1038,6 @@ mod tests {
             columns: vec![
                 col("id", "uuid", ColumnClass::Uuid),
                 col("user_id", "uuid", ColumnClass::Uuid),
-                col("status", "text", ColumnClass::Text),
-                col("tags", "ARRAY", ColumnClass::Array),
-                ColMeta {
-                    compare: Some(TypedCompare {
-                        form: Some(ValueForm::PgNumeric),
-                        cast: Some("numeric"),
-                        int_cast: Some("int8"),
-                    }),
-                    ..col("total", "integer", ColumnClass::Number)
-                },
             ],
             order_keys: vec![0],
         }
@@ -1074,89 +1067,8 @@ mod tests {
         }
     }
 
-    fn dialect() -> Dialect {
-        Dialect {
-            quote: crate::db::quote_ident,
-            cast_text: |c| format!("{c}::text"),
-            cast_param: |p, t| format!("{p}::{t}"),
-            numbered: true,
-            ilike: IlikeStyle::Native,
-        }
-    }
-
     const JOIN: &str = r#"{"table":"orders","joins":[{"type":"left","table":"users",
         "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#;
-
-    #[test]
-    fn parses_a_valid_join() {
-        let spec = JoinSpec::parse(JOIN).unwrap();
-        assert_eq!(spec.table_refs(), [(None, "orders"), (None, "users")]);
-        assert_eq!(spec.joins[0].kind, JoinType::Left);
-    }
-
-    #[test]
-    fn rejects_structural_violations() {
-        let cases = [
-            "not json",
-            "[]",
-            r#"{"table":"o","joins":[]}"#,
-            r#"{"table":"o","joins":[{"type":"right","table":"u","on":[{"left":{"join":0,"column":"a"},"right":"b"}]}]}"#,
-            r#"{"table":"o","joins":[{"type":"LEFT","table":"u","on":[{"left":{"join":0,"column":"a"},"right":"b"}]}]}"#,
-            r#"{"table":"o","joins":[{"type":"left","table":"u","on":[]}]}"#,
-            r#"{"table":"o","joins":[{"type":"left","table":"u","on":[{"left":{"join":1,"column":"a"},"right":"b"}]}]}"#,
-            r#"{"table":"o","joins":[{"type":"left","table":"u","on":[{"left":{"join":0,"column":"a"},"right":"b","op":">"}]}]}"#,
-            r#"{"table":"o","joins":[{"type":"left","table":"u","on":[{"left":{"join":-1,"column":"a"},"right":"b"}]}]}"#,
-            r#"{"table":"o","joins":[{"type":"left","table":"u","on":[{"left":{"join":0,"column":"a"},"right":"b"}]}],"columns":[]}"#,
-            r#"{"table":"o","joins":[{"type":"left","table":"u","on":[{"left":{"join":0,"column":"a"},"right":"b"}]}],"columns":[{"join":0,"column":"a"},{"join":0,"column":"a"}]}"#,
-        ];
-        for raw in cases {
-            assert!(JoinSpec::parse(raw).is_err(), "should reject {raw}");
-        }
-    }
-
-    #[test]
-    fn caps_tables_and_pairs_and_bytes() {
-        let pair = r#"{"left":{"join":0,"column":"a"},"right":"b"}"#;
-        let four_pairs = format!(
-            r#"{{"table":"o","joins":[{{"type":"left","table":"u","on":[{pair},{pair},{pair},{pair}]}}]}}"#
-        );
-        assert!(JoinSpec::parse(&four_pairs).is_err());
-        let entry = format!(r#"{{"type":"left","table":"u","on":[{pair}]}}"#);
-        let five = format!(r#"{{"table":"o","joins":[{entry},{entry},{entry},{entry}]}}"#);
-        assert!(JoinSpec::parse(&five).is_err());
-        let four = format!(r#"{{"table":"o","joins":[{entry},{entry},{entry}]}}"#);
-        assert!(JoinSpec::parse(&four).is_ok());
-        let long = format!(r#"{{"table":"{}","joins":[]}}"#, "t".repeat(MAX_JOIN_BYTES));
-        assert!(JoinSpec::parse(&long).is_err());
-    }
-
-    #[test]
-    fn plan_rejects_unknown_names_and_incompatible_pairs() {
-        let spec = JoinSpec::parse(JOIN).unwrap();
-        let mut bad_name = spec.clone();
-        bad_name.joins[0].on[0].right = "nope\"; drop".into();
-        assert!(matches!(
-            plan(&bad_name, vec![orders(), users()], &opts()),
-            Err(DbError::BadJoin(_))
-        ));
-
-        let mut cross = spec.clone();
-        cross.joins[0].on[0].left.column = "status".into();
-        let Err(DbError::BadJoin(msg)) = plan(&cross, vec![orders(), users()], &opts()) else {
-            panic!("expected BadJoin");
-        };
-        assert!(
-            msg.contains("orders.status (text)") && msg.contains("users.id (uuid)"),
-            "{msg}"
-        );
-
-        let mut array = spec;
-        array.joins[0].on[0].left.column = "tags".into();
-        assert!(matches!(
-            plan(&array, vec![orders(), users()], &opts()),
-            Err(DbError::BadJoin(_))
-        ));
-    }
 
     #[test]
     fn only_a_text_column_reports_its_collation() {
@@ -1189,69 +1101,6 @@ mod tests {
     }
 
     #[test]
-    fn enum_classes_pair_only_when_equal() {
-        let mut a = orders();
-        a.columns[2] = col(
-            "status",
-            "USER-DEFINED",
-            ColumnClass::Enum("public.status".into()),
-        );
-        let mut b = users();
-        b.columns[1] = col(
-            "kind",
-            "USER-DEFINED",
-            ColumnClass::Enum("public.kind".into()),
-        );
-        let mut spec = JoinSpec::parse(JOIN).unwrap();
-        spec.joins[0].on[0].left.column = "status".into();
-        spec.joins[0].on[0].right = "kind".into();
-        assert!(matches!(
-            plan(&spec, vec![a.clone(), b], &opts()),
-            Err(DbError::BadJoin(_))
-        ));
-        let mut same = users();
-        same.columns[1] = col(
-            "kind",
-            "USER-DEFINED",
-            ColumnClass::Enum("public.status".into()),
-        );
-        assert!(plan(&spec, vec![a, same], &opts()).is_ok());
-    }
-
-    #[test]
-    fn text_collation_clash_is_rejected() {
-        let mut a = orders();
-        a.columns[2].collation = Some("utf8mb4_bin".into());
-        let mut b = users();
-        b.columns[1].collation = Some("utf8mb4_general_ci".into());
-        let mut spec = JoinSpec::parse(JOIN).unwrap();
-        spec.joins[0].on[0].left.column = "status".into();
-        spec.joins[0].on[0].right = "email".into();
-        let Err(DbError::BadJoin(msg)) = plan(&spec, vec![a, b], &opts()) else {
-            panic!("expected BadJoin");
-        };
-        assert!(msg.contains("collation"), "{msg}");
-    }
-
-    #[test]
-    fn tie_break_prefers_the_primary_key_then_the_shortest_unique_key() {
-        let cols = orders().columns;
-        let key = |name: &str, primary, columns: &[&str]| UniqueKey {
-            name: name.into(),
-            primary,
-            columns: columns.iter().map(|c| c.to_string()).collect(),
-        };
-        let pk = key("z_pkey", true, &["status", "id"]);
-        let short = key("b", false, &["user_id"]);
-        let tied = key("a", false, &["status"]);
-        let hidden = key("0", false, &["hidden"]);
-        assert_eq!(tie_break_keys(&cols, &[short, pk]), [2, 0]);
-        let short = key("b", false, &["user_id"]);
-        assert_eq!(tie_break_keys(&cols, &[short, tied, hidden]), [2]);
-        assert!(tie_break_keys(&cols, &[]).is_empty());
-    }
-
-    #[test]
     fn a_key_with_an_unusable_part_is_dropped() {
         let part = |index: &str, column: &str, usable| KeyPart {
             index: index.into(),
@@ -1272,120 +1121,29 @@ mod tests {
     }
 
     #[test]
-    fn order_by_leaves_out_a_key_already_used_as_sort() {
-        let render = |i: usize| format!("c{i}");
-        assert_eq!(
-            order_by_clause(Some(1), [1, 0], true, render),
-            " order by c1 desc, c0 desc"
-        );
-        // `order` applies only with a `sort`.
-        assert_eq!(order_by_clause(None, [0], true, render), " order by c0 asc");
-        assert_eq!(order_by_clause(None, [], false, render), "");
-    }
-
-    #[test]
-    fn labels_are_unique_and_stable() {
-        let labels = assign_labels(&[(0, "id"), (1, "id"), (1, "email"), (0, "id_1")]);
-        assert_eq!(labels, ["id_0", "id_1_2", "email", "id_1"]);
-        let labels = assign_labels(&[(0, "id"), (1, "id"), (1, "email")]);
-        assert_eq!(labels, ["id_0", "id_1", "email"]);
-    }
-
-    #[test]
-    fn builds_sql_from_catalog_names_only() {
+    fn a_table_in_another_schema_is_reported_under_it() {
         let spec = JoinSpec::parse(JOIN).unwrap();
-        let mut o = opts();
-        o.sort = Some("email".into());
-        o.sort_join = Some(1);
-        o.filter = Some(vec![
-            Condition {
-                logic: None,
-                not: false,
-                column: "email".into(),
-                op: FilterOp::Eq,
-                value: Some("a@b.c".into()),
-                join: Some(1),
-            },
-            Condition {
-                logic: Some(Logic::Or),
-                not: true,
-                column: "status".into(),
-                op: FilterOp::IsNull,
-                value: None,
-                join: None,
-            },
-        ]);
-        let p = plan(&spec, vec![orders(), users()], &o).unwrap();
-        let (sql, values) = build_select(&p, &dialect());
-        assert!(sql.starts_with("t0.\"id\"::text as c0, "), "{sql}");
-        assert!(
-            sql.contains(
-                " from \"public\".\"orders\" t0 left join \"public\".\"users\" t1 \
-                 on t1.\"id\" = t0.\"user_id\""
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(" where (t1.\"email\"::text = $3) OR (NOT (t0.\"status\"::text IS NULL))"),
-            "{sql}"
-        );
-        assert!(
-            sql.ends_with(" order by t1.\"email\" asc, t0.\"id\" asc limit $1 offset $2"),
-            "{sql}"
-        );
-        assert_eq!(values, ["a@b.c"]);
-    }
-
-    fn cond(column: &str, op: FilterOp, value: FilterValue) -> Condition {
-        Condition {
-            logic: None,
-            not: false,
-            column: column.into(),
-            op,
-            value: Some(value),
-            join: None,
-        }
+        let mut u = users();
+        u.schema = Some(Ident::for_test("warehouse"));
+        let p = plan(&spec, vec![orders(), u], &opts()).unwrap();
+        let schemas: Vec<_> = p
+            .columns(Some("public"))
+            .into_iter()
+            .map(|c| (c.table, c.schema))
+            .collect();
+        assert!(schemas.contains(&("orders".into(), None)));
+        assert!(schemas.contains(&("users".into(), Some("warehouse".into()))));
     }
 
     #[test]
-    fn typed_columns_compare_in_their_own_type() {
-        let spec = JoinSpec::parse(JOIN).unwrap();
-        let list = |v: &[&str]| FilterValue::List(v.iter().map(|s| s.to_string()).collect());
-        let mut o = opts();
-        o.filter = Some(vec![
-            cond("total", FilterOp::Between, list(&["1", "9.5"])),
-            Condition {
-                logic: Some(Logic::And),
-                not: true,
-                ..cond("status", FilterOp::In, list(&["a", "b"]))
-            },
-            Condition {
-                logic: Some(Logic::Or),
-                ..cond("total", FilterOp::Like, "1%".into())
-            },
-        ]);
-        let p = plan(&spec, vec![orders(), users()], &o).unwrap();
-        let (sql, values) = build_select(&p, &dialect());
-        assert!(
-            sql.contains(
-                " where (t0.\"total\" BETWEEN $3::int8 AND $4::numeric) \
-                 AND (NOT (t0.\"status\"::text IN ($5, $6))) OR (t0.\"total\"::text LIKE $7)"
-            ),
-            "{sql}"
-        );
-        assert_eq!(values, ["1", "9.5", "a", "b", "1%"]);
-
-        let mut o = opts();
-        o.filter = Some(vec![cond("total", FilterOp::In, list(&["1", "x"]))]);
-        let err = plan(&spec, vec![orders(), users()], &o).err().unwrap();
-        assert!(
-            matches!(&err, DbError::FilterParse(m) if m.contains("\"x\"") && m.contains("\"total\"")),
-            "{err:?}"
-        );
-    }
-
-    #[test]
-    fn a_mysql_zero_date_compares_the_columns_text() {
+    fn a_mysql_zero_date_compares_the_columns_text_on_the_table_route() {
+        let dialect = Dialect {
+            quote: crate::db::quote_ident,
+            cast_text: |c| format!("{c}::text"),
+            cast_param: |p, t| format!("{p}::{t}"),
+            numbered: true,
+            ilike: IlikeStyle::Native,
+        };
         let table = TableMeta {
             schema: None,
             name: Ident::for_test("t"),
@@ -1399,189 +1157,31 @@ mod tests {
             }],
             order_keys: Vec::new(),
         };
+        let cond = |op, value| Condition {
+            logic: None,
+            not: false,
+            column: "d".into(),
+            op,
+            value: Some(value),
+            join: None,
+        };
         let list = |v: &[&str]| FilterValue::List(v.iter().map(|s| s.to_string()).collect());
         for (filter, want) in [
             (
-                cond("d", FilterOp::Eq, "2016-02-29".into()),
+                cond(FilterOp::Eq, "2016-02-29".into()),
                 " where (\"d\" = $3)",
             ),
             (
-                cond("d", FilterOp::Eq, "0000-00-00".into()),
+                cond(FilterOp::Eq, "0000-00-00".into()),
                 " where (\"d\"::text = $3)",
             ),
             (
-                cond("d", FilterOp::In, list(&["2016-02-29", "0000-00-00"])),
+                cond(FilterOp::In, list(&["2016-02-29", "0000-00-00"])),
                 " where (\"d\"::text IN ($3, $4))",
             ),
         ] {
-            let (sql, _) = table_where_clause(&[filter], &table, &dialect()).unwrap();
+            let (sql, _) = table_where_clause(&[filter], &table, &dialect).unwrap();
             assert_eq!(sql, want);
         }
-    }
-
-    #[test]
-    fn each_table_may_name_its_own_schema() {
-        let spec = JoinSpec::parse(
-            r#"{"table":"shipments","schema":"warehouse","joins":[{"type":"left","table":"orders",
-            "schema":"public","on":[{"left":{"join":0,"column":"order_id"},"right":"id"}]}]}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            spec.table_refs(),
-            [(Some("warehouse"), "shipments"), (Some("public"), "orders")]
-        );
-        for bad in [
-            r#"{"table":"orders","schema":null,"joins":[{"type":"left","table":"users",
-            "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#,
-            r#"{"table":"orders","schema":1,"joins":[{"type":"left","table":"users",
-            "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#,
-            r#"{"table":"orders","joins":[{"type":"left","table":"users","schema":["public"],
-            "on":[{"left":{"join":0,"column":"user_id"},"right":"id"}]}]}"#,
-        ] {
-            assert!(JoinSpec::parse(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn a_table_in_another_schema_is_spliced_and_reported_under_it() {
-        let spec = JoinSpec::parse(JOIN).unwrap();
-        let mut u = users();
-        u.schema = Some(Ident::for_test("warehouse"));
-        let p = plan(&spec, vec![orders(), u], &opts()).unwrap();
-        let (sql, _) = build_select(&p, &dialect());
-        assert!(
-            sql.contains(" from \"public\".\"orders\" t0 left join \"warehouse\".\"users\" t1 "),
-            "{sql}"
-        );
-        let schemas: Vec<_> = p
-            .columns(Some("public"))
-            .into_iter()
-            .map(|c| (c.table, c.schema))
-            .collect();
-        assert!(schemas.contains(&("orders".into(), None)));
-        assert!(schemas.contains(&("users".into(), Some("warehouse".into()))));
-    }
-
-    #[test]
-    fn filter_and_sort_positions_are_range_checked() {
-        let spec = JoinSpec::parse(JOIN).unwrap();
-        let mut o = opts();
-        o.filter = Some(vec![Condition {
-            logic: None,
-            not: false,
-            column: "id".into(),
-            op: FilterOp::IsNull,
-            value: None,
-            join: Some(2),
-        }]);
-        assert!(matches!(
-            plan(&spec, vec![orders(), users()], &o),
-            Err(DbError::FilterParse(_))
-        ));
-        let mut o = opts();
-        o.sort_join = Some(1);
-        assert!(matches!(
-            plan(&spec, vec![orders(), users()], &o),
-            Err(DbError::BadParameter(_))
-        ));
-        let mut o = opts();
-        o.sort = Some("email".into());
-        assert!(matches!(
-            plan(&spec, vec![orders(), users()], &o),
-            Err(DbError::NotAllowed(_))
-        ));
-    }
-
-    fn keyed(name: &str, cols: &[(&str, &str)], key: Vec<usize>) -> TableMeta {
-        TableMeta {
-            schema: None,
-            name: Ident::for_test(name),
-            columns: cols
-                .iter()
-                .map(|&(n, t)| col(n, t, ColumnClass::Number))
-                .collect(),
-            order_keys: key,
-        }
-    }
-
-    #[test]
-    fn a_key_fully_bound_to_a_fixed_table_is_left_out() {
-        let t0 = keyed("a", &[("id", "int4"), ("b_id", "int4")], vec![0]);
-        let t1 = keyed("b", &[("id", "int4")], vec![0]);
-        assert_eq!(join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]), [(0, 0)]);
-    }
-
-    #[test]
-    fn a_partly_bound_key_is_kept() {
-        let t0 = keyed("a", &[("id", "int4"), ("x", "int4")], vec![0]);
-        let t1 = keyed("b", &[("x", "int4"), ("y", "int4")], vec![0, 1]);
-        assert_eq!(
-            join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]),
-            [(0, 0), (1, 0), (1, 1)]
-        );
-    }
-
-    #[test]
-    fn a_composite_key_bound_column_by_column_is_left_out() {
-        let t0 = keyed(
-            "a",
-            &[("id", "int4"), ("x", "int4"), ("y", "int4")],
-            vec![0],
-        );
-        let t1 = keyed("b", &[("x", "int4"), ("y", "int4")], vec![0, 1]);
-        assert_eq!(
-            join_order_keys(&[t0, t1], &[vec![(0, 2, 1), (0, 1, 0)]]),
-            [(0, 0)]
-        );
-    }
-
-    #[test]
-    fn a_key_bound_across_types_or_collations_is_kept() {
-        let t0 = keyed("a", &[("id", "int4"), ("b_id", "int8")], vec![0]);
-        let t1 = keyed("b", &[("id", "int4")], vec![0]);
-        assert_eq!(
-            join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]),
-            [(0, 0), (1, 0)]
-        );
-
-        let mut t0 = keyed("a", &[("id", "int4"), ("b_code", "text")], vec![0]);
-        t0.columns[1].collation = Some("C".into());
-        let t1 = keyed("b", &[("code", "text")], vec![0]);
-        assert_eq!(
-            join_order_keys(&[t0, t1], &[vec![(0, 1, 0)]]),
-            [(0, 0), (1, 0)]
-        );
-    }
-
-    #[test]
-    fn a_key_bound_to_a_keyless_table_is_kept() {
-        let t0 = keyed("v", &[("b_id", "int4")], vec![]);
-        let t1 = keyed("b", &[("id", "int4")], vec![0]);
-        assert_eq!(join_order_keys(&[t0, t1], &[vec![(0, 0, 0)]]), [(1, 0)]);
-    }
-
-    #[test]
-    fn a_left_out_key_still_fixes_its_table_for_later_joins() {
-        let t0 = keyed("a", &[("id", "int4"), ("b_id", "int4")], vec![0]);
-        let t1 = keyed("b", &[("id", "int4"), ("c_id", "int4")], vec![0]);
-        let t2 = keyed("c", &[("id", "int4")], vec![0]);
-        assert_eq!(
-            join_order_keys(&[t0, t1, t2], &[vec![(0, 1, 0)], vec![(1, 1, 0)]]),
-            [(0, 0)]
-        );
-    }
-
-    #[test]
-    fn one_binding_from_a_fixed_table_is_enough() {
-        let t0 = keyed("v", &[("b_id", "int4")], vec![]);
-        let t1 = keyed("a", &[("id", "int4"), ("b_id", "int4")], vec![0]);
-        let t2 = keyed("b", &[("id", "int4")], vec![0]);
-        assert_eq!(
-            join_order_keys(
-                &[t0, t1, t2],
-                &[vec![(0, 0, 1)], vec![(0, 0, 0), (1, 1, 0)]]
-            ),
-            [(1, 0)]
-        );
     }
 }
