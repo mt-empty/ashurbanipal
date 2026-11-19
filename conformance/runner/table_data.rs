@@ -650,6 +650,24 @@ async fn table_param_match_is_case_sensitive() {
     .await;
 }
 
+/// spec/protocol.md §5.2: the allow-list holds base tables only, so a seeded
+/// view is an unknown table. The materialized view exists only in the
+/// Postgres seed.
+#[tokio::test]
+async fn a_view_is_not_an_allowed_table() {
+    let srv = TestServer::spawn().await;
+    for view in ["active_users", "order_totals_by_status"] {
+        let resp = srv
+            .client()
+            .get(srv.url("/api/tables/data"))
+            .query(&[("table", view)])
+            .send()
+            .await
+            .unwrap();
+        assert_problem_code(resp, 400, "unknown_table", &format!("table={view}")).await;
+    }
+}
+
 /// The crux of this suite: no unvalidated identifier ever reaches SQL.
 /// Every one of these should be a clean rejection — never a 500, never a
 /// hang, and never actual damage to the schema. Per the status-only error

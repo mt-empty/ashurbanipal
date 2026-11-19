@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 15
     services:
       db:
-        image: postgres:18-alpine
+        image: postgres:18.4-alpine
         env:
           POSTGRES_USER: ashurbanipal
           POSTGRES_PASSWORD: ashurbanipal

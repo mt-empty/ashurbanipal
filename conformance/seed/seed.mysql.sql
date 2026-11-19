@@ -15,6 +15,7 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP DATABASE IF EXISTS `warehouse`;
+DROP VIEW IF EXISTS `active_users`;
 DROP TABLE IF EXISTS `_conformance_meta`;
 DROP TABLE IF EXISTS `typed_samples`;
 DROP TABLE IF EXISTS `page_hits`;
@@ -514,5 +515,8 @@ ANALYZE TABLE `users`, `orders`, `order_extra`, `products`, `events`, `sessions`
   `reviews`, `support_tickets`, `payments`, `audit_log`, `saved_reports`,
   `inventory_locations`, `inventory_counts`, `page_hits`, `typed_samples`;
 
+-- Not a base table: /api/tables and its allow-list (spec §5.2) must leave it out.
+CREATE VIEW `active_users` AS SELECT `id`, `email`, `full_name` FROM `users` WHERE `is_active`;
+
 INSERT INTO `_conformance_meta` (`seed_version`, `dialect`, `checksum`, `generated_at`)
-VALUES ('8', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));
+VALUES ('9', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));

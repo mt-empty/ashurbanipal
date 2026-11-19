@@ -17,6 +17,23 @@ Adding a *new* backend or a *new* row shape may still need a
 `spec/protocol.md` proposal if the property itself, not just the
 mechanism, would have to change (see `docs/design.md`'s governance note).
 
+## Supported engine versions
+
+A version is supported while its own project still maintains it. When a
+version reaches end of life, the range below drops it.
+
+| Backend | Supported | Why not older |
+|---------|-----------|---------------|
+| Postgres | 15 and later | 14 reached end of life in November 2026. Below 14 the adapter is wrong, not just untested: a never-analyzed table has `reltuples = 0`, not `-1`, so §5.3 reports 0 rows for a table that has rows. |
+| MySQL | 8.4 and later | 8.0 reached end of life in April 2026. |
+| MariaDB | 10.11 and later | 10.6, the long-term release before it, reached end of life in July 2026. |
+| SQLite | The library each port's driver bundles; Flask uses the Python build's own | 3.16 and later. The adapter calls pragmas as table-valued functions, which arrived in 3.16. Flask's tests pass on 3.16.0 and fail on 3.15.2; CI does not run this check. |
+
+CI runs Postgres 18, MySQL 8.4 and MariaDB 11.8 on every pull request. On
+each push to `main` it also runs Postgres 15, MariaDB 10.11, MySQL 9 and
+MariaDB 12 (`rust-axum-conformance.yml`, axum only). Every image tag names
+an exact version, so the engine under test changes only with a commit.
+
 ## §5.3 / §5.4.4 — `approx_rows` / `total_approx`
 
 Protocol property: a per-table row-count figure, cheap enough to compute

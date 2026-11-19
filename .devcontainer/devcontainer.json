@@ -8,7 +8,9 @@
         "ghcr.io/mt-empty/devcontainer-features/my-cli-tools:1": {},
         "ghcr.io/mt-empty/devcontainer-features/dotfiles:2": {},
         "ghcr.io/mt-empty/devcontainer-features/shell-history:1": {},
-        "ghcr.io/devcontainers-extra/features/mise:1": {}
+        "ghcr.io/devcontainers-extra/features/mise:1": {},
+        // Runs throwaway engine versions (e.g. an older Postgres) on localhost, as CI's service containers do.
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {}
     },
     "forwardPorts": [5432, 3306, 3307],
     "containerEnv": {
@@ -16,5 +18,7 @@
         "MYSQL_TEST_URL": "mysql://root:ashurbanipal@mysql:3306/ashurbanipal",
         "MARIADB_TEST_URL": "mysql://root:ashurbanipal@mariadb:3306/ashurbanipal"
     },
-    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client"
+    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client sqlite3",
+    // docker-in-docker selects iptables-legacy, which fails on a host with no legacy nat table; dockerd then never starts.
+    "postStartCommand": "sudo update-alternatives --set iptables /usr/sbin/iptables-nft && sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft && (docker info >/dev/null 2>&1 || sudo sh -c 'nohup dockerd >/tmp/dockerd.log 2>&1 &')"
 }

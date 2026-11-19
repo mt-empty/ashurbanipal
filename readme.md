@@ -33,7 +33,7 @@ Ashurbanipal skips the whole chain by not needing a new connection: it runs insi
 - Browse tables: paginated rows, click-to-sort columns, primary/foreign-key and column-comment hints.
 - Filter rows with a subset of SQL `WHERE` syntax (no subqueries, no CTEs, no DML).
 - Join up to four tables with `INNER` or `LEFT` equality joins, built in a form or typed as restricted SQL text; the result is read-only and paged without a total.
-- Works with Postgres, MySQL/MariaDB, and SQLite.
+- Works with Postgres, MySQL/MariaDB, and SQLite ([supported versions](#supported-databases)).
 - Register more than one database, even of different types, and switch between them; browse across schemas where the engine has them.
 - Link sibling instances and see which are reachable.
 - Ships as one static file compiled into your binary; nothing extra to host or deploy.
@@ -51,6 +51,16 @@ Two things back that up:
 
 - **Fail-safe default**: the `enabled` flag defaults to off. Ashurbanipal has no concept of "environment"; where to turn it on is the host's call.
 - **Read-only by construction**: `SELECT` only, no DDL or DML.
+
+## Supported databases
+
+| Database | Supported versions |
+|----------|--------------------|
+| Postgres | 15 and later |
+| MySQL    | 8.4 and later |
+| MariaDB  | 10.11 and later |
+| SQLite   | 3.16 and later |
+
 
 ## Quick usage
 

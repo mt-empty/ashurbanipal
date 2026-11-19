@@ -59,6 +59,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | ID | Requirement | Test |
 |---|---|---|
 | `P5.2-COMMENT-OMITTED` | `comment` omitted when the table has none | `tables::table_comments_are_present_only_where_seeded` |
+| `P5.2-BASE-TABLES-ONLY` | Lists base tables only: a view or materialized view is neither listed nor allowed | `tables::lists_exactly_the_seeded_tables_in_alphabetical_order` (the seeds define views), `table_data::a_view_is_not_an_allowed_table` |
 | `P5.2-STABLE-ORDER` | Stable (name) order | `tables::lists_exactly_the_seeded_tables_in_alphabetical_order` |
 | `P5.2-SCHEMA-PARAM` | `schema` selects the resolved schema (§1) | `schemas::explicit_other_schema_selects_only_its_own_table`, `schemas::explicit_default_schema_matches_the_implicit_default` |
 | `P5.2-SOURCE-PARAM` | `source` selects the resolved source (§1); unrecognized → 400 | `sources::explicit_default_source_matches_the_implicit_default`, `sources::unrecognized_source_values_are_rejected_cleanly_on_every_route` |
