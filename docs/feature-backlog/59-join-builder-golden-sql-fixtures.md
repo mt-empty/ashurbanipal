@@ -1,6 +1,6 @@
 # Golden-SQL fixtures for the join builder
 
-> **Status:** OPEN · **Area:** ports, conformance
+> **Status:** DONE · **Area:** ports, conformance · **Ref:** `spec/fixtures/join-builder-tests.json`, run per engine in all five ports; per-engine `filter-builder-tests.json` still open
 
 **Ask:** add `spec/fixtures/join-builder-tests.json`, the join counterpart
 of `filter-builder-tests.json`. Each case gives a join spec plus the
