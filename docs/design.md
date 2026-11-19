@@ -410,9 +410,9 @@ can't:
    - **not checked** — HTTP-layer framing beyond headers the spec
      actually requires (e.g. `Date`, `Server`).
 
-   `spec/fixtures/parser-tests.json` and `filter-builder-tests.json` are
-   the first instance of this pattern, scoped to the filter DSL; the
-   conformance kit generalizes it to every route.
+   `spec/fixtures/parser-tests.json`, `filter-builder-tests.json` and
+   `join-builder-tests.json` are this pattern scoped to the filter DSL and
+   the join route; the conformance kit generalizes it to every route.
 
 Even all three together don't cover everything a port must get right —
 notably, none of them can prove the *absence* of a SQL-injection vector a
