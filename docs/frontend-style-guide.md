@@ -62,7 +62,7 @@ src/
   `populateSelect`, `flashIcon`). The client state is behind one
   `./state.js` entry point re-exporting `store.ts` (the `state` object, its
   localStorage persistence, the named scope transitions, and the
-  new-rows-since-refresh bookkeeping — `rowDiffKey` and the last-payload
+  changed-since-refresh bookkeeping — `rowDiffKey` and the last-payload
   cache, delegating the actual diff to the pure `lib/row-diff.ts`) and
   `url.ts` (URL params ⇄ state, read side — two readers that differ on
   purpose, see the header comment there). `store.ts` exposes named

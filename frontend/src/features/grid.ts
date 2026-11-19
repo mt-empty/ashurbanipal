@@ -21,7 +21,7 @@ import {
   warnBadJsonCell,
 } from "../lib/format.js";
 import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
-import { rowKey } from "../lib/row-diff.js";
+import { type RowChanges, rowKey } from "../lib/row-diff.js";
 import { eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
 import { columnMinWidth } from "./column-widths.js";
 import { applyFilter, commonValueSource, commonValuesButton } from "./filter-ui.js";
@@ -164,7 +164,7 @@ interface CellContext {
 
 // A real <button> as the click target so it's keyboard-focusable and
 // Enter/Space-activatable, matching the copy button one element over.
-function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTableCellElement {
+function buildCell(col: Column, row: Row, { hidden, meta }: CellContext, changed = false): HTMLTableCellElement {
   const raw = row[col.name];
   const isNull = raw == null;
   // A null cell has no copy/expand affordance to clone, so it builds a bare
@@ -174,6 +174,15 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext): HTMLTa
     : ((cellTemplate.content.cloneNode(true) as DocumentFragment).firstElementChild as HTMLTableCellElement);
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
+  // Showing a display:none cell restarts its CSS animations, so a hidden cell
+  // never gets the tint and a shown one drops it once faded (setHidden drops
+  // it on hide: hiding cancels the fade without an animationend).
+  else if (changed) {
+    td.classList.add("cell-changed");
+    td.addEventListener("animationend", (e) => {
+      if (e.target === td) td.classList.remove("cell-changed");
+    });
+  }
   if (isNull) {
     const span = el("span", "cell-text cell-null", "∅");
     span.title = "null";
@@ -249,6 +258,7 @@ function setHidden(next: readonly string[]): void {
     if (before.has(name) === after.has(name)) continue;
     for (const cell of tableEl.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
       cell.classList.toggle("col-hidden", after.has(name));
+      if (after.has(name)) cell.classList.remove("cell-changed");
     }
   }
   countColumns();
@@ -423,10 +433,10 @@ function buildRowActionCell(columns: Column[], rows: Row[], index: number): HTML
   return td;
 }
 
-// newRowKeys (rowKey values absent from the previous same-scope fetch,
-// passed only on an explicit refresh) tint those rows via .row-new;
-// pkNames is the matching PK column list, computed once by the caller.
-export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: string[] = []): void {
+// changes (passed only on a refresh or auto-refresh tick) tints rows absent
+// from the previous same-scope fetch via .row-new and cells whose value
+// changed via .cell-changed.
+export function renderRows(data: ViewData, { newRowKeys, changedCells, pkNames }: RowChanges = { pkNames: [] }): void {
   const { hidden, shown } = counts;
   if (data.rows.length === 0) {
     // colSpan must match the *visible* column count, not the fetched one —
@@ -439,10 +449,12 @@ export function renderRows(data: ViewData, newRowKeys?: Set<string>, pkNames: st
   tbody.replaceChildren(
     ...data.rows.map((row, index) => {
       const tr = el("tr");
-      if (newRowKeys?.has(rowKey(pkNames, row))) tr.classList.add("row-new");
+      const key = pkNames.length ? rowKey(pkNames, row) : "";
+      if (newRowKeys?.has(key)) tr.classList.add("row-new");
+      const changed = changedCells?.get(key);
       tr.appendChild(buildRowActionCell(data.columns, data.rows, index));
       for (const col of data.columns) {
-        tr.appendChild(buildCell(col, row, ctx));
+        tr.appendChild(buildCell(col, row, ctx, changed?.has(col.name)));
       }
       return tr;
     }),

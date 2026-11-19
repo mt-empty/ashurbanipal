@@ -2,7 +2,7 @@ import { tryParseFilterDsl } from "../lib/filter-dsl.js";
 import { countsNeverEstimated } from "../lib/format.js";
 import { dropScopeSchema } from "../lib/join-def.js";
 import { effectiveName, parseJoin, printJoin } from "../lib/join-dsl.js";
-import { collectNewRowKeys } from "../lib/row-diff.js";
+import { collectRowChanges, type RowChanges } from "../lib/row-diff.js";
 import { isScopeKey, scopeKey, visitKey } from "../lib/scope-key.js";
 import { near, schemaRef, tableIn } from "../lib/table-ref.js";
 
@@ -681,7 +681,7 @@ export function switchSchema(name: string): void {
   clearFilter();
 }
 
-// ---- new-rows-since-refresh bookkeeping ----
+// ---- changed-since-refresh bookkeeping ----
 // rowDiffKey identifies "the same view" between two fetches: a sort/filter/page/
 // scope change makes every row look new, so the highlight only fires when this
 // is unchanged from the fetch being diffed against. The last payload and its
@@ -708,9 +708,9 @@ let lastRowDiffKey: string | null = null;
 
 // Advances the lastPayload/lastRowDiffKey bookkeeping, since it only ever happens
 // alongside this diff.
-export function diffNewRows(data: ViewData, highlightNew: boolean): { newRowKeys?: Set<string>; pkNames: string[] } {
+export function diffRows(data: ViewData, highlightNew: boolean): RowChanges {
   const nowScope = rowDiffKey();
-  const result = collectNewRowKeys(lastPayload, data, {
+  const result = collectRowChanges(lastPayload, data, {
     highlightNew,
     sameScope: lastRowDiffKey === nowScope,
   });

@@ -168,6 +168,23 @@ test("30 minutes without input turns it off and says so", async ({ page }) => {
   expect(mock.hits).toBe(before);
 });
 
+test("a tick tints a cell whose value changed and shows the changed chip", async ({ page }) => {
+  // Static tint: the class goes when its 3 s fade ends, which waitForIdle does not wait out.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const mock = await setup(page);
+  await choose(page, "5 s");
+  mock.body = payload([
+    [1, "a"],
+    [2, "b2"],
+  ]);
+  await tick(page, mock);
+
+  await expect(page.locator("#tbody td.cell-changed")).toHaveCount(1);
+  await expect(page.locator('#tbody tr:nth-child(2) td[data-col="label"]')).toHaveClass(/cell-changed/);
+  await expect(page.locator("#row-changed-chip")).toHaveText("1 changed");
+  await expect(page.locator("#status")).toHaveText("1 changed");
+});
+
 test("a tick tints new rows, shows the +N chip and the updated time", async ({ page }) => {
   const mock = await setup(page);
   await choose(page, "5 s");

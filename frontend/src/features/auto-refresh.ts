@@ -20,7 +20,7 @@ const STEPS: ReadonlyArray<{ ms: number; label: string }> = [
 const MAX_FAILURES = 5;
 const IDLE_MS = 30 * 60_000;
 const IDLE_NOTICE = "Auto-refresh turned off after 30 minutes without activity.";
-// Matches the .row-new wash the chip accompanies.
+// Matches the .row-new and .cell-changed fades the chips accompany.
 const CHIP_MS = 3000;
 
 let intervalMs = 0;
@@ -142,15 +142,20 @@ export function noteTickFailed(e: unknown): void {
   );
 }
 
-// Also the manual refresh's count; 0 hides it, so a chip never outlives the view it described.
-export function setNewChip(count: number): void {
-  const chip = $("row-new-chip");
+// Also the manual refresh's counts; a 0 count or empty text hides that chip,
+// so a chip never outlives the view it described.
+export function setRowChangeChips(newCount: number, changedText: string): void {
+  const newChip = $("row-new-chip");
+  const changedChip = $("row-changed-chip");
   clearTimeout(chipTimer);
-  chip.hidden = count === 0;
-  if (count === 0) return;
-  chip.textContent = `+${count} new`;
+  newChip.hidden = newCount === 0;
+  newChip.textContent = newCount ? `+${newCount} new` : "";
+  changedChip.hidden = !changedText;
+  changedChip.textContent = changedText;
+  if (newChip.hidden && changedChip.hidden) return;
   chipTimer = setTimeout(() => {
-    chip.hidden = true;
+    newChip.hidden = true;
+    changedChip.hidden = true;
   }, CHIP_MS);
 }
 

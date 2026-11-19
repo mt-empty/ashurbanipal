@@ -148,17 +148,22 @@ should block on.
   the table and a spinner on the table's entry in the list cover the rest. `#error`
   covers failure. *(Derives from: visibility of system status — heuristic
   #1, given full weight above.)*
-- **R10 — The `refresh` button and its new-row tint are the sanctioned
-  "what changed" affordance.** A user-clicked re-fetch of the current view;
-  rows absent from the previous same-scope response briefly wash
-  (`--row-new-bg`, faded/static per `prefers-reduced-motion`). Constraints:
+- **R10 — The `refresh` button and its new-row and changed-cell tints are
+  the sanctioned "what changed" affordance.** A user-clicked re-fetch of the
+  current view; rows absent from the previous same-scope response briefly
+  wash (`--row-new-bg`), and so does each shown cell whose value differs
+  from the same row's previous value (`--cell-changed-bg`), both
+  faded/static per `prefers-reduced-motion`. A new row gets only the row
+  wash, and a cell in a hidden column gets no tint. The chips count rows,
+  not cells, hidden changes included; when every changed column is hidden
+  the chip says so ("1 changed in a hidden column"). Constraints:
   it runs on a user click or on the opt-in auto-refresh interval (story 38);
   row identity is the primary key, so a PK-less table gets no tint rather
   than a guessed one; the previous row set lives in memory only and is
   never persisted (R6); a join view has no primary key to identify a row by,
   so it gets no tint either; and the fetch itself reports through the normal
-  `fetchViewData` chrome, with the new-row count also announced via
-  `#status` (R9, no carve-out). Rows fetched ahead of a click (a chip the
+  `fetchViewData` chrome, with the new-row and changed-row counts also
+  announced via `#status` (R9, no carve-out). Rows fetched ahead of a click (a chip the
   pointer rests on, the next page) are held only briefly and dropped by
   Refresh and by every auto-refresh tick, so they never stand in for a
   fresher answer. *(Derives from: recognition rather than recall,
@@ -213,8 +218,8 @@ should block on.
   `prefers-reduced-motion: reduce` every animation becomes static, stepped
   or instant while its state stays visible: the loading bar stripes instead
   of sweeping, the auto-refresh countdown drains in steps, spinners and the
-  refresh icon stand still, the new-row tint
-  (R10) is a flat colour, a re-render swaps without its cross-fade, and a
+  refresh icon stand still, the new-row and changed-cell tints
+  (R10) are a flat colour, a re-render swaps without its cross-fade, and a
   view switch jumps to the top instead of scrolling there smoothly.
   *(Derives from: aesthetic and minimalist design, visibility of system
   status.)*
