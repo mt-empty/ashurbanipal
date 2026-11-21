@@ -6,6 +6,7 @@ on:
     paths:
       - "implementations/flask-python/**"
       - "spec/**"
+      - "!spec/**/*.md"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".github/workflows/flask-conformance.yml"
@@ -15,6 +16,7 @@ on:
     paths:
       - "implementations/flask-python/**"
       - "spec/**"
+      - "!spec/**/*.md"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".github/workflows/flask-conformance.yml"

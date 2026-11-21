@@ -6,6 +6,7 @@ on:
     paths:
       - "implementations/spring-boot-starter/**"
       - "spec/**"
+      - "!spec/**/*.md"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".github/workflows/spring-boot-conformance.yml"
@@ -15,6 +16,7 @@ on:
     paths:
       - "implementations/spring-boot-starter/**"
       - "spec/**"
+      - "!spec/**/*.md"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".github/workflows/spring-boot-conformance.yml"
