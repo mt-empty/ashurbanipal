@@ -37,7 +37,7 @@ cross-engine consistency guarantee. (Answered 2026-11-02 by story 47: the
 server now reports `class` and the engine's full `type` spelling. Since
 2026-11-04 `class` is sent for every column and covers `json`, `float`,
 `array` and `other`; the research behind that shape is in story 23 §4.) This
-supersedes the open question in
+settles the question in
 `docs/feature-backlog/23-inline-column-type-nullable-default-enum.md` §4
 ("Raw engine type string, or a normalised label?") for rendering purposes
 — fold any revisit into item 23.
@@ -167,7 +167,7 @@ note) are already cross-engine. The INSERT-copy path was generalised;
   view. Its §4 raw-vs-normalised question is settled here for rendering
   (ship the raw string, bucket it in the frontend); if it adds a popover
   it reuses `columnTypeClass` and the `<code>`-wrapped raw type.
-- `docs/feature-backlog/30-show-ddl-source-viewer.md:64` — normalised
+- `docs/feature-backlog/30-show-ddl-source-viewer.md` §3 — normalised
   type formatting via Postgres `format_type()`; a different surface, same
   raw-vs-normalised tension.
 

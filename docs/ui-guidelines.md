@@ -47,7 +47,7 @@ these on purpose rather than by neglect:
    never offer an action the backend would reject.
 6. **Recognition rather than recall** — surface state instead of making the
    user remember it (row counts always visible, active sort shown via
-   ▲/▼, remembered table/sort via `localStorage`). Full weight.
+   ↑/↓, remembered table/sort via `localStorage`). Full weight.
 7. **Flexibility and efficiency of use** — power-user accelerators
    (keyboard shortcuts, bulk actions). Deliberately low weight for v1 — this
    is a browse-and-inspect tool, not a daily-driver editor. Revisit only if

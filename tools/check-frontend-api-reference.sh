@@ -10,8 +10,8 @@ set -eu
 #   - frontend/src/lib/filter-tokens.ts — FILTER_OPERATORS (filter suggestions
 #     and the synthetic demo backend's op check)
 # spec/openapi.yaml is the source of truth for the operator set and the
-# condition cap. max_json_bytes has no normative home (spec/protocol.md
-# §5.4.2 describes only the Rust port's bound), so it is checked only for
+# condition cap. max_json_bytes has no normative number (spec/protocol.md
+# §5.4.2 only suggests 8192 bytes), so it is checked only for
 # internal consistency between api-reference.ts's limits object and its
 # own prose. Verify-only: the restatements are few and the message points
 # at the exact mismatch.

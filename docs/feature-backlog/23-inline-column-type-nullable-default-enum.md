@@ -1,80 +1,74 @@
 # Inline column type, nullability, default, and enum values
 
-> **Status:** PARTIAL · **Area:** spec, frontend · **Ref:** raw column type now renders inline (via story 32); type also in the record view; `nullable`, `default`, `enum_values` fields remain, header popover parked
+> **Status:** PARTIAL · **Area:** spec, ports, conformance, frontend · **Ref:** raw type shipped; `nullable`, `default` and `enum_values` open
 
 Read-only — catalog metadata only.
 
 ## 1. The ask
 
-Column headers today surface the comment (as a `title` tooltip) and a
-PK/FK icon (`docs/design.md` §3.1) — nothing about the column's shape. A
-dev coding against a table wants to see, without leaving the grid:
+A dev coding against a table wants to see, without leaving the grid:
 
-- data type
 - `NOT NULL` vs nullable
 - default expression
-- for enum-typed / `CHECK (col IN (…))` columns, the allowed values
+- for enum-typed columns, the allowed values
 
-Surfaced in the column header popover and repeated in the record view.
+The column's type already shows: `type` is on the wire (`spec/protocol.md`
+§5.4.1), in the grid header and as a chip beside each record-view field
+name (`typeChip` in `frontend/src/features/column-parts.ts`). The new
+facts belong beside that chip.
 
 ## 2. Per-backend source
 
-- **Postgres** — `information_schema.columns` for type / nullability /
-  default; enum values via `pg_type` + `pg_enum`. `CHECK (col IN (…))`
-  literal extraction is out of scope for v1.
-- **MySQL/MariaDB** — `information_schema.columns`; `ENUM`/`SET` members are
-  already in `COLUMN_TYPE` text.
-- **SQLite** — `pragma_table_info` gives type affinity, `notnull`,
-  `dflt_value`. No enum concept; `CHECK` parsing out of scope.
+- **Postgres** — the §5.4.1 lookup already joins
+  `information_schema.columns` to `pg_attribute`
+  (`implementations/rust/core/src/db/postgres.rs`), which has nullability
+  and the default. Enum labels come from `pg_enum` for the type that
+  §5.4.1's `enum_type` names, so a domain over an enum works too. Postgres
+  needs `enum_values` most: its `type` shows only the enum's name.
+- **MySQL/MariaDB** — `information_schema.columns` (`is_nullable`,
+  `column_default`). `ENUM`/`SET` members are already visible in `type`,
+  which sends `COLUMN_TYPE` verbatim (`enum('a','b')`). MariaDB quotes
+  string defaults in `column_default` and MySQL does not; record how the
+  two are reconciled.
+- **SQLite** — `pragma_table_info` gives `notnull` and `dflt_value`. No enum
+  concept.
 
-Divergence in what "type" and "enum" mean across the three belongs in
+`CHECK (col IN (…))` lists are out of scope; §5.10's `check[].expression`
+already shows their text in the structure dialog. Differences in what
+"default" and "enum" mean across engines belong in
 `docs/adapter-decisions.md`.
 
 ## 3. Touchpoints
 
-- `spec/protocol.md` — `nullable`, `default` and `enum_values?` per
-  column, either on §5.4.1's `columns[]` or on the lazy §5.10 structure
-  route (see §4). `type` is already in §5.4.1.
-- Frontend — header popover + record view rendering; it reuses the §5.10
+- `spec/protocol.md` + `spec/openapi.yaml` — `nullable`, `default` and
+  `enum_values` per column, on §5.4.1's `columns[]` or on the lazy §5.10
+  structure route (see §5).
+- All five ports — the catalog queries that fill them.
+- Frontend — render beside the record view's type chip; reuse the §5.10
   fetch if the fields go there.
 - Conformance — schema-test assertions for the new fields across engines.
 
-## 4. Open questions
+## 4. Decided
 
-- Raw engine type string, or a normalised label? Raw is less work and more
-  honest; normalised reads better but reintroduces a mapping table. For
-  *rendering* purposes this was settled by
-  `docs/feature-backlog/32-cross-engine-column-type-rendering.md` (ship the
-  raw string, bucket it tolerantly in the frontend); if this story adds a
-  popover, the same `<code>`-wrapped raw type and the same `columnTypeClass`
-  helper apply.
-- **Shape of the new fields (decided 2026-11-04).** JDBC
-  (`getColumnTypeName` beside `getColumnType`), Metabase (`base_type`,
-  `effective_type`, `semantic_type`), Arrow (the logical type in field
-  metadata over the physical type) and Frictionless Table Schema (`type`
-  plus `format`) all send the engine's native name beside a small closed
-  vocabulary. `type` + `class` is that pair, and `class` is now sent for
-  every column (story 47). `nullable`, `default` and `enum_values` therefore
-  arrive as separate named optional fields, each meaning what its name says.
-  A traits bag (`{sortable, generated, ...}`) was rejected, and so was one
-  field whose meaning depends on another, such as a generic "compare token":
-  each trait would still cost five ports and conformance, so a bag only hides
-  the growth. `collation` was the first such field.
-- §5.4.1 or §5.10? Story 26 put indexes and constraints on the lazy §5.10
-  route so `/tables/data` stays cheap on every page. These fields are the
-  same kind of per-table data, so §5.10 is the likely home unless the grid
-  needs them before the popover opens.
-- Does the enum list feed the filter's value autocomplete (currently
-  column-name only)? Natural follow-on, separate story.
+- **Raw type, not a normalised label.** §5.4.1 sends the engine's full
+  type spelling as `type` and a closed vocabulary as `class` (story 47).
+  A new popover or chip renders the same `<code>`-wrapped raw type.
+- **Shape of the new fields.** `nullable`, `default` and `enum_values`
+  arrive as separate optional fields, each meaning what its name says, not
+  as a traits bag: a bag still costs five ports and conformance per trait.
+  Prior art pairs a native type name with a small closed vocabulary, as
+  `type` + `class` do: JDBC, Metabase, Arrow, Frictionless Table Schema.
 
-## 5. Partially shipped
+## 5. Open questions
 
-The raw engine type string renders in the grid header (landed with
-`docs/feature-backlog/32-cross-engine-column-type-rendering.md`) and, since
-2026-11-02, as a type chip under each record-view field name, beside the
-key icon and comment. `type` was already on the wire (`spec/protocol.md`
-§5.4.1). Still open here: the `nullable`, `default`, and `enum_values`
-fields on the §5.4.1 column shape, the per-backend catalog queries that
-populate them, and the conformance schema-test assertions. The header
-popover was drawn (design canvas board AT) and parked by the user on
-2026-11-02.
+- §5.4.1 or §5.10? [[26-index-and-constraint-metadata-panel]] put indexes and
+  constraints on the lazy §5.10 route so `/tables/data` stays cheap on
+  every page. These fields are the same kind of per-table data, so §5.10
+  is the likely home unless the grid needs them before the user asks.
+- Where else do they show? The header popover was drawn (design canvas
+  board AT) and parked by the user on 2026-11-02. The structure dialog
+  (`frontend/src/features/structure.ts`) has no column list today.
+- Should `enum_values` feed the filter autocomplete? It already suggests a
+  column's common values after an operator
+  (`frontend/src/features/filter-ui.ts`); an enum would give the full
+  list. Separate story.

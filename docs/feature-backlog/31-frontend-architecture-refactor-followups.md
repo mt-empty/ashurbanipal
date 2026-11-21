@@ -1,151 +1,59 @@
 # Frontend architecture refactor — deferred follow-ups
 
-> **Status:** PARTIAL · **Area:** frontend · **Ref:** items 2, 3, 6, 7, 9 done; 5 moved to story 43; 1, 4, 8 open
+> **Status:** OPEN · **Area:** frontend
 
-The nine-phase `frontend/src/` refactor (commits `47d10a7`..`7d86976`)
-landed the import-cycle break, the Biome adoption, the `state.ts` split,
-the drift guard, the DSL-parser unit tests, and the guidelines pass. This
-doc holds the items that were consciously left out of that series — either
-because they are their own kind of change (a `spec/` governance decision,
-a design split, a directory move) or because a phase's premise turned out
-narrower than planned. Each is independent.
-
-The two consolidated review documents this refactor executed against were
-scratch notes and have been removed; their action list is fully accounted for
-(done, or deferred here with a reason).
-
----
+Frontend clean-ups left out of the `frontend/src/` refactor. Each item is
+independent. Item IDs stay stable, so gaps in the numbering are expected.
 
 ## 1. `types.ts` ↔ `spec/openapi.yaml`: full wire-type check, or codegen
 
-Phase 5 shipped `tools/check-frontend-api-reference.sh`, which holds the filter
-**operator list** and **condition cap** to `spec/openapi.yaml` (and, in
-passing, `FilterOp` to the OpenAPI `op` enum). The originally-planned
-`check-frontend-wire-types.sh` — asserting the `Column` / `Row` / `TableData`
-/ `FilterCondition` / `CommonValue` / `Sibling` field names and requiredness
-against the OpenAPI component schemas — was dropped: regex-comparing TS
-interfaces (`Column` is now a three-member discriminated union) to YAML
-schemas produces false positives and gets disabled within a month.
+`tools/check-frontend-api-reference.sh` holds only the filter operator
+list and the condition cap to `spec/openapi.yaml`. Nothing checks the
+other wire types in `frontend/src/core/types.ts` (`Column`, `Row`,
+`ViewData`, `StructureResponse`, …) against the OpenAPI schemas. A regex
+compare is not worth it: `Column` is a three-member union, and such a
+check gives false positives.
 
-The real fix is **codegen**: generate `types.ts` from `openapi.yaml` at build
-time, or write the check on a real OpenAPI + TS parser rather than a grep.
-`api()` still casts `resp.json()` with no runtime validation — the one
-normative wire surface with no guard at all.
+`api()` in `frontend/src/core/api.ts` returns `resp.json()` cast to `T`
+with no runtime check. The schemathesis run (`conformance:schema-test`)
+holds the servers to the schemas, but the frontend's side is unguarded.
 
-## 2. `row-diff.ts` unit tests — DONE
-
-`scopeKey()` and the last-payload/last-scope bookkeeping moved into
-`store.ts`; `diffNewRows()` there is now a thin wrapper that delegates the
-scope-gated PK diff to a pure `collectNewRowKeys(prev, next, {highlightNew,
-sameScope})` in `frontend/src/lib/row-diff.ts`. `row-diff.ts` moved
-`core/` → `lib/` and imports only `core/types.ts` (type-only) — a true leaf,
-closing item #7's caveat. `frontend/test/row-diff.test.ts` covers `rowKey`
-plus the diff's gates (highlight off, first fetch, scope changed, no-PK
-table, edited vs. new row, composite PK). The `../core/state.js` barrel
-surface is unchanged (the moved names re-export via `store.ts`); only
-`grid.ts`'s `rowKey` import repointed to `lib/row-diff.ts`.
-
-## 3. `json-tree.ts` unit tests — DONE
-
-`frontend/src/lib/json-tree.ts` split into a pure `foldJson(value):
-JsonNode` (a `scalar`/`empty`/`container` shape tree) and a thin
-`renderNode` walk; `renderJsonTree`'s signature and emitted DOM are
-byte-identical (verified by rendering both versions under a throwaway DOM
-shim and diffing, since `inspection-affordances.spec.ts` only asserts
-`.json-key` text). Today's deliberately inconsistent comma emission (bare
-text node on scalar lines, inside `.json-punct` on empty/close) is
-preserved. `frontend/test/json-tree.test.ts` covers the fold: scalar
-kind/text, UUID tagging, string escaping, empty `{}`/`[]`, entry order and
-raw keys, nesting, and the inherited large-integer precision loss.
+Fix: generate `types.ts` from `openapi.yaml` at build time, or build the
+check on a real OpenAPI and TypeScript parser.
 
 ## 4. `tsconfig` `noUncheckedIndexedAccess`
 
-Its own PR. Phase 4's `Column` discriminated union and the index-access guards
-did some of the same nullability work incidentally, but turning the flag on
-will surface real sites that rely on the current (flag-off) default — the cell
-and row builders in `table-chips.ts` / `filter-ui.ts` / `grid.ts`, and the demo
-fixtures. Land it after 1–3 so the type surface is settled.
+Its own PR. With the flag on, `tsc` reports 176 errors today, most in the
+join parser and builder (`lib/join-dsl.ts`, `features/join-sql.ts`,
+`lib/join-tokens.ts`, `lib/join-draft.ts`) and in
+`demo/synthetic/serve.ts`. Land it after item 1 if codegen changes the
+type surface.
 
-## 5. A normative home for `max_json_bytes` — moved to story 43
+## 8. Replace `tools/check-frontend-cycles.sh`
 
-Story 43 replaces the per-parameter byte bounds with one query-string
-budget that every port MUST enforce; do this item there. Original notes:
+It is a hand-written Tarjan SCC over a regex-parsed import graph, run as a
+`node -e '…'` string inside a `sh` script. It also checks that app code
+never imports `src/demo/`. The regex is fragile, and an apostrophe in the
+embedded JavaScript breaks the shell quoting.
 
+Biome 2.6, the frontend's linter (`frontend/package.json`), now has
+`suspicious/noImportCycles`, which skips `import type` edges by default
+(`ignoreTypes`). Check first whether it fits. Other options: `madge
+--circular` or `dpdm`. Any replacement must keep all three current
+properties:
 
-`spec/protocol.md` §5.4.2 describes only the Rust port's 8192-byte filter-AST
-bound, as an example — not a cross-port MUST — and `spec/openapi.yaml` puts no
-byte cap on the `filter` param. So Phase 5's guard checks `api-reference.ts`'s
-`max_json_bytes` only for *internal* consistency (the `limits` object vs its
-own prose). Giving it a real home means a `spec/` change: a MUST in
-`protocol.md` and a `maxLength` (or documented bound) in `openapi.yaml`, which
-every port then has to honour. If done, extend
-`check-frontend-api-reference.sh` to assert against the spec value instead of
-the self-check.
+- `import type` edges excluded;
+- re-export (`export … from`) edges included;
+- the `src/` → `src/demo/` boundary check (Biome's `noRestrictedImports`
+  may cover it, or keep it as a small script).
 
-## 6. `demo-shim.ts` re-implementing the wire contract — DONE
+## 10. The JSON tree rounds large integers
 
-Landed 2026-10-30 (story 16): `demo-shim.ts` is gone. The live demo runs
-node-express's own `PostgresSource` on PGlite, and its route layer passes
-the full conformance kit in CI (`demo.yml`). The synthetic page replays a
-build-time snapshot of that backend's answers and keeps only its filter,
-sort and paging in JS (`frontend/src/demo/synthetic/serve.ts`). The
-original note follows.
-
-
-`frontend/src/demo/demo-shim.ts` re-implements schema resolution, all ten
-filter operators, `LIKE`→regex, typed sort, and pagination — a slice of
-`spec/protocol.md` that conformance CI never exercises, shipped on the public
-GitHub Pages demo. Phase 7 relocated it under `src/demo/` and fenced it off
-(the `check-frontend-cycles.sh` boundary rule stops app code importing it),
-but whether a second, unverified implementation of the wire contract should
-exist at all is a `PORTING.md` governance question for the port owners, not a
-frontend change. Options if it stays: run the conformance filter/sort table
-against `demo-shim` too, or thin it to a canned-response fixture.
-
-## 7. Restructure `frontend/src/` to a standard layout — DONE
-
-Landed: `frontend/src/` is grouped into four role-based layers —
-`bootstrap/` (main, controller, reload, table-focus), `core/` (api, dom,
-types, state, store, url, row-diff), `features/` (grid, filter-ui, sidebar,
-nav, record-view, siblings, api-reference, theme; the sidebar's resize and
-bounds modules went with the chip redesign, #147, and sidebar and nav were
-later renamed table-chips, scope-select and view-history), and
-`lib/` (filter-dsl, json-tree, format). `demo/` is unchanged. Role-based was
-chosen over feature-based so the shared renderers (`lib/format.ts`,
-`lib/json-tree.ts`) have one home rather than a `shared/` catch-all.
-`row-diff.ts` has since moved to `lib/` as a true leaf (item 2). No CI rule
-enforces layer direction yet; the cycle + demo-boundary checks are unchanged.
-
-## 8. Revisit `tools/check-frontend-cycles.sh`
-
-It is a hand-rolled Tarjan SCC over a regex-parsed import graph, embedded as a
-`node -e` string inside a `sh` script, now also carrying the `src/demo/`
-import-boundary check. It works and is dependency-free, but the regex has
-already needed two fixes (re-export edges, `362328a`; `../` and nested paths,
-Phase 7), and the single-quote `node -e '...'` embedding is fragile — an
-apostrophe in a comment breaks the shell parse (hit twice during this
-refactor).
-
-Replacements to weigh: `madge --circular`, `dpdm`, `eslint-plugin-import`'s
-`import/no-cycle` (if ESLint is ever added alongside Biome), or Biome's own
-cycle rule — check first whether Biome 2 (the frontend already runs it)
-now has one that meets the properties below. Any replacement must keep all three current
-properties: `import type` edges excluded, re-export (`export … from`) edges
-included, and the `src/` → `src/demo/` boundary assertion.
-
-## 9. Spring / Gradle test flake under `mise run check` — DONE
-
-`spring:check` was a `depends = ["spring:build", "spring:test"]` fan-out, and
-mise runs `depends` in parallel — two Gradle clients (`./gradlew build`,
-`./gradlew test`) racing on one daemon and one Kotlin incremental-compile
-cache, which corrupted under load ("Could not close incremental caches …
-`class-fq-name-to-source.tab`", "Detected multiple Kotlin daemon sessions")
-and cascaded into spurious `SQLSyntaxErrorException` / `EOFException` in the
-MySQL/MariaDB tests.
-
-`spring:check` now runs a single `./gradlew build` (compile + assemble +
-test in one invocation), matching what `.github/workflows/_spring-build-test.yml`
-already does — no parallel Gradle clients, so nothing to corrupt the cache.
-`spring:build` was narrowed to `./gradlew assemble` (compile + jar only) and
-`spring:test` kept as-is, both still callable individually; they are just no
-longer run concurrently.
+Both JSON trees build from `JSON.parse(raw)`: the record view
+(`frontend/src/features/record-view.ts`) and the cell popover
+(`showCellPop` in `features/grid.ts`). So an integer above 2^53 shows
+rounded: `9007199254740993` displays as `9007199254740992`
+(`frontend/test/json-tree.test.ts`). Copy already keeps every digit
+(`reindentJson`, `lib/json-text.ts`). Fix it once: a small
+source-preserving parser in `frontend/src/lib/` that keeps each number's
+text and feeds `foldJson` for both callers.

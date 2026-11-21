@@ -219,12 +219,8 @@ then 400 on click" exist only in port tests. The UI has never been tested
 against a table it lists but can't read. *Size:* M (a second, limited role
 in the seed and one e2e spec on MySQL).
 
-**S9. Two SQLite seeds exist and nothing compares them.** `tools/seed-gen`
-already emits a reduced SQLite dialect (`tools/seed-gen/src/main.rs:15-17`,
-`generate_sqlite` at line 1651) for `mise run rust:demo-sqlite`. The
-conformance kit uses the hand-written `seed.sqlite.sql`. Story 35's first
-option ("teach seed-gen to emit MySQL and SQLite") is half built already.
-Link this into story 35 when it is picked up. *Size:* folded into story 35.
+**S9. Two SQLite seeds exist and nothing compares them.** Folded into
+[[35-conformance-seed-dialect-parity]], which owns it.
 
 ### C — Conformance runs
 
@@ -241,7 +237,7 @@ those engines. *Size:* S to M.
 **C2. Schemathesis runs on Postgres only.** `_conformance-schema.yml:66,86`
 starts Postgres and applies `seed.sql`, for every port. No port's MySQL or
 SQLite responses are fuzzed against `spec/openapi.yaml`, and neither is the
-live demo backend. Story 43 owns the Node flakiness in this job. *Size:* M.
+live demo backend. *Size:* M.
 
 **C3. Two-source and labelled-sibling runs are Postgres only.** Every
 port's `two-source-conformance` job uses the Postgres default. A source on

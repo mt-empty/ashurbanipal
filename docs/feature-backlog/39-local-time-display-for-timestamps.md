@@ -19,29 +19,30 @@ browser's time zone.
 - **Tooltip shows local and UTC, in grid and record dialog. No visible line.**
 - **JSON and JSONB values get the same tooltip** for strict RFC 3339
   date-time strings (§5.5).
-- **Spec wording gets fixed, not the behavior.** See §4.
 
 ## 3. What exists today
 
-- `frontend/src/lib/format.ts:28-60` — `date`, `timestamp`, `timestamptz`,
-  `datetime` and the two long spellings all map to one `"date"` class.
-  The comment at `:28-30` says nothing renders them differently. Only
-  some of these values can carry a local time, so this needs a split. The
-  server's `class: temporal` is coarser still (it covers `date` and both
-  timestamp spellings), so the native `type` string stays the input here.
-- `frontend/src/lib/format.ts:97-106` — `formatCellValue` is the one place
-  a date cell is built. Grid (`grid.ts:173`) and record view
-  (`record-view.ts:32`) both call it. It prints the raw text in a
-  `<time>` element.
-- `format.ts:100-101` — the `<time>` element has no `datetime` attribute,
-  because the raw cast is not valid ISO. Once a value parses, we can set
-  one.
-- `frontend/src/lib/json-tree.ts:29-49`, `:130-134` — JSON and JSONB cells
-  do not use `formatCellValue`. `foldJson` turns each string into a
-  scalar (plain or UUID) and `scalarSpan` builds its `<span>`. The text is
-  the quoted JSON string, so the raw string is not kept on the node today.
-- `grid.ts:176`, `grid.ts:180` — copy and "filter by this value" use the
-  **raw** string. Tier 1 leaves both alone.
+- `frontend/src/lib/format.ts` `TYPE_ALIASES` — `date`, `timestamp`,
+  `timestamptz`, `datetime` and the two long spellings all map to one
+  `"date"` bucket; the comment above `DisplayBucket` says nothing renders
+  them differently. Only some of these values can carry a local time, so
+  this needs a split. `columnTypeClass` falls back to the server's
+  `class` when the type name is unknown (for example a domain), and
+  `temporal` covers `date` and both timestamp spellings. For such a
+  column, the offset test in §5.1 alone decides.
+- `format.ts` `formatCellValue` is the one place a date cell is built.
+  The grid (`buildCell` in `grid.ts`) and the record view (`fieldValue`
+  in `record-view.ts`) both call it. `typedValue` prints the raw text in
+  a `<time>` element with no `datetime` attribute, because the raw cast is
+  not valid ISO. Once a value parses, we can set one.
+- `frontend/src/lib/json-tree.ts` — the JSON tree in the cell popover
+  (`showCellPop` in `grid.ts`) and the record view does not use
+  `formatCellValue`. `foldJson` turns each string into a scalar (plain or
+  UUID) and `scalarSpan` builds its `<span>`. The text is the quoted JSON
+  string, so the raw string is not kept on the node today.
+- `buildCell` in `grid.ts` — copy (`copyText(raw, …)`) and "filter by
+  this value" (`eqClause(columnKey(col), raw)`) use the **raw** string.
+  Tier 1 leaves both alone.
 
 ## 4. What the wire carries
 
@@ -71,16 +72,9 @@ Consequences:
    host's session zone". That is acceptable: it is what the database
    reports. Conversion is safe regardless, because the offset is in the
    text.
-3. **The spec overstates.** `spec/protocol.md` §5.4.3 and
-   `docs/adapter-decisions.md:48` call the cast timezone-independent.
-   For `timestamptz` it follows the session `TimeZone`.
-   **Decided: fix the wording.** Say the cast follows the session
-   timezone and that clients must read the offset in the value. No port
-   pins the session to UTC. This is a wording change only; it is listed
-   in §6 as a companion edit.
-4. MySQL `TIMESTAMP` is an **accepted gap**: the offset is gone before
-   the frontend sees the value. Record it in `docs/adapter-decisions.md`
-   §5.4.3.
+3. MySQL/MariaDB `TIMESTAMP` is an accepted gap: the offset is gone
+   before the frontend sees the value (`spec/protocol.md` §5.4.3,
+   `docs/adapter-decisions.md` §5.4.3).
 
 ## 5. Tier 1 behavior
 
@@ -118,8 +112,9 @@ UTC: 2026-10-14 01:33:58.296095 Z
   ISO form (`2026-10-14T01:33:58.296095Z`). Assistive tech and
   extensions can read it.
 - The record dialog builds values with the same `formatCellValue`, so it
-  gets the same tooltip. **Decided: tooltip only.** A `title` does not
-  show on touch or by keyboard; that is accepted for Tier 1.
+  gets the same tooltip. Tier 1 is tooltip only. A `title` does not show
+  on touch or by keyboard. Keyboard access is still wanted;
+  it is the first follow-up (§8).
 
 ### 5.3 What does not change
 
@@ -130,7 +125,7 @@ UTC: 2026-10-14 01:33:58.296095 Z
 - Typed filters compare timestamps in their own type, in the session
   zone. A user who types `created_at > 2026-10-14 00:00` gets the host's
   session-zone meaning, not their browser's; an offset is honored only on
-  a `timestamptz` column.
+  a `timestamptz` column (`spec/protocol.md` §5.4.2).
 - Common values. JSON text, copy, and the JSON/SQL copy buttons keep the
   stored string.
 
@@ -169,18 +164,14 @@ if it matches strict RFC 3339 date-time:
 ## 6. Touchpoints
 
 - `frontend/src/lib/format.ts` — split the timestamp class from plain
-  `date`; add the offset parser and the local/UTC formatter;
-  `formatCellValue` sets `title` and `datetime`. The parser and
-  formatter live here, plus a separate strict RFC 3339 test for JSON.
+  `date`; add the local/UTC formatter; `formatCellValue` sets `title` and
+  `datetime`.
 - `frontend/src/lib/json-tree.ts` — keep the raw string on the scalar
-  node; `scalarSpan` sets `title` when it qualifies. `format.ts` is a
-  leaf with type-only imports (`format.ts:3-4`), so `json-tree.ts`
-  imports the shared parser from a small new leaf module, not from
-  `format.ts`.
-- `frontend/src/demo/seeds/`, `docs/demo/` — regenerate.
-- `spec/protocol.md` §5.4.3, `docs/adapter-decisions.md:48` — the wording
-  fix above, and the MySQL `TIMESTAMP` gap. Companion edit, no behavior
-  change; confirm it is acceptable under spec governance.
+  node; `scalarSpan` sets `title` when it qualifies. `format.ts` and
+  `json-tree.ts` are both leaves with no runtime imports (each keeps its
+  own copy of `UUID_RE` for that reason), so the offset parser and the
+  strict RFC 3339 test for JSON go in a small new leaf module that both
+  import.
 
 No port change. The shared frontend artifact reaches each port through
 its normal vendoring.
@@ -206,15 +197,20 @@ on screenshots.
   Copy JSON returns the stored text unchanged.
 - The record dialog shows the same tooltip for a qualifying value and
   none otherwise.
-- Per `CLAUDE.md`, run the full suite at default parallelism before
-  calling it done.
+- The full three-browser suite passes (`docs/e2e-testing-guidelines.md`
+  §5).
 
 ## 8. Follow-ups, not part of this story
 
-Build these only if users ask to scan whole columns in local time.
+**Keyboard access — wanted.** Tier 1's `title` tooltip is mouse-only.
+Show the same local and UTC lines where the keyboard already reaches: the
+cell popover (its trigger is a focusable `<button>`, `features/grid.ts`
+`buildCell`) and the record dialog's value. Build this before Tier 2.
+
+Build Tier 2 and 3 only if users ask to scan whole columns in local time.
 
 **Tier 2 — view switch.** One top-bar button, next to `#theme-toggle`
-(`index.html:46`), cycles As stored, Local, and UTC. Saved per device the
+(`frontend/src/index.html`), cycles As stored, Local, and UTC. Saved per device the
 way `features/theme.ts` does it: its own `localStorage` key, kept out of
 `UI_KEY` and the URL. Qualifying cells render in the chosen view as
 `2026-10-14 03:33:58.296095 +02:00`. Cells without an offset stay as

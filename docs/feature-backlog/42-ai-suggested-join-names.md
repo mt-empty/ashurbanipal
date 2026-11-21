@@ -11,7 +11,7 @@ where the model is already on the device. Never trigger a download.
 
 ## 2. Browser support
 
-Checked 2026-10-18. Re-check before building; the API is contested and may change.
+Checked 2026-10-18; the Chrome rows again on 2026-11-21. Re-check before building; the API is contested and may change.
 
 | Browser | Status |
 |---|---|
@@ -41,8 +41,8 @@ Docs:
 - Show the control only when the result is exactly `'available'`. Treat
   `downloadable`, `downloading`, `unavailable`, `null` and a missing API the
   same way: show nothing. No button, no message, no fallback request to any
-  server. Never call `create()` unless the model is already available, so
-  this feature never starts a download.
+  server, and no heuristic name such as `orders + users`. Never call `create()` unless the model is already available:
+  Chrome's Prompt API page says `create()` is what triggers the download.
 - A page cannot choose the model or its size. The browser decides.
 - Check availability when the join dialog opens, not once at page load, so
   a finished download or a removed model is seen.
@@ -53,25 +53,24 @@ Docs:
   satisfies the user-activation rule for `create()`.
 - Prompt: table names and column names of the join only. Column names are
   schema, not data; row values are never sent. Ask for one name of at most
-  60 characters, then trim the answer.
-- Show a loading state while the model runs (story 37). Abort on dialog
-  close. Call `session.destroy()` after each suggestion.
+  60 characters (the Name field's `maxlength`), then trim the answer.
+- The control shows its own loading state while the model runs
+  (`docs/ui-guidelines.md` R9). Abort on dialog close. Call
+  `session.destroy()` after each suggestion.
 - Wrap `create()` and `prompt()` in try/catch. The model can vanish (Chrome
   removes it below 10 GB free disk), so a stale `available` is possible. On
   failure, hide the control and leave the Name field untouched.
-- No heuristic fallback such as `orders + users`. Unsupported means nothing
-  is shown.
 - Limits: not available in Web Workers. A host that embeds the UI in a
   cross-origin iframe needs `allow="language-model"`, or the control stays
   hidden.
+- The join dialog footer (`.dialog-foot` in `frontend/src/index.html`)
+  already holds the Name field and three buttons. Place the control on a
+  design canvas board before building.
 
 ## 4. Open questions
 
-- Does `create()` start a download whenever `availability()` is not
-  `'available'`? Chrome's docs do not say what triggers a download. Check on
-  a machine without the model before relying on it.
-- Is the first prompt after browser start slow enough to need more than the
-  story 37 loading state?
+- Is the first prompt after browser start slow enough to need more than an
+  in-place loading state?
 
 ## 5. Tests
 

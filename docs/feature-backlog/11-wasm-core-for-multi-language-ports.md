@@ -1,14 +1,16 @@
 # Shared WASM core for the filter, join and response logic across language ports
 
-> **Status:** OPEN · **Area:** ports · **Ref:** deferred 2026-11-18 in favour of shared golden-SQL fixtures ([59](59-join-builder-golden-sql-fixtures.md))
+> **Status:** OPEN · **Area:** ports
 
-**Decision, 2026-11-18:** deferred. More ports in popular languages are
-planned, but the likely targets (C#/.NET, PHP, Ruby) would all need a
-native WASM runtime (wasmtime-dotnet, a PHP extension, wasmtime-rb), and
-PHP hosting often can't load extensions. Fixtures pin behaviour across
-ports without that cost or a canonical implementation. Revisit if fixture
-coverage still lets ports drift, or if the per-change cost across ports
-becomes the main bottleneck.
+**Deferred (2026-11-18)** in favour of shared golden-SQL fixtures
+([[59-join-builder-golden-sql-fixtures]], [[60-per-engine-filter-builder-fixtures]]).
+More ports in popular languages are planned, but the likely targets
+(C#/.NET, PHP, Ruby) would all need a native WASM runtime
+(wasmtime-dotnet, a PHP extension, wasmtime-rb), and PHP hosting often
+can't load extensions. Fixtures pin behaviour across ports without that
+cost or a canonical implementation. Revisit if ports still drift despite
+the fixtures, or if the per-change cost across ports becomes the main
+bottleneck.
 
 **Ask:** each `implementations/*` port hand-writes the same pure logic.
 Compile that logic once to WebAssembly and embed it in each host language,
@@ -17,16 +19,17 @@ so a bug fix or new operator is written and reviewed once, not five times.
 **What would move into the core.** Only pure, I/O-free logic:
 - The filter AST check (`spec/protocol.md` §5.4.2), including the typed
   value check and the IN/BETWEEN operators.
-- The join planner and its SQL builder (`spec/join-dsl.md`). This is now
-  the largest duplicated piece: about 600–1,000 lines per port, against
-  about 230–570 for the filter. In Rust it is already a pure seam:
-  `join::plan` takes the spec plus each table's catalog metadata and
+- The join planner and its SQL builder (`spec/join-dsl.md`). This is the
+  largest duplicated piece: about 600–1,050 lines per port, against about
+  230–460 for the filter (non-test code). In Rust it is already a pure
+  seam: `join::plan` takes the spec plus each table's catalog metadata and
   returns a `Plan`, and `join::build_select` turns a plan plus a `Dialect`
   into SQL text and bound parameters
   (`implementations/rust/core/src/join.rs`).
 - The operator→SQL mapping for all three engines (Postgres, SQLite,
-  MySQL/MariaDB), which each port now carries three times over.
-- Sort tie-breaking on the table's key, and the response envelope
+  MySQL/MariaDB), which each port carries three times over.
+- Sort tie-breaking on the table's key (`tie_break_keys` and
+  `order_by_clause` in `join.rs`), and the request and response shapes
   (`implementations/rust/core/src/protocol_wire.rs`).
 
 Everything else stays native: connections, pools and query execution,
@@ -34,12 +37,12 @@ catalog queries, HTTP routing, and config/kill-switch loading. These
 depend on host drivers and conventions, and the `DbSource` invariant keeps
 them there.
 
-**What drift costs today.** A cross-port change already lands as one PR
-touching all five ports — nine behaviour changes did so between 2026-08
-and 2026-11 (#153, #154, #123, #234, #248, #279, #281, #282, #283). Drift
-is held back by the shared fixtures in `spec/fixtures/`, which every port
-tests against, and by each port's conformance CI. So the win is less
-writing and review per change, not fewer PRs to keep in sync.
+**What drift costs today.** A cross-port change lands as one PR touching
+all five ports (for example #279, #281, #283). Drift is held back by
+`spec/fixtures/`, which every port tests against — including the expected
+SQL per engine for the filter and join builders — and by each port's
+conformance CI. So the win is less writing and review per change, not
+fewer PRs to keep in sync.
 
 **Open conflicts with current design:**
 - **Peer ports.** `PORTING.md` says a port is a peer, not a lesser copy,
@@ -56,9 +59,9 @@ writing and review per change, not fewer PRs to keep in sync.
   have to pass the full live catalog, not a pre-filtered list. The
   guarantee would then rest on the core's checks plus correct host input,
   not on the host's type system.
-- **Dialect quirks found by real engines.** Many recent fixes were
-  engine-specific (MySQL zero dates, #283). Moving the dialect mapping
-  into the core does not remove those; it moves where they are fixed.
+- **Dialect quirks found by real engines.** Many fixes are engine-specific
+  (MySQL zero dates, #283). Moving the dialect mapping into the core does
+  not remove those; it moves where they are fixed.
 
 **Runtime cost per host:**
 - Go: wazero, pure Go, no cgo.
@@ -66,7 +69,7 @@ writing and review per change, not fewer PRs to keep in sync.
 - Node: built-in `WebAssembly`. The live demo, which runs node-express in
   the browser, keeps working.
 - Python: wasmtime-py, which ships native wheels per platform — the one
-  host that gains a native artifact.
+  current host that gains a native artifact.
 - Rust: none; it links the core directly.
 
 Shipping a vendored blob with a checksum pin is a pattern the repo already
@@ -90,9 +93,9 @@ it is cited.)
 callbacks), OPA's WASM-compiled Rego SDKs (same shape, narrower domain),
 DuckDB-Wasm (native FFI per language, WASM only where FFI is missing).
 
-**Before committing:** spike `join::plan` + `join::build_select` + the
-filter check as one WASM module, embedded in the Go port via wazero.
-Measure binary size, per-request marshaling time on a large join, and how
-much of the Go port's `filter.go`/`join.go` the shim actually replaces.
-Decide the governance question above before writing the spike, since a
-"no" there makes the numbers moot.
+**Before committing:** decide the governance question above first, since
+a "no" there makes any numbers moot. Then spike `join::plan` +
+`join::build_select` + the filter check as one WASM module, embedded in
+the Go port via wazero. Measure binary size, per-request marshaling time
+on a large join, and how much of the Go port's `filter.go`/`join.go` the
+shim actually replaces.

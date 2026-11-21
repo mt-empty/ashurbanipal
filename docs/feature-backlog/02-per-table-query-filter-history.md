@@ -2,33 +2,28 @@
 
 > **Status:** OPEN · **Area:** frontend
 
-**Ask:** remember previous filters/queries per table.
+**Ask:** remember a table's previous filters, so the user can pick one
+again.
 
-**Impact / constraints:**
-- Collides directly with an existing, deliberate rule: `ui-guidelines.md` R6
-  and `frontend-style-guide.md` §6 both bar persisting filter values in
-  `localStorage` or the URL, specifically *because* filters can carry data
-  values (unlike table/sort/limit, which are just UI shape). "Filter/query
-  history" is exactly the case that rule was written to block.
-- Two ways to reconcile, not yet decided between:
-  - **Session-only, in-memory** (a JS array, cleared on reload) — stays
-    fully compliant with R6 since nothing touches persistent storage, but
-    "history" disappears on every page refresh, which may or may not satisfy
-    the actual ask.
-  - **Consciously carve out an exception to R6** for this one feature (e.g.
-    persist filter history but flag it clearly as a data-carrying exception,
-    maybe with an explicit clear/opt-out) — bigger conversation, since R6 is
-    phrased as a blanket rule "so each future feature doesn't re-litigate it
-    case by case."
-- Either way, this is a scope/policy decision before it's an implementation
-  one.
+**What exists:**
+- Each applied filter is its own browser-history entry, so Back and
+  Forward step through past filters in the tab (`docs/ui-guidelines.md`
+  R16). That history is one line across all tables, not a list per table.
+- The applied filter lives in the URL only, never in `localStorage`
+  (R6c).
 
-**Update (2026-09-05):** `docs/feature-backlog/20-persisted-and-shareable-filter-state.md`
-shipped, replacing R6 with a narrower rule permitting the *current* applied
-filter (URL-only, never `localStorage`) as the user's own authored view
-intent. The "carve out an exception to R6" branch above is no longer
-hypothetical — it's the shipped default for the single current filter.
-This entry's actual ask, a *history* of past filters, is still a distinct,
-undecided feature: R6 as it now reads permits the one filter the user is
-actively viewing, not an accumulating list of prior ones, so the
-session-only-vs-persisted choice above is unresolved.
+**Decide first — this is a policy question before an implementation one:**
+- **Session-only, in memory.** Fits R6 as written, but the list is gone
+  after a reload.
+- **Persisted in `localStorage`.** Needs R6c changed. R6c exists so that
+  returning to a table never silently reapplies a filter; a list the user
+  picks from reapplies nothing. R6b still applies: only filters the user
+  typed qualify, not ones a click built from a row value (the `=` button,
+  FK navigation). It needs a way to clear the list.
+
+**Shape:** the filter field's suggestion list (`features/filter-ui.ts`,
+`features/suggest-list.ts`) is the natural place to show past filters,
+since the filter stays one plain text field
+([[10-structured-filter-builder-ui]]).
+
+**Open question:** does a join view keep its own list, keyed by the join?

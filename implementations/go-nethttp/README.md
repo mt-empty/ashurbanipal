@@ -80,7 +80,7 @@ Register both paths: the UI is served at the bare path, and the API under it. If
 
 ## MySQL, MariaDB, or SQLite
 
-These backends are behind build tags, so a Postgres-only app doesn't compile their drivers. Add the tag to **your app's** build:
+These backends are behind build tags, so a Postgres-only app doesn't compile their code (and, for MySQL, the MySQL driver package). The library imports no SQLite driver: your app opens the `*sql.DB` with one it chooses. Add the tag to **your app's** build:
 
 ```sh
 go build -tags sqlite ./...   # or -tags mysql, or -tags sqlite,mysql
