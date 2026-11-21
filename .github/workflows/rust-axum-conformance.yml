@@ -6,6 +6,7 @@ on:
     paths:
       - "implementations/rust/**"
       - "spec/**"
+      - "!spec/**/*.md"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".devcontainer/db/init/01-seed.sql"
@@ -18,6 +19,7 @@ on:
     paths:
       - "implementations/rust/**"
       - "spec/**"
+      - "!spec/**/*.md"
       - "conformance/**"
       - "frontend/dbviewer.html"
       - ".devcontainer/db/init/01-seed.sql"
