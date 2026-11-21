@@ -90,14 +90,18 @@ async fn builder_fixture_cases_over_http() {
     let engine = Backend::current().fixture_name();
     for case in cases {
         let name = case["name"].as_str().unwrap();
-        let rejected = match (case.get("expect_error"), case["expect"].get(engine)) {
-            (Some(kind), _) => kind.as_str(),
-            (None, Some(want)) => want.get("error").and_then(|k| k.as_str()),
-            (None, None) => continue,
+        let rejected = match (case.get("expect_error"), case.get("expect")) {
+            (Some(kind), None) => kind.as_str(),
+            (None, Some(expect)) => match expect.get(engine) {
+                Some(want) => want.get("error").and_then(|k| k.as_str()),
+                None => continue,
+            },
+            _ => panic!("case {name}: needs exactly one of expect and expect_error"),
         };
-        let filter = match case.get("raw") {
-            Some(raw) => raw.as_str().unwrap().to_string(),
-            None => serde_json::to_string(&case["conditions"]).unwrap(),
+        let filter = match (case.get("raw"), case.get("conditions")) {
+            (Some(raw), None) => raw.as_str().unwrap().to_string(),
+            (None, Some(conditions)) => serde_json::to_string(conditions).unwrap(),
+            _ => panic!("case {name}: needs exactly one of raw and conditions"),
         };
         let resp = fetch(&srv, case["table"].as_str().unwrap(), &filter).await;
         match rejected {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -37,6 +36,9 @@ func filterFixtureKind(kind string) string {
 
 func runFilterFixtureCase(t *testing.T, e fixtureEngine, table tableMeta, tc filterFixtureCase) filterFixtureOutcome {
 	t.Helper()
+	if (tc.Raw == nil) == (tc.Conditions == nil) {
+		t.Fatalf("case %s: needs exactly one of raw and conditions", tc.Name)
+	}
 	raw := string(tc.Conditions)
 	if tc.Raw != nil {
 		raw = *tc.Raw
@@ -53,9 +55,9 @@ func runFilterFixtureCase(t *testing.T, e fixtureEngine, table tableMeta, tc fil
 		if values == nil {
 			values = []string{}
 		}
-		return filterFixtureOutcome{Where: strings.TrimPrefix(where, " where "), Values: values}
+		return filterFixtureOutcome{Where: where, Values: values}
 	case errors.As(err, &notAllowed):
-		return filterFixtureOutcome{Error: "unknown_column"}
+		return filterFixtureOutcome{Error: notAllowed.Kind.Code()}
 	case errors.As(err, &filterError):
 		return filterFixtureOutcome{Error: "invalid_value"}
 	default:
@@ -65,13 +67,20 @@ func runFilterFixtureCase(t *testing.T, e fixtureEngine, table tableMeta, tc fil
 }
 
 // filterFixtureWant is the case's expectation on engine, or false when the case doesn't run there.
-func filterFixtureWant(tc filterFixtureCase, engine string) (filterFixtureOutcome, bool) {
+func filterFixtureWant(t *testing.T, tc filterFixtureCase, engine string) (filterFixtureOutcome, bool) {
+	t.Helper()
+	if (tc.ExpectError == nil) == (tc.Expect == nil) {
+		t.Fatalf("case %s: needs exactly one of expect and expect_error", tc.Name)
+	}
 	if tc.ExpectError != nil {
 		return filterFixtureOutcome{Error: filterFixtureKind(*tc.ExpectError)}, true
 	}
 	want, ok := tc.Expect[engine]
-	if ok && want.Error != "" {
+	switch {
+	case want.Error != "":
 		want.Error = filterFixtureKind(want.Error)
+	case want.Where != "":
+		want.Where = " where " + want.Where
 	}
 	return want, ok
 }
@@ -84,7 +93,7 @@ func runFilterFixture(t *testing.T, e fixtureEngine) {
 	cat, tables := loadCatalogFixture(t, e)
 	ran := 0
 	for _, tc := range file.Cases {
-		want, ok := filterFixtureWant(tc, e.name)
+		want, ok := filterFixtureWant(t, tc, e.name)
 		if !ok {
 			continue
 		}

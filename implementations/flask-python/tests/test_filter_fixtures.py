@@ -23,6 +23,9 @@ def _kind(kind: str) -> str:
 
 
 def _expected(engine: Engine, case: dict[str, Any]) -> dict[str, Any] | None:
+    assert ("expect" in case) != ("expect_error" in case), (
+        f"case {case['name']}: needs exactly one of expect and expect_error"
+    )
     if "expect_error" in case:
         return {"error": _kind(case["expect_error"])}
     want = case["expect"].get(engine.name)
@@ -30,10 +33,14 @@ def _expected(engine: Engine, case: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if "error" in want:
         return {"error": _kind(want["error"])}
-    return {**want, "where": native_placeholders(engine, want["where"])}
+    where = want["where"] and f" where {native_placeholders(engine, want['where'])}"
+    return {**want, "where": where}
 
 
 def _run(engine: Engine, case: dict[str, Any]) -> dict[str, Any]:
+    assert ("raw" in case) != ("conditions" in case), (
+        f"case {case['name']}: needs exactly one of raw and conditions"
+    )
     raw = case["raw"] if "raw" in case else json.dumps(case["conditions"])
     try:
         conditions = filter_module.parse(raw)
@@ -42,11 +49,11 @@ def _run(engine: Engine, case: dict[str, Any]) -> dict[str, Any]:
     table = TABLES[engine.name][f"{CATALOGS[engine.name]['default_schema']}.{case['table']}"]
     try:
         where, values = table_where_clause(conditions, table, engine.dialect)
-    except NotAllowed:
-        return {"error": "unknown_column"}
+    except NotAllowed as e:
+        return {"error": e.kind.value}
     except FilterParseError:
         return {"error": "invalid_value"}
-    return {"where": where.removeprefix(" where "), "values": values}
+    return {"where": where, "values": values}
 
 
 PARAMS = [

@@ -16,13 +16,20 @@ class FilterValidatorFixtureTest {
     private fun kind(k: String): String = if (k == "unknown_column" || k == "invalid_value") k else STRUCTURAL
 
     private fun expected(engine: CatalogFixture.Engine, case: JsonNode): Outcome? {
+        require(case.has("expect") != case.has("expect_error")) {
+            "case ${case.text("name")}: needs exactly one of expect and expect_error"
+        }
         case["expect_error"]?.let { return Outcome(error = kind(it.asText())) }
         val want = case["expect"][engine.name] ?: return null
         want["error"]?.let { return Outcome(error = kind(it.asText())) }
-        return Outcome(normalizePlaceholders(want.text("where")), want["values"].strings())
+        val where = want.text("where").let { if (it.isEmpty()) it else " where " + normalizePlaceholders(it) }
+        return Outcome(where, want["values"].strings())
     }
 
     private fun run(engine: CatalogFixture.Engine, table: TableMeta, case: JsonNode): Outcome {
+        require(case.has("raw") != case.has("conditions")) {
+            "case ${case.text("name")}: needs exactly one of raw and conditions"
+        }
         val raw = case["raw"]?.asText() ?: CatalogFixture.mapper.writeValueAsString(case["conditions"])
         val conditions = try {
             FilterValidator().parse(raw)
@@ -31,9 +38,9 @@ class FilterValidatorFixtureTest {
         }
         return try {
             val where = tableWhereClause(conditions, table, engine.dialect)
-            Outcome(where.sql.removePrefix(" where "), where.values)
-        } catch (_: NotAllowedException) {
-            Outcome(error = "unknown_column")
+            Outcome(where.sql, where.values)
+        } catch (e: NotAllowedException) {
+            Outcome(error = e.kind.code)
         } catch (_: FilterException) {
             Outcome(error = "invalid_value")
         }

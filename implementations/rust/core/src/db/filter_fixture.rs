@@ -4,13 +4,13 @@
 use serde_json::Value;
 
 use super::catalog_fixture::{self, Engine};
-use super::DbError;
+use super::{DbError, NotAllowedDetail};
 use crate::filter;
 use crate::join;
 
 const FIXTURES: &str = include_str!("../../../../../spec/fixtures/filter-builder-tests.json");
 
-/// `(where fragment, values)`, or the rejection's kind. Structural kinds all
+/// `(where clause, values)`, or the rejection's kind. Structural kinds all
 /// fail the parse before any schema access, so they compare as one.
 type Outcome = Result<(String, Vec<String>), String>;
 
@@ -25,27 +25,31 @@ fn kind(kind: &str) -> String {
 
 fn run_case(engine: &Engine, table: &join::TableMeta, case: &Value) -> Outcome {
     let raw = match (case.get("raw"), case.get("conditions")) {
-        (Some(raw), _) => raw.as_str().unwrap().to_string(),
+        (Some(raw), None) => raw.as_str().unwrap().to_string(),
         (None, Some(conditions)) => conditions.to_string(),
-        (None, None) => panic!("case {}: neither raw nor conditions", case["name"]),
+        _ => panic!(
+            "case {}: needs exactly one of raw and conditions",
+            case["name"]
+        ),
     };
     let conditions = filter::parse(&raw).map_err(|_| STRUCTURAL.to_string())?;
     match join::table_where_clause(&conditions, table, engine.dialect) {
-        Ok((clause, values)) => {
-            let fragment = clause.strip_prefix(" where ").unwrap_or(&clause);
-            Ok((fragment.to_string(), values))
-        }
-        Err(DbError::NotAllowed(_)) => Err("unknown_column".to_string()),
+        Ok(built) => Ok(built),
+        Err(DbError::NotAllowed(NotAllowedDetail { kind, .. })) => Err(kind.code().to_string()),
         Err(DbError::FilterParse(_)) => Err("invalid_value".to_string()),
         Err(other) => panic!("case {}: unexpected error {other:?}", case["name"]),
     }
 }
 
 fn expected(case: &Value, engine: &str) -> Option<Outcome> {
-    if let Some(k) = case.get("expect_error") {
-        return Some(Err(kind(k.as_str().unwrap())));
-    }
-    let e = case["expect"].get(engine)?;
+    let e = match (case.get("expect_error"), case.get("expect")) {
+        (Some(k), None) => return Some(Err(kind(k.as_str().unwrap()))),
+        (None, Some(expect)) => expect.get(engine)?,
+        _ => panic!(
+            "case {}: needs exactly one of expect and expect_error",
+            case["name"]
+        ),
+    };
     if let Some(k) = e.get("error") {
         return Some(Err(kind(k.as_str().unwrap())));
     }
@@ -55,7 +59,11 @@ fn expected(case: &Value, engine: &str) -> Option<Outcome> {
         .iter()
         .map(|s| s.as_str().unwrap().to_string())
         .collect();
-    Some(Ok((e["where"].as_str().unwrap().to_string(), values)))
+    let clause = match e["where"].as_str().unwrap() {
+        "" => String::new(),
+        fragment => format!(" where {fragment}"),
+    };
+    Some(Ok((clause, values)))
 }
 
 pub(crate) fn run(engine: &Engine) {

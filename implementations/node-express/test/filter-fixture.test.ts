@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FilterError, NotAllowedError } from "../src/errors.js";
+import { FilterError, NOT_ALLOWED_CODE, NotAllowedError } from "../src/errors.js";
 import { parseFilter } from "../src/filter.js";
 import { type TableMeta, tableWhereClause } from "../src/join.js";
 import { type Engine, engineCatalog, engines, readFixture } from "./catalog-fixture.js";
@@ -31,13 +31,19 @@ function kind(k: string): string {
 }
 
 function expected(c: FixtureCase, engine: string): Outcome | undefined {
+  if ((c.expect_error === undefined) === (c.expect === undefined)) {
+    throw new Error(`case ${c.name}: needs exactly one of expect and expect_error`);
+  }
   if (c.expect_error !== undefined) return { error: kind(c.expect_error) };
   const want = c.expect?.[engine];
   if (want?.error !== undefined) return { error: kind(want.error) };
-  return want;
+  return want && { ...want, where: want.where && ` where ${want.where}` };
 }
 
 function runCase(engine: Engine, table: TableMeta, c: FixtureCase): Outcome {
+  if ((c.raw === undefined) === (c.conditions === undefined)) {
+    throw new Error(`case ${c.name}: needs exactly one of raw and conditions`);
+  }
   let conditions: ReturnType<typeof parseFilter>;
   try {
     conditions = parseFilter(c.raw ?? JSON.stringify(c.conditions));
@@ -45,10 +51,9 @@ function runCase(engine: Engine, table: TableMeta, c: FixtureCase): Outcome {
     return { error: STRUCTURAL };
   }
   try {
-    const { where, values } = tableWhereClause(conditions, table, engine.dialect);
-    return { where: where.replace(/^ where /, ""), values };
+    return tableWhereClause(conditions, table, engine.dialect);
   } catch (err) {
-    if (err instanceof NotAllowedError) return { error: "unknown_column" };
+    if (err instanceof NotAllowedError) return { error: NOT_ALLOWED_CODE[err.kind] };
     if (err instanceof FilterError) return { error: "invalid_value" };
     throw err;
   }
