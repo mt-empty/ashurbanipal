@@ -189,7 +189,7 @@ jobs:
       # The conformance runner itself (layer 3) is Rust regardless of which
       # implementation is under test — report.sh always runs `cargo test`
       # inside implementations/rust, per PORTING.md.
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
