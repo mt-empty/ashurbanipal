@@ -32,6 +32,9 @@ a port is a peer, not a lesser copy.
   AST → WHERE-fragment cases every backend, reference and ports alike, is
   tested against). `spec/fixtures/parser-tests.json` is frontend-only —
   no port consumes it, since no port parses DSL text.
+- **The join fixtures** — `spec/fixtures/join-builder-tests.json` (join
+  object + catalog → SQL, bind values and labels, per engine). Every port
+  runs it once per engine it supports, with no database.
 - **The conformance seed + runner** — `conformance/seed/seed.sql` (apply
   once against your target database) and `conformance/runner` (drives
   HTTP assertions at your running instance). See "How to run conformance"
@@ -126,13 +129,17 @@ by reusing the frontend and fixtures above:
    cast to text *in the SQL itself*; decoding into a native type and
    reformatting in application code is non-conformant even if the end
    result happens to look like a string (see hardening checklist item 1).
+   Every catalog and data query MUST run on the oldest supported version of
+   each engine, not just the newest (`docs/adapter-decisions.md`,
+   "Supported engine versions").
 4. **Filter AST validation + WHERE-clause building** (§5.4.2) — no DSL
    text parsing (that's frontend-only, `spec/filter-dsl.md`); this is
    pure JSON-AST-in, WHERE-fragment-out. Columns validated against the
    live schema allow-list exactly like `sort`; operators mapped through a
    hardcoded allow-listed table; values always bound parameters, never
    concatenated (hardening checklist item 6). Build against
-   `spec/fixtures/filter-builder-tests.json` first — it's the spec.
+   `spec/fixtures/filter-builder-tests.json` first — it's the spec — and
+   the join route (§5.11) against `spec/fixtures/join-builder-tests.json`.
 5. **A timeout on every query** (§6) — catalog queries included, not just
    `tables/data`.
 6. **The API response headers** (§2) — `x-ashurbanipal-protocol` (§7)

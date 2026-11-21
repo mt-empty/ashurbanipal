@@ -1377,4 +1377,33 @@ mod tests {
             assert_eq!(column_class(declared), expected, "{declared:?}");
         }
     }
+
+    fn join_fixture_column(c: &serde_json::Value) -> ColMeta {
+        let declared = c["declared"].as_str().unwrap();
+        let class = column_class(declared);
+        ColMeta {
+            name: Ident::for_test(c["name"].as_str().unwrap()),
+            type_name: if declared.is_empty() {
+                "unknown".to_string()
+            } else {
+                declared.to_string()
+            },
+            compare: typed_compare(&class),
+            class,
+            collation: None,
+            key: None,
+            references: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn join_builder_fixtures() {
+        super::super::join_fixture::run(super::super::join_fixture::Engine {
+            name: "sqlite",
+            dialect: &DIALECT,
+            splices_schema: false,
+            column: join_fixture_column,
+        });
+    }
 }

@@ -1526,4 +1526,31 @@ mod tests {
         assert_eq!(column_class("uuid", "uuid"), Uuid);
         assert_eq!(column_class("geometry", "geometry"), Other);
     }
+
+    fn join_fixture_column(c: &serde_json::Value) -> ColMeta {
+        let s = |k: &str| c[k].as_str().unwrap();
+        ColMeta {
+            name: Ident::for_test(s("name")),
+            type_name: s("column_type").to_string(),
+            class: column_class(s("data_type"), s("column_type")),
+            compare: typed_compare(s("data_type")),
+            collation: c
+                .get("collation")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            key: None,
+            references: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn join_builder_fixtures() {
+        super::super::join_fixture::run(super::super::join_fixture::Engine {
+            name: "mysql",
+            dialect: &DIALECT,
+            splices_schema: true,
+            column: join_fixture_column,
+        });
+    }
 }

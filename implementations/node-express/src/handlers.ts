@@ -240,7 +240,7 @@ function problem(status: number, code: string, title: string): ApiResult {
 // BadJoinError is invalid_join; a bad parameter is invalid_parameter; UnsortableError is unsortable_column; a statement stopped by the query
 // timeout is query_timeout; anything else is a database failure (500). Status code + code are the
 // contract — `title` wording is implementation-defined.
-function errorResult(err: unknown): ApiResult {
+export function errorResult(err: unknown): ApiResult {
   if (err instanceof NotAllowedError) return problem(400, NOT_ALLOWED_CODE[err.kind], err.message);
   if (err instanceof FilterError) return problem(400, "invalid_filter", err.message);
   if (err instanceof BadJoinError) return problem(400, "invalid_join", err.message);

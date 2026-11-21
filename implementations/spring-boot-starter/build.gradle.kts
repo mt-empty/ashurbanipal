@@ -43,7 +43,7 @@ dependencies {
     implementation(springBootBom)
     compileOnly(springBootBom)
     // Newer than Spring Boot 4.1.2's managed Jackson; the higher platform wins.
-    implementation(platform("tools.jackson:jackson-bom:3.2.4"))
+    implementation(platform("tools.jackson:jackson-bom:3.3.0"))
     // The Kotlin Gradle plugin's build-time BouncyCastle (never shipped) resolves a
     // version affected by GHSA-9pwp-9qqc-pr26; the four bc* artifacts must stay aligned.
     constraints {
@@ -112,6 +112,8 @@ tasks.withType<Test> {
     // implementation's test suite rather than duplicated into
     // src/test/resources.
     systemProperty("ashurbanipal.repoRoot", rootDir.parentFile.parentFile.absolutePath)
+    // Outside the project, so Gradle would otherwise skip the tests as up to date after a fixture edit.
+    inputs.dir(rootDir.parentFile.parentFile.resolve("spec/fixtures")).withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // ---- Frontend vendoring (PORTING.md hardening item 3) ----
@@ -125,7 +127,7 @@ tasks.withType<Test> {
 // copy since there is no separate tagged release to vendor from.
 val repoRoot = rootDir.parentFile.parentFile
 val frontendSource = repoRoot.resolve("frontend/dbviewer.html")
-val pinnedFrontendSha256 = "aacf91cff5ac93deb81dd226fdc314aa5d1a0663ea54b60ccd7ad07c7dd5d839"
+val pinnedFrontendSha256 = "9cec85809c10b29e5bffdb74e764d9f352dcc9a872857a954b74b89dfe44eabc"
 
 val vendorFrontend = tasks.register("vendorFrontend") {
     description = "Copies frontend/dbviewer.html into generated resources, re-verifying its sha256."

@@ -1,6 +1,6 @@
 # Highlight cells that changed since the last refresh
 
-> **Status:** OPEN · **Area:** frontend, docs, e2e
+> **Status:** DONE · **Area:** frontend, docs, e2e · **Ref:** design canvas round 20 (BO, BP b, BQ), chosen 2026-11-19; `lib/row-diff.ts` `collectRowChanges`, `refresh-highlight.spec.ts`
 
 On refresh, tint each cell whose value differs from the same row's value
 in the previous fetch, the way new rows are tinted today.
@@ -19,7 +19,7 @@ No hashing. The previous page is already in memory, and every value is a
 string or `null` (`frontend/src/core/types.ts`, `Row`), so a direct
 comparison is as cheap as a hash and says which cell changed.
 
-- `frontend/src/core/store.ts` (`diffNewRows`) already keeps the previous
+- `frontend/src/core/store.ts` (`diffRows`) keeps the previous
   same-scope payload in `lastPayload`.
 - Build a `Map` from each previous row's `rowKey`
   (`frontend/src/lib/row-diff.ts`) to that row.
@@ -29,7 +29,10 @@ comparison is as cheap as a hash and says which cell changed.
   between fetches is not a change.
 - `renderRows` (`frontend/src/features/grid.ts`) adds a class to those
   cells. The CSS fades it like `.row-new`, with a new colour token beside
-  `--row-new-bg`, and a static tint under `prefers-reduced-motion` (R15).
+  `--row-new-bg` (`--cell-changed-bg`, blue), and a static tint under
+  `prefers-reduced-motion` (R15). The class is dropped when the fade ends
+  or the column is hidden, because showing a hidden column restarts its
+  cells' CSS animations.
 
 Cost: at most one page of rows × columns string comparisons per refresh.
 Memory is unchanged.
@@ -45,45 +48,50 @@ Memory is unchanged.
 - Re-sorting reorders rows but keeps their keys, so the comparison is
   unaffected.
 
-## 4. Status and chip
+## 4. Status and chips
 
-- `#row-new-chip` and the `#status` text gain the changed-cell count, for
-  example `2 new · 3 changed` (R9). Count rows with a change, or cells?
-  See §7.
-- The refresh button title changes from "briefly highlight rows added
-  since the last look" to cover both.
+- A second chip, `#row-changed-chip`, sits after `#row-new-chip` in the
+  changed-cell tint: `+2 new` `3 changed`. It counts rows with a change,
+  not cells. Both hide after 3 s, with the fades.
+- A change only in hidden columns has no cell to tint, so the chip says
+  `1 changed in a hidden column` (or `in hidden columns`).
+- `#status` joins the two: `2 new · 3 changed` (R9). "no changes" shows
+  only when nothing is new or changed.
+- The refresh button title covers both tints.
 
 ## 5. Touchpoints
 
-- `frontend/src/lib/row-diff.ts` — a `collectChangedCells` beside
-  `collectNewRowKeys`, sharing the key and the gates; unit tests next to
-  the existing ones.
-- `frontend/src/core/store.ts` (`diffNewRows`),
+- `frontend/src/lib/row-diff.ts` — `collectRowChanges` returns new rows
+  and changed cells from one pass,
+  sharing the key and the gates; `changedRowsText` words the chip.
+- `frontend/src/core/store.ts` (`diffRows`),
   `frontend/src/bootstrap/controller.ts`, `frontend/src/features/grid.ts`
   (`renderRows`), `frontend/src/features/auto-refresh.ts` (chip),
   `frontend/src/styles.css`, `frontend/src/index.html` (button title).
 - `docs/ui-guidelines.md` R10 — widen "new-row tint" to "new-row and
   changed-cell tint", keeping the PK-only identity rule.
-- Check the design canvas boards before building (the refresh and chip
-  boards); add one if none covers a changed cell.
+- Design canvas round 20: BO (layout), BP (tint options; b chosen), BQ
+  (edge cases).
 
 ## 6. What "done" means
 
 - Unit tests: changed cell found; unchanged row skipped; PK-less table and
   scope change produce nothing; `null` to `''` counts as a change.
-- An e2e spec: update a seed row through the test's own DB connection,
-  click refresh, and assert the tint lands on exactly that cell; repeat
-  with auto-refresh.
+- e2e specs (`refresh-highlight.spec.ts`, `auto-refresh.spec.ts`): the
+  tint lands on exactly the changed cell, on refresh and on a tick; new
+  and changed together; a hidden column; the class drops after the fade;
+  no PK. They mock `/tables/data` like the existing new-row tests, rather
+  than editing a seed row.
 - The full three-browser e2e suite passes.
 
-## 7. Open questions
+## 7. Decisions (2026-11-19)
 
-- **Count rows or cells** in the chip? Rows matches "2 new" better; cells
-  is more exact.
-- **A cell's tint inside a new row.** A new row has no previous value, so
-  it gets only the row tint. Confirm that is the wanted look.
-- **Very long values.** Comparing a multi-MB `jsonb` string is linear but
-  fast. No cap planned; revisit only if a slow refresh is measured.
+- **The chip counts rows.** It matches `+2 new`; the tint shows the cells.
+- **A new row gets only the row tint.** It has no previous value.
+- **Blue, not amber** (canvas BP b): blue and green stay apart under the
+  common colour blindness types.
+- **Very long values.** Compared in full, no cap; revisit only if a slow
+  refresh is measured.
 
 ## 8. Out of scope
 

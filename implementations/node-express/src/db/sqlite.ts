@@ -178,7 +178,7 @@ async function keyMetadata(
   return { pkColumns, fkColumns };
 }
 
-const JOIN_DIALECT: JoinDialect = {
+export const JOIN_DIALECT: JoinDialect = {
   quote: quoteIdent,
   castText: (expr) => `CAST(${expr} AS TEXT)`,
   castParam: (p, target) => `CAST(${p} AS ${target})`,

@@ -1,0 +1,1978 @@
+{
+  "$schema_note": "Join planner + SQL builder fixtures, per engine. Schema: spec/fixtures/README.md. Hand-maintained: a change to spec/protocol.md §5.11 and this file ships in one PR.",
+  "catalogs": {
+    "postgres": {
+      "schemas": ["other_schema", "public", "warehouse"],
+      "default_schema": "public",
+      "tables": {
+        "public.users": {
+          "columns": [
+            {"name": "id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {"name": "email", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "full_name", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "age", "data_type": "smallint", "udt_schema": "pg_catalog", "udt_name": "int2", "is_enum": false, "type": "smallint"},
+            {"name": "is_active", "data_type": "boolean", "udt_schema": "pg_catalog", "udt_name": "bool", "is_enum": false, "type": "boolean"},
+            {"name": "login_count", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "metadata", "data_type": "jsonb", "udt_schema": "pg_catalog", "udt_name": "jsonb", "is_enum": false, "type": "jsonb"},
+            {
+              "name": "last_login_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "name": "created_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            }
+          ],
+          "unique_keys": [{"name": "users_email_key", "primary": false, "columns": ["email"]}, {"name": "users_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "public.orders": {
+          "columns": [
+            {"name": "id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {"name": "user_id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {"name": "status", "data_type": "USER-DEFINED", "udt_schema": "public", "udt_name": "order_status", "is_enum": true, "type": "order_status"},
+            {"name": "total_cents", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "discount_pct", "data_type": "numeric", "udt_schema": "pg_catalog", "udt_name": "numeric", "is_enum": false, "type": "numeric(5,2)"},
+            {"name": "tags", "data_type": "ARRAY", "udt_schema": "pg_catalog", "udt_name": "_text", "is_enum": false, "type": "text[]"},
+            {"name": "line_items", "data_type": "jsonb", "udt_schema": "pg_catalog", "udt_name": "jsonb", "is_enum": false, "type": "jsonb"},
+            {
+              "name": "created_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            }
+          ],
+          "unique_keys": [{"name": "orders_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "public.order_extra": {
+          "columns": [
+            {"name": "order_id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {"name": "gift_message", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "is_gift", "data_type": "boolean", "udt_schema": "pg_catalog", "udt_name": "bool", "is_enum": false, "type": "boolean"},
+            {
+              "name": "created_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            }
+          ],
+          "unique_keys": [{"name": "order_extra_pkey", "primary": true, "columns": ["order_id"]}]
+        },
+        "public.products": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {
+              "name": "sku",
+              "data_type": "character varying",
+              "udt_schema": "pg_catalog",
+              "udt_name": "varchar",
+              "is_enum": false,
+              "type": "character varying(20)"
+            },
+            {"name": "name", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {
+              "name": "category",
+              "data_type": "USER-DEFINED",
+              "udt_schema": "public",
+              "udt_name": "product_category",
+              "is_enum": true,
+              "type": "product_category"
+            },
+            {"name": "price", "data_type": "numeric", "udt_schema": "pg_catalog", "udt_name": "numeric", "is_enum": false, "type": "numeric(10,2)"},
+            {"name": "weight_kg", "data_type": "real", "udt_schema": "pg_catalog", "udt_name": "float4", "is_enum": false, "type": "real"},
+            {"name": "in_stock", "data_type": "boolean", "udt_schema": "pg_catalog", "udt_name": "bool", "is_enum": false, "type": "boolean"},
+            {"name": "description", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "created_on", "data_type": "date", "udt_schema": "pg_catalog", "udt_name": "date", "is_enum": false, "type": "date"}
+          ],
+          "unique_keys": [{"name": "products_pkey", "primary": true, "columns": ["id"]}, {"name": "products_sku_key", "primary": false, "columns": ["sku"]}]
+        },
+        "public.page_hits": {
+          "columns": [
+            {"name": "path", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "day", "data_type": "date", "udt_schema": "pg_catalog", "udt_name": "date", "is_enum": false, "type": "date"},
+            {"name": "hits", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "ref_code", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "detail", "data_type": "json", "udt_schema": "pg_catalog", "udt_name": "json", "is_enum": false, "type": "json"}
+          ],
+          "unique_keys": [
+            {"name": "page_hits_hits_day_path_key", "primary": false, "columns": ["hits", "day", "path"]},
+            {"name": "page_hits_path_day", "primary": false, "columns": ["path", "day"]}
+          ]
+        },
+        "public.typed_samples": {
+          "columns": [
+            {"name": "id", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "smallint_v", "data_type": "smallint", "udt_schema": "pg_catalog", "udt_name": "int2", "is_enum": false, "type": "smallint"},
+            {"name": "integer_v", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "bigint_v", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {"name": "numeric_v", "data_type": "numeric", "udt_schema": "pg_catalog", "udt_name": "numeric", "is_enum": false, "type": "numeric"},
+            {"name": "real_v", "data_type": "real", "udt_schema": "pg_catalog", "udt_name": "float4", "is_enum": false, "type": "real"},
+            {
+              "name": "double_v",
+              "data_type": "double precision",
+              "udt_schema": "pg_catalog",
+              "udt_name": "float8",
+              "is_enum": false,
+              "type": "double precision"
+            },
+            {"name": "date_v", "data_type": "date", "udt_schema": "pg_catalog", "udt_name": "date", "is_enum": false, "type": "date"},
+            {
+              "name": "timestamp_v",
+              "data_type": "timestamp without time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamp",
+              "is_enum": false,
+              "type": "timestamp without time zone"
+            },
+            {
+              "name": "timestamptz_v",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "name": "time_v",
+              "data_type": "time without time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "time",
+              "is_enum": false,
+              "type": "time without time zone"
+            },
+            {
+              "name": "timetz_v",
+              "data_type": "time with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timetz",
+              "is_enum": false,
+              "type": "time with time zone"
+            }
+          ],
+          "unique_keys": [{"name": "typed_samples_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.carriers": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {"name": "name", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "contact_email", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "is_active", "data_type": "boolean", "udt_schema": "pg_catalog", "udt_name": "bool", "is_enum": false, "type": "boolean"}
+          ],
+          "unique_keys": [{"name": "carriers_name_key", "primary": false, "columns": ["name"]}, {"name": "carriers_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.shipments": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {"name": "order_id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {"name": "carrier_id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {
+              "name": "tracking_number",
+              "data_type": "character varying",
+              "udt_schema": "pg_catalog",
+              "udt_name": "varchar",
+              "is_enum": false,
+              "type": "character varying(30)"
+            },
+            {
+              "name": "status",
+              "data_type": "character varying",
+              "udt_schema": "pg_catalog",
+              "udt_name": "varchar",
+              "is_enum": false,
+              "type": "character varying(20)"
+            },
+            {
+              "name": "shipped_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            },
+            {
+              "name": "delivered_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            }
+          ],
+          "unique_keys": [{"name": "shipments_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.shipment_events": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {"name": "shipment_id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {"name": "handled_by_user_id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {
+              "name": "event_type",
+              "data_type": "character varying",
+              "udt_schema": "pg_catalog",
+              "udt_name": "varchar",
+              "is_enum": false,
+              "type": "character varying(30)"
+            },
+            {
+              "name": "occurred_at",
+              "data_type": "timestamp with time zone",
+              "udt_schema": "pg_catalog",
+              "udt_name": "timestamptz",
+              "is_enum": false,
+              "type": "timestamp with time zone"
+            },
+            {"name": "notes", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"}
+          ],
+          "unique_keys": [{"name": "shipment_events_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.users": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
+            {"name": "username", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {
+              "name": "shift",
+              "data_type": "character varying",
+              "udt_schema": "pg_catalog",
+              "udt_name": "varchar",
+              "is_enum": false,
+              "type": "character varying(10)"
+            }
+          ],
+          "unique_keys": [{"name": "users_pkey", "primary": true, "columns": ["id"]}, {"name": "users_username_key", "primary": false, "columns": ["username"]}]
+        },
+        "public.collated": {
+          "synthetic": true,
+          "columns": [
+            {"name": "id", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "name_a", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text", "collation": "C"},
+            {"name": "name_b", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text", "collation": "POSIX"}
+          ],
+          "unique_keys": [{"name": "collated_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "public.keyless": {
+          "synthetic": true,
+          "columns": [
+            {"name": "order_id", "data_type": "uuid", "udt_schema": "pg_catalog", "udt_name": "uuid", "is_enum": false, "type": "uuid"},
+            {"name": "note", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"}
+          ],
+          "unique_keys": []
+        },
+        "public.label_clash": {
+          "synthetic": true,
+          "columns": [
+            {"name": "id", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "id_1", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"}
+          ],
+          "unique_keys": [{"name": "label_clash_pkey", "primary": true, "columns": ["id"]}]
+        },
+        "public.text_keyed": {
+          "synthetic": true,
+          "columns": [
+            {"name": "code", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"},
+            {"name": "label", "data_type": "text", "udt_schema": "pg_catalog", "udt_name": "text", "is_enum": false, "type": "text"}
+          ],
+          "unique_keys": [{"name": "text_keyed_pkey", "primary": true, "columns": ["code"]}]
+        },
+        "public.key_choice": {
+          "synthetic": true,
+          "columns": [
+            {"name": "a", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "b", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "c", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"}
+          ],
+          "unique_keys": [{"name": "b_short", "primary": false, "columns": ["c"]}, {"name": "key_choice_pkey", "primary": true, "columns": ["a", "b"]}]
+        },
+        "public.key_tie": {
+          "synthetic": true,
+          "columns": [
+            {"name": "a", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "b", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"}
+          ],
+          "unique_keys": [
+            {"name": "b_key", "primary": false, "columns": ["b"]},
+            {"name": "a_key", "primary": false, "columns": ["a"]},
+            {"name": "0_hidden", "primary": false, "columns": ["hidden"]}
+          ]
+        }
+      }
+    },
+    "mysql": {
+      "schemas": ["ashurbanipal", "other_schema", "warehouse"],
+      "default_schema": "ashurbanipal",
+      "tables": {
+        "ashurbanipal.users": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "email", "data_type": "varchar", "column_type": "varchar(200)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "full_name", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "age", "data_type": "smallint", "column_type": "smallint"},
+            {"name": "is_active", "data_type": "tinyint", "column_type": "tinyint(1)"},
+            {"name": "login_count", "data_type": "int", "column_type": "int"},
+            {"name": "metadata", "data_type": "json", "column_type": "json"},
+            {"name": "last_login_at", "data_type": "datetime", "column_type": "datetime"},
+            {"name": "created_at", "data_type": "datetime", "column_type": "datetime"}
+          ],
+          "unique_keys": [{"name": "email", "primary": false, "columns": ["email"]}, {"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "ashurbanipal.orders": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "user_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "status", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "total_cents", "data_type": "int", "column_type": "int"},
+            {"name": "discount_pct", "data_type": "decimal", "column_type": "decimal(5,2)"},
+            {"name": "created_at", "data_type": "datetime", "column_type": "datetime"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "ashurbanipal.order_extra": {
+          "columns": [
+            {"name": "order_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "gift_message", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "is_gift", "data_type": "tinyint", "column_type": "tinyint(1)"},
+            {"name": "created_at", "data_type": "datetime", "column_type": "datetime"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["order_id"]}]
+        },
+        "ashurbanipal.products": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "sku", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "name", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "category", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "price", "data_type": "decimal", "column_type": "decimal(10,2)"},
+            {"name": "weight_kg", "data_type": "float", "column_type": "float"},
+            {"name": "in_stock", "data_type": "tinyint", "column_type": "tinyint(1)"},
+            {"name": "description", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "created_on", "data_type": "date", "column_type": "date"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}, {"name": "sku", "primary": false, "columns": ["sku"]}]
+        },
+        "ashurbanipal.page_hits": {
+          "columns": [
+            {"name": "path", "data_type": "varchar", "column_type": "varchar(60)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "day", "data_type": "date", "column_type": "date"},
+            {"name": "hits", "data_type": "int", "column_type": "int"},
+            {"name": "ref_code", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "detail", "data_type": "json", "column_type": "json"}
+          ],
+          "unique_keys": [
+            {"name": "page_hits_hits_day_path", "primary": false, "columns": ["hits", "day", "path"]},
+            {"name": "page_hits_path_day", "primary": false, "columns": ["path", "day"]}
+          ]
+        },
+        "ashurbanipal.typed_samples": {
+          "columns": [
+            {"name": "id", "data_type": "int", "column_type": "int"},
+            {"name": "tinyint_v", "data_type": "tinyint", "column_type": "tinyint"},
+            {"name": "smallint_v", "data_type": "smallint", "column_type": "smallint"},
+            {"name": "mediumint_v", "data_type": "mediumint", "column_type": "mediumint"},
+            {"name": "int_v", "data_type": "int", "column_type": "int"},
+            {"name": "bigint_v", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "unsigned_v", "data_type": "bigint", "column_type": "bigint unsigned"},
+            {"name": "decimal_v", "data_type": "decimal", "column_type": "decimal(65,30)"},
+            {"name": "float_v", "data_type": "float", "column_type": "float"},
+            {"name": "double_v", "data_type": "double", "column_type": "double"},
+            {"name": "date_v", "data_type": "date", "column_type": "date"},
+            {"name": "datetime_v", "data_type": "datetime", "column_type": "datetime(6)"},
+            {"name": "timestamp_v", "data_type": "timestamp", "column_type": "timestamp(6)"},
+            {"name": "time_v", "data_type": "time", "column_type": "time(6)"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.carriers": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "name", "data_type": "varchar", "column_type": "varchar(100)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "contact_email", "data_type": "varchar", "column_type": "varchar(200)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "is_active", "data_type": "tinyint", "column_type": "tinyint(1)"}
+          ],
+          "unique_keys": [{"name": "name", "primary": false, "columns": ["name"]}, {"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.shipments": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "order_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "carrier_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "tracking_number", "data_type": "varchar", "column_type": "varchar(30)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "status", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "shipped_at", "data_type": "datetime", "column_type": "datetime"},
+            {"name": "delivered_at", "data_type": "datetime", "column_type": "datetime"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.shipment_events": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "shipment_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "handled_by_user_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "event_type", "data_type": "varchar", "column_type": "varchar(30)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "occurred_at", "data_type": "datetime", "column_type": "datetime"},
+            {"name": "notes", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "warehouse.users": {
+          "columns": [
+            {"name": "id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "username", "data_type": "varchar", "column_type": "varchar(50)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "shift", "data_type": "varchar", "column_type": "varchar(10)", "collation": "utf8mb4_0900_ai_ci"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}, {"name": "username", "primary": false, "columns": ["username"]}]
+        },
+        "ashurbanipal.collated": {
+          "synthetic": true,
+          "columns": [
+            {"name": "id", "data_type": "int", "column_type": "int"},
+            {"name": "name_a", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_bin"},
+            {"name": "name_b", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "ashurbanipal.keyless": {
+          "synthetic": true,
+          "columns": [
+            {"name": "order_id", "data_type": "bigint", "column_type": "bigint"},
+            {"name": "note", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"}
+          ],
+          "unique_keys": []
+        },
+        "ashurbanipal.label_clash": {
+          "synthetic": true,
+          "columns": [{"name": "id", "data_type": "int", "column_type": "int"}, {"name": "id_1", "data_type": "int", "column_type": "int"}],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
+        "ashurbanipal.text_keyed": {
+          "synthetic": true,
+          "columns": [
+            {"name": "code", "data_type": "varchar", "column_type": "varchar(20)", "collation": "utf8mb4_0900_ai_ci"},
+            {"name": "label", "data_type": "text", "column_type": "text", "collation": "utf8mb4_0900_ai_ci"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["code"]}]
+        },
+        "ashurbanipal.key_choice": {
+          "synthetic": true,
+          "columns": [
+            {"name": "a", "data_type": "int", "column_type": "int"},
+            {"name": "b", "data_type": "int", "column_type": "int"},
+            {"name": "c", "data_type": "int", "column_type": "int"}
+          ],
+          "unique_keys": [{"name": "b_short", "primary": false, "columns": ["c"]}, {"name": "PRIMARY", "primary": true, "columns": ["a", "b"]}]
+        },
+        "ashurbanipal.key_tie": {
+          "synthetic": true,
+          "columns": [{"name": "a", "data_type": "int", "column_type": "int"}, {"name": "b", "data_type": "int", "column_type": "int"}],
+          "unique_keys": [
+            {"name": "b_key", "primary": false, "columns": ["b"]},
+            {"name": "a_key", "primary": false, "columns": ["a"]},
+            {"name": "0_hidden", "primary": false, "columns": ["hidden"]}
+          ]
+        }
+      }
+    },
+    "sqlite": {
+      "schemas": ["main"],
+      "default_schema": "main",
+      "tables": {
+        "main.users": {
+          "columns": [
+            {"name": "id", "declared": "INTEGER"},
+            {"name": "email", "declared": "TEXT"},
+            {"name": "full_name", "declared": "TEXT"},
+            {"name": "age", "declared": "INTEGER"},
+            {"name": "is_active", "declared": "INTEGER"},
+            {"name": "login_count", "declared": "INTEGER"},
+            {"name": "metadata", "declared": "TEXT"},
+            {"name": "last_login_at", "declared": "TEXT"},
+            {"name": "created_at", "declared": "TEXT"}
+          ],
+          "unique_keys": [{"name": "sqlite_autoindex_users_1", "primary": false, "columns": ["email"]}, {"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.orders": {
+          "columns": [
+            {"name": "id", "declared": "INTEGER"},
+            {"name": "user_id", "declared": "INTEGER"},
+            {"name": "status", "declared": "TEXT"},
+            {"name": "total_cents", "declared": "INTEGER"},
+            {"name": "discount_pct", "declared": "REAL"},
+            {"name": "created_at", "declared": "TEXT"}
+          ],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.order_extra": {
+          "columns": [
+            {"name": "order_id", "declared": "INTEGER"},
+            {"name": "gift_message", "declared": "TEXT"},
+            {"name": "is_gift", "declared": "INTEGER"},
+            {"name": "created_at", "declared": "TEXT"}
+          ],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["order_id"]}]
+        },
+        "main.products": {
+          "columns": [
+            {"name": "id", "declared": "INTEGER"},
+            {"name": "sku", "declared": "TEXT"},
+            {"name": "name", "declared": "TEXT"},
+            {"name": "category", "declared": "TEXT"},
+            {"name": "price", "declared": "REAL"},
+            {"name": "weight_kg", "declared": "REAL"},
+            {"name": "in_stock", "declared": "INTEGER"},
+            {"name": "description", "declared": "TEXT"},
+            {"name": "created_on", "declared": "TEXT"}
+          ],
+          "unique_keys": [{"name": "sqlite_autoindex_products_1", "primary": false, "columns": ["sku"]}, {"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.page_hits": {
+          "columns": [
+            {"name": "path", "declared": "TEXT"},
+            {"name": "day", "declared": "TEXT"},
+            {"name": "hits", "declared": "INTEGER"},
+            {"name": "ref_code", "declared": "TEXT"},
+            {"name": "detail", "declared": "TEXT"}
+          ],
+          "unique_keys": [
+            {"name": "page_hits_path_day", "primary": false, "columns": ["path", "day"]},
+            {"name": "sqlite_autoindex_page_hits_2", "primary": false, "columns": ["hits", "day", "path"]}
+          ]
+        },
+        "main.typed_samples": {
+          "columns": [
+            {"name": "id", "declared": "INTEGER"},
+            {"name": "integer_v", "declared": "INTEGER"},
+            {"name": "numeric_v", "declared": "NUMERIC"},
+            {"name": "real_v", "declared": "REAL"},
+            {"name": "date_v", "declared": "DATE"},
+            {"name": "datetime_v", "declared": "DATETIME"},
+            {"name": "time_v", "declared": "TIME"}
+          ],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.collated": {
+          "synthetic": true,
+          "columns": [{"name": "id", "declared": "INTEGER"}, {"name": "name_a", "declared": "TEXT"}, {"name": "name_b", "declared": "TEXT"}],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.keyless": {"synthetic": true, "columns": [{"name": "order_id", "declared": "INTEGER"}, {"name": "note", "declared": "TEXT"}], "unique_keys": []},
+        "main.label_clash": {
+          "synthetic": true,
+          "columns": [{"name": "id", "declared": "INTEGER"}, {"name": "id_1", "declared": "INTEGER"}],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.text_keyed": {
+          "synthetic": true,
+          "columns": [{"name": "code", "declared": "TEXT"}, {"name": "label", "declared": "TEXT"}],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["code"]}]
+        },
+        "main.key_choice": {
+          "synthetic": true,
+          "columns": [{"name": "a", "declared": "INTEGER"}, {"name": "b", "declared": "INTEGER"}, {"name": "c", "declared": "INTEGER"}],
+          "unique_keys": [{"name": "b_short", "primary": false, "columns": ["c"]}, {"name": "", "primary": true, "columns": ["a", "b"]}]
+        },
+        "main.key_tie": {
+          "synthetic": true,
+          "columns": [{"name": "a", "declared": "INTEGER"}, {"name": "b", "declared": "INTEGER"}],
+          "unique_keys": [
+            {"name": "b_key", "primary": false, "columns": ["b"]},
+            {"name": "a_key", "primary": false, "columns": ["a"]},
+            {"name": "0_hidden", "primary": false, "columns": ["hidden"]}
+          ]
+        }
+      }
+    }
+  },
+  "cases": [
+    {"name": "parse-malformed-json", "join_raw": "{", "expect_error": "invalid_join"},
+    {"name": "parse-not-an-object", "join_raw": "[]", "expect_error": "invalid_join"},
+    {
+      "name": "parse-unknown-key",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}], "where": "1=1"},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-unknown-key-in-an-on-pair",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id", "op": ">"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-negative-position",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": -1, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-missing-table",
+      "join": {"joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-missing-right",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-trailing-data",
+      "join_raw": "{\"table\":\"orders\",\"joins\":[{\"type\":\"inner\",\"table\":\"users\",\"on\":[{\"left\":{\"join\":0,\"column\":\"user_id\"},\"right\":\"id\"}]}]} {}",
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-key-in-another-case",
+      "join": {"TABLE": "orders", "Joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-nested-key-in-another-case",
+      "join": {"table": "orders", "joins": [{"Type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-fractional-position",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0.5, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-boolean-position",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": true, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-wrong-json-type",
+      "join": {"table": 5, "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-null-schema",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}], "schema": null},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-joined-table-null-schema",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "schema": null, "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-schema-wrong-type",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}], "schema": 5},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-joined-table-schema-wrong-type",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "schema": ["public"], "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]
+      },
+      "expect_error": "invalid_join"
+    },
+    {"name": "parse-no-joins", "join": {"table": "orders", "joins": []}, "expect_error": "invalid_join"},
+    {
+      "name": "parse-too-many-tables",
+      "join": {
+        "table": "orders",
+        "joins": [
+          {"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]},
+          {"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]},
+          {"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]},
+          {"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}
+        ]
+      },
+      "expect_error": "invalid_join"
+    },
+    {"name": "parse-empty-on", "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": []}]}, "expect_error": "invalid_join"},
+    {
+      "name": "parse-too-many-pairs",
+      "join": {
+        "table": "page_hits",
+        "joins": [
+          {
+            "type": "inner",
+            "table": "page_hits",
+            "on": [
+              {"left": {"join": 0, "column": "path"}, "right": "path"},
+              {"left": {"join": 0, "column": "path"}, "right": "path"},
+              {"left": {"join": 0, "column": "path"}, "right": "path"},
+              {"left": {"join": 0, "column": "path"}, "right": "path"}
+            ]
+          }
+        ]
+      },
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-on-left-not-earlier",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 1, "column": "id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-unknown-join-type",
+      "join": {"table": "orders", "joins": [{"type": "outer", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-join-type-is-case-sensitive",
+      "join": {"table": "orders", "joins": [{"type": "LEFT", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-empty-columns",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}], "columns": []},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-duplicate-columns",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 0, "column": "id"}]
+      },
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "parse-oversize",
+      "join_raw": "{\"table\":\"oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo\",\"joins\":[{\"type\":\"inner\",\"table\":\"users\",\"on\":[{\"left\":{\"join\":0,\"column\":\"user_id\"},\"right\":\"id\"}]}]}",
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "unknown-table",
+      "join": {"table": "no_such_table", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "unknown-table-schema",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "schema": "no_such_schema"
+      },
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "unknown-on-column",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "nope"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "unknown-on-left-column",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "nope"}, "right": "id"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "unknown-hostile-on-column",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id\" = t0.\"user_id\" or 1=1 --"}]}]
+      },
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "unknown-columns-entry",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 1, "column": "nope"}]
+      },
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "columns-position-out-of-range",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 2, "column": "id"}]
+      },
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "pair-class-mismatch",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "total_cents"}, "right": "email"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "pair-json-is-not-joinable",
+      "join": {
+        "table": "users",
+        "joins": [{"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "metadata"}, "right": "status"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {"error": "invalid_join"},
+        "mysql": {"error": "invalid_join"},
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1 from \"users\" t0 inner join \"orders\" t1 on t1.\"status\" = t0.\"metadata\" order by t0.\"id\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        }
+      }
+    },
+    {
+      "name": "pair-float-is-not-joinable",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "products", "on": [{"left": {"join": 0, "column": "discount_pct"}, "right": "weight_kg"}]}]},
+      "expect_error": "invalid_join"
+    },
+    {
+      "name": "pair-array-is-not-joinable",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "tags"}, "right": "tags"}]}]},
+      "expect": {"postgres": {"error": "invalid_join"}}
+    },
+    {
+      "name": "pair-enums-of-different-types",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "products", "on": [{"left": {"join": 0, "column": "status"}, "right": "category"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {"error": "invalid_join"},
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`id` AS CHAR) as c1 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`products` t1 on t1.`category` = t0.`status` order by t0.`id` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1 from \"orders\" t0 inner join \"products\" t1 on t1.\"category\" = t0.\"status\" order by t0.\"id\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        }
+      }
+    },
+    {
+      "name": "pair-enum-to-same-enum",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "status"}, "right": "status"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"id\"::text as c1 from \"public\".\"orders\" t0 inner join \"public\".\"orders\" t1 on t1.\"status\" = t0.\"status\" order by t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`id` AS CHAR) as c1 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`orders` t1 on t1.`status` = t0.`status` order by t0.`id` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1 from \"orders\" t0 inner join \"orders\" t1 on t1.\"status\" = t0.\"status\" order by t0.\"id\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        }
+      }
+    },
+    {
+      "name": "pair-text-collation-clash",
+      "join": {
+        "table": "collated",
+        "joins": [{"type": "inner", "table": "collated", "on": [{"left": {"join": 0, "column": "name_a"}, "right": "name_b"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {"error": "invalid_join"},
+        "mysql": {"error": "invalid_join"},
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1 from \"collated\" t0 inner join \"collated\" t1 on t1.\"name_b\" = t0.\"name_a\" order by t0.\"id\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        }
+      }
+    },
+    {
+      "name": "pair-text-same-collation",
+      "join": {
+        "table": "collated",
+        "joins": [{"type": "inner", "table": "collated", "on": [{"left": {"join": 0, "column": "name_a"}, "right": "name_a"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"id\"::text as c1 from \"public\".\"collated\" t0 inner join \"public\".\"collated\" t1 on t1.\"name_a\" = t0.\"name_a\" order by t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`id` AS CHAR) as c1 from `ashurbanipal`.`collated` t0 inner join `ashurbanipal`.`collated` t1 on t1.`name_a` = t0.`name_a` order by t0.`id` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1 from \"collated\" t0 inner join \"collated\" t1 on t1.\"name_a\" = t0.\"name_a\" order by t0.\"id\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1"]
+        }
+      }
+    },
+    {
+      "name": "all-columns-with-label-collisions",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t0.\"user_id\"::text as c1, t0.\"status\"::text as c2, t0.\"total_cents\"::text as c3, t0.\"discount_pct\"::text as c4, t0.\"tags\"::text as c5, t0.\"line_items\"::text as c6, t0.\"created_at\"::text as c7, t1.\"id\"::text as c8, t1.\"email\"::text as c9, t1.\"full_name\"::text as c10, t1.\"age\"::text as c11, t1.\"is_active\"::text as c12, t1.\"login_count\"::text as c13, t1.\"metadata\"::text as c14, t1.\"last_login_at\"::text as c15, t1.\"created_at\"::text as c16 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": [
+            "id_0",
+            "user_id",
+            "status",
+            "total_cents",
+            "discount_pct",
+            "tags",
+            "line_items",
+            "created_at_0",
+            "id_1",
+            "email",
+            "full_name",
+            "age",
+            "is_active",
+            "login_count",
+            "metadata",
+            "last_login_at",
+            "created_at_1"
+          ]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t0.`user_id` AS CHAR) as c1, CAST(t0.`status` AS CHAR) as c2, CAST(t0.`total_cents` AS CHAR) as c3, CAST(t0.`discount_pct` AS CHAR) as c4, CAST(t0.`created_at` AS CHAR) as c5, CAST(t1.`id` AS CHAR) as c6, CAST(t1.`email` AS CHAR) as c7, CAST(t1.`full_name` AS CHAR) as c8, CAST(t1.`age` AS CHAR) as c9, CAST(t1.`is_active` AS CHAR) as c10, CAST(t1.`login_count` AS CHAR) as c11, CAST(t1.`metadata` AS CHAR) as c12, CAST(t1.`last_login_at` AS CHAR) as c13, CAST(t1.`created_at` AS CHAR) as c14 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": [
+            "id_0",
+            "user_id",
+            "status",
+            "total_cents",
+            "discount_pct",
+            "created_at_0",
+            "id_1",
+            "email",
+            "full_name",
+            "age",
+            "is_active",
+            "login_count",
+            "metadata",
+            "last_login_at",
+            "created_at_1"
+          ]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t0.\"user_id\" AS TEXT) as c1, CAST(t0.\"status\" AS TEXT) as c2, CAST(t0.\"total_cents\" AS TEXT) as c3, CAST(t0.\"discount_pct\" AS TEXT) as c4, CAST(t0.\"created_at\" AS TEXT) as c5, CAST(t1.\"id\" AS TEXT) as c6, CAST(t1.\"email\" AS TEXT) as c7, CAST(t1.\"full_name\" AS TEXT) as c8, CAST(t1.\"age\" AS TEXT) as c9, CAST(t1.\"is_active\" AS TEXT) as c10, CAST(t1.\"login_count\" AS TEXT) as c11, CAST(t1.\"metadata\" AS TEXT) as c12, CAST(t1.\"last_login_at\" AS TEXT) as c13, CAST(t1.\"created_at\" AS TEXT) as c14 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": [
+            "id_0",
+            "user_id",
+            "status",
+            "total_cents",
+            "discount_pct",
+            "created_at_0",
+            "id_1",
+            "email",
+            "full_name",
+            "age",
+            "is_active",
+            "login_count",
+            "metadata",
+            "last_login_at",
+            "created_at_1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "columns-subset-in-request-order",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 1, "column": "email"}, {"join": 0, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t1.\"email\"::text as c0, t0.\"id\"::text as c1 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["email", "id"]
+        },
+        "mysql": {
+          "sql": "CAST(t1.`email` AS CHAR) as c0, CAST(t0.`id` AS CHAR) as c1 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["email", "id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t1.\"email\" AS TEXT) as c0, CAST(t0.\"id\" AS TEXT) as c1 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["email", "id"]
+        }
+      }
+    },
+    {
+      "name": "self-join-labels",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "left", "table": "orders", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "user_id"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}, {"join": 0, "column": "status"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"id\"::text as c1, t0.\"status\"::text as c2 from \"public\".\"orders\" t0 left join \"public\".\"orders\" t1 on t1.\"user_id\" = t0.\"user_id\" order by t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id_0", "id_1", "status"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`id` AS CHAR) as c1, CAST(t0.`status` AS CHAR) as c2 from `ashurbanipal`.`orders` t0 left join `ashurbanipal`.`orders` t1 on t1.`user_id` = t0.`user_id` order by t0.`id` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1", "status"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1, CAST(t0.\"status\" AS TEXT) as c2 from \"orders\" t0 left join \"orders\" t1 on t1.\"user_id\" = t0.\"user_id\" order by t0.\"id\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1", "status"]
+        }
+      }
+    },
+    {
+      "name": "label-suffix-collides-with-a-real-column",
+      "join": {
+        "table": "label_clash",
+        "joins": [{"type": "inner", "table": "label_clash", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}, {"join": 0, "column": "id_1"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"id\"::text as c1, t0.\"id_1\"::text as c2 from \"public\".\"label_clash\" t0 inner join \"public\".\"label_clash\" t1 on t1.\"id\" = t0.\"id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id_0", "id_1_2", "id_1"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`id` AS CHAR) as c1, CAST(t0.`id_1` AS CHAR) as c2 from `ashurbanipal`.`label_clash` t0 inner join `ashurbanipal`.`label_clash` t1 on t1.`id` = t0.`id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1_2", "id_1"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"id\" AS TEXT) as c1, CAST(t0.\"id_1\" AS TEXT) as c2 from \"label_clash\" t0 inner join \"label_clash\" t1 on t1.\"id\" = t0.\"id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1_2", "id_1"]
+        }
+      }
+    },
+    {
+      "name": "left-joins-chained",
+      "join": {
+        "table": "orders",
+        "joins": [
+          {"type": "left", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]},
+          {"type": "left", "table": "order_extra", "on": [{"left": {"join": 0, "column": "id"}, "right": "order_id"}]}
+        ],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "email"}, {"join": 2, "column": "gift_message"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"email\"::text as c1, t2.\"gift_message\"::text as c2 from \"public\".\"orders\" t0 left join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" left join \"public\".\"order_extra\" t2 on t2.\"order_id\" = t0.\"id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id", "email", "gift_message"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`email` AS CHAR) as c1, CAST(t2.`gift_message` AS CHAR) as c2 from `ashurbanipal`.`orders` t0 left join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` left join `ashurbanipal`.`order_extra` t2 on t2.`order_id` = t0.`id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id", "email", "gift_message"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"email\" AS TEXT) as c1, CAST(t2.\"gift_message\" AS TEXT) as c2 from \"orders\" t0 left join \"users\" t1 on t1.\"id\" = t0.\"user_id\" left join \"order_extra\" t2 on t2.\"order_id\" = t0.\"id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id", "email", "gift_message"]
+        }
+      }
+    },
+    {
+      "name": "four-tables-three-pairs",
+      "join": {
+        "table": "page_hits",
+        "joins": [
+          {
+            "type": "inner",
+            "table": "page_hits",
+            "on": [
+              {"left": {"join": 0, "column": "hits"}, "right": "hits"},
+              {"left": {"join": 0, "column": "day"}, "right": "day"},
+              {"left": {"join": 0, "column": "path"}, "right": "path"}
+            ]
+          },
+          {
+            "type": "left",
+            "table": "page_hits",
+            "on": [{"left": {"join": 1, "column": "path"}, "right": "path"}, {"left": {"join": 1, "column": "day"}, "right": "day"}]
+          },
+          {"type": "left", "table": "page_hits", "on": [{"left": {"join": 0, "column": "path"}, "right": "path"}]}
+        ],
+        "columns": [{"join": 0, "column": "path"}, {"join": 1, "column": "hits"}, {"join": 2, "column": "hits"}, {"join": 3, "column": "hits"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"path\"::text as c0, t1.\"hits\"::text as c1, t2.\"hits\"::text as c2, t3.\"hits\"::text as c3 from \"public\".\"page_hits\" t0 inner join \"public\".\"page_hits\" t1 on t1.\"hits\" = t0.\"hits\" and t1.\"day\" = t0.\"day\" and t1.\"path\" = t0.\"path\" left join \"public\".\"page_hits\" t2 on t2.\"path\" = t1.\"path\" and t2.\"day\" = t1.\"day\" left join \"public\".\"page_hits\" t3 on t3.\"path\" = t0.\"path\" order by t0.\"path\" asc, t0.\"day\" asc, t3.\"path\" asc, t3.\"day\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["path", "hits_1", "hits_2", "hits_3"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`path` AS CHAR) as c0, CAST(t1.`hits` AS CHAR) as c1, CAST(t2.`hits` AS CHAR) as c2, CAST(t3.`hits` AS CHAR) as c3 from `ashurbanipal`.`page_hits` t0 inner join `ashurbanipal`.`page_hits` t1 on t1.`hits` = t0.`hits` and t1.`day` = t0.`day` and t1.`path` = t0.`path` left join `ashurbanipal`.`page_hits` t2 on t2.`path` = t1.`path` and t2.`day` = t1.`day` left join `ashurbanipal`.`page_hits` t3 on t3.`path` = t0.`path` order by t0.`path` asc, t0.`day` asc, t3.`path` asc, t3.`day` asc limit ? offset ?",
+          "values": [],
+          "labels": ["path", "hits_1", "hits_2", "hits_3"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"path\" AS TEXT) as c0, CAST(t1.\"hits\" AS TEXT) as c1, CAST(t2.\"hits\" AS TEXT) as c2, CAST(t3.\"hits\" AS TEXT) as c3 from \"page_hits\" t0 inner join \"page_hits\" t1 on t1.\"hits\" = t0.\"hits\" and t1.\"day\" = t0.\"day\" and t1.\"path\" = t0.\"path\" left join \"page_hits\" t2 on t2.\"path\" = t1.\"path\" and t2.\"day\" = t1.\"day\" left join \"page_hits\" t3 on t3.\"path\" = t0.\"path\" order by t0.\"path\" asc, t0.\"day\" asc, t3.\"path\" asc, t3.\"day\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["path", "hits_1", "hits_2", "hits_3"]
+        }
+      }
+    },
+    {
+      "name": "table-in-another-schema",
+      "join": {
+        "table": "shipments",
+        "schema": "warehouse",
+        "joins": [{"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "order_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "tracking_number"}, {"join": 1, "column": "status"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"tracking_number\"::text as c0, t1.\"status\"::text as c1 from \"warehouse\".\"shipments\" t0 inner join \"public\".\"orders\" t1 on t1.\"id\" = t0.\"order_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["tracking_number", "status"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`tracking_number` AS CHAR) as c0, CAST(t1.`status` AS CHAR) as c1 from `warehouse`.`shipments` t0 inner join `ashurbanipal`.`orders` t1 on t1.`id` = t0.`order_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["tracking_number", "status"]
+        }
+      }
+    },
+    {
+      "name": "joined-table-in-another-schema",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "left", "table": "shipments", "schema": "warehouse", "on": [{"left": {"join": 0, "column": "id"}, "right": "order_id"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "tracking_number"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"tracking_number\"::text as c1 from \"public\".\"orders\" t0 left join \"warehouse\".\"shipments\" t1 on t1.\"order_id\" = t0.\"id\" order by t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id", "tracking_number"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`tracking_number` AS CHAR) as c1 from `ashurbanipal`.`orders` t0 left join `warehouse`.`shipments` t1 on t1.`order_id` = t0.`id` order by t0.`id` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id", "tracking_number"]
+        }
+      }
+    },
+    {
+      "name": "request-schema-applies-to-unqualified-tables",
+      "schema": "warehouse",
+      "join": {
+        "table": "shipments",
+        "joins": [{"type": "left", "table": "carriers", "on": [{"left": {"join": 0, "column": "carrier_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "name"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"name\"::text as c1 from \"warehouse\".\"shipments\" t0 left join \"warehouse\".\"carriers\" t1 on t1.\"id\" = t0.\"carrier_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id", "name"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`name` AS CHAR) as c1 from `warehouse`.`shipments` t0 left join `warehouse`.`carriers` t1 on t1.`id` = t0.`carrier_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id", "name"]
+        }
+      }
+    },
+    {
+      "name": "same-name-tables-in-two-schemas",
+      "join": {
+        "table": "shipment_events",
+        "schema": "warehouse",
+        "joins": [
+          {"type": "left", "table": "users", "on": [{"left": {"join": 0, "column": "handled_by_user_id"}, "right": "id"}]},
+          {"type": "left", "table": "users", "schema": "warehouse", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}
+        ],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "id"}, {"join": 2, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0, t1.\"id\"::text as c1, t2.\"id\"::text as c2 from \"warehouse\".\"shipment_events\" t0 left join \"public\".\"users\" t1 on t1.\"id\" = t0.\"handled_by_user_id\" left join \"warehouse\".\"users\" t2 on t2.\"id\" = t0.\"id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id_0", "id_1", "id_2"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0, CAST(t1.`id` AS CHAR) as c1, CAST(t2.`id` AS CHAR) as c2 from `warehouse`.`shipment_events` t0 left join `ashurbanipal`.`users` t1 on t1.`id` = t0.`handled_by_user_id` left join `warehouse`.`users` t2 on t2.`id` = t0.`id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id_0", "id_1", "id_2"]
+        }
+      }
+    },
+    {
+      "name": "sqlite-main-schema-is-not-spliced",
+      "join": {
+        "table": "orders",
+        "schema": "main",
+        "joins": [{"type": "inner", "table": "users", "schema": "main", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}, {"join": 1, "column": "email"}]
+      },
+      "expect": {
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0, CAST(t1.\"email\" AS TEXT) as c1 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id", "email"]
+        }
+      }
+    },
+    {
+      "name": "filter-text-on-a-joined-table",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"join": 1, "column": "email", "op": "=", "value": "ada@example.com"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t1.\"email\"::text = $3) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["ada@example.com"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (CAST(t1.`email` AS CHAR) = ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["ada@example.com"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (CAST(t1.\"email\" AS TEXT) = ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["ada@example.com"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-typed-number-int-and-decimal",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "total_cents", "op": ">", "value": "100"}, {"logic": "OR", "not": true, "column": "total_cents", "op": "<=", "value": "10.5"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" > $3::int8) OR (NOT (t0.\"total_cents\" <= $4::numeric)) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["100", "10.5"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (t0.`total_cents` > CAST(? AS DECIMAL(65,30))) OR (NOT (t0.`total_cents` <= CAST(? AS DECIMAL(65,30)))) order by t0.`id` asc limit ? offset ?",
+          "values": ["100", "10.5"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" > ?) OR (NOT (t0.\"total_cents\" <= ?)) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["100", "10.5"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-in-and-between",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [
+        {"column": "total_cents", "op": "IN", "value": ["1", "2", "3"]},
+        {"logic": "AND", "join": 1, "column": "created_at", "op": "BETWEEN", "value": ["2024-01-01 00:00:00", "2024-12-31 23:59:59"]}
+      ],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" IN ($3::int8, $4::int8, $5::int8)) AND (t1.\"created_at\" BETWEEN $6::timestamptz AND $7::timestamptz) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["1", "2", "3", "2024-01-01 00:00:00", "2024-12-31 23:59:59"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (t0.`total_cents` IN (CAST(? AS DECIMAL(65,30)), CAST(? AS DECIMAL(65,30)), CAST(? AS DECIMAL(65,30)))) AND (t1.`created_at` BETWEEN ? AND ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["1", "2", "3", "2024-01-01 00:00:00", "2024-12-31 23:59:59"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" IN (?, ?, ?)) AND (CAST(t1.\"created_at\" AS TEXT) BETWEEN ? AND ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["1", "2", "3", "2024-01-01 00:00:00", "2024-12-31 23:59:59"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-mixed-between-and-a-pattern-on-a-typed-column",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "total_cents", "op": "BETWEEN", "value": ["1", "9.5"]}, {"logic": "OR", "column": "total_cents", "op": "LIKE", "value": "1%"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" BETWEEN $3::int8 AND $4::numeric) OR (t0.\"total_cents\"::text LIKE $5) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["1", "9.5", "1%"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (t0.`total_cents` BETWEEN CAST(? AS DECIMAL(65,30)) AND CAST(? AS DECIMAL(65,30))) OR (CAST(t0.`total_cents` AS CHAR) LIKE ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["1", "9.5", "1%"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" BETWEEN ? AND ?) OR (CAST(t0.\"total_cents\" AS TEXT) LIKE ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["1", "9.5", "1%"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-ilike-per-engine",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"join": 1, "column": "full_name", "op": "ILIKE", "value": "%ada%"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t1.\"full_name\"::text ILIKE $3) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["%ada%"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (LOWER(CAST(t1.`full_name` AS CHAR)) LIKE LOWER(?)) order by t0.`id` asc limit ? offset ?",
+          "values": ["%ada%"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (CAST(t1.\"full_name\" AS TEXT) LIKE ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["%ada%"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-null-checks",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "left", "table": "order_extra", "on": [{"left": {"join": 0, "column": "id"}, "right": "order_id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"join": 1, "column": "gift_message", "op": "IS NULL"}, {"logic": "AND", "column": "discount_pct", "op": "IS NOT NULL"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 left join \"public\".\"order_extra\" t1 on t1.\"order_id\" = t0.\"id\" where (t1.\"gift_message\"::text IS NULL) AND (t0.\"discount_pct\" IS NOT NULL) order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 left join `ashurbanipal`.`order_extra` t1 on t1.`order_id` = t0.`id` where (CAST(t1.`gift_message` AS CHAR) IS NULL) AND (t0.`discount_pct` IS NOT NULL) order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 left join \"order_extra\" t1 on t1.\"order_id\" = t0.\"id\" where (CAST(t1.\"gift_message\" AS TEXT) IS NULL) AND (t0.\"discount_pct\" IS NOT NULL) order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-position-out-of-range",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"join": 2, "column": "id", "op": "=", "value": "1"}],
+      "expect_error": "invalid_filter"
+    },
+    {
+      "name": "filter-unknown-column",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"join": 1, "column": "nope", "op": "=", "value": "1"}],
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "filter-hostile-column-name",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"join": 1, "column": "email\"::text = '' or 1=1 --", "op": "=", "value": "x"}],
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "filter-typed-value-check",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "total_cents", "op": "=", "value": "abc"}],
+      "expect": {
+        "postgres": {"error": "invalid_filter"},
+        "mysql": {"error": "invalid_filter"},
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" where (t0.\"total_cents\" = ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["abc"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-zero-date",
+      "join": {
+        "table": "typed_samples",
+        "joins": [{"type": "inner", "table": "typed_samples", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "date_v", "op": "=", "value": "0000-00-00"}],
+      "expect": {
+        "postgres": {"error": "invalid_filter"},
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`typed_samples` t0 inner join `ashurbanipal`.`typed_samples` t1 on t1.`id` = t0.`id` where (CAST(t0.`date_v` AS CHAR) = ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["0000-00-00"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"typed_samples\" t0 inner join \"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" = ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["0000-00-00"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-date-compares-in-its-own-type",
+      "join": {
+        "table": "typed_samples",
+        "joins": [{"type": "inner", "table": "typed_samples", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "date_v", "op": "=", "value": "2016-02-29"}],
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"typed_samples\" t0 inner join \"public\".\"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" = $3::date) order by t0.\"id\" asc limit $1 offset $2",
+          "values": ["2016-02-29"],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`typed_samples` t0 inner join `ashurbanipal`.`typed_samples` t1 on t1.`id` = t0.`id` where (t0.`date_v` = ?) order by t0.`id` asc limit ? offset ?",
+          "values": ["2016-02-29"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"typed_samples\" t0 inner join \"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" = ?) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["2016-02-29"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-zero-date-in-a-list",
+      "join": {
+        "table": "typed_samples",
+        "joins": [{"type": "inner", "table": "typed_samples", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "filter": [{"column": "date_v", "op": "IN", "value": ["2016-02-29", "0000-00-00"]}],
+      "expect": {
+        "postgres": {"error": "invalid_filter"},
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`typed_samples` t0 inner join `ashurbanipal`.`typed_samples` t1 on t1.`id` = t0.`id` where (CAST(t0.`date_v` AS CHAR) IN (?, ?)) order by t0.`id` asc limit ? offset ?",
+          "values": ["2016-02-29", "0000-00-00"],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"typed_samples\" t0 inner join \"typed_samples\" t1 on t1.\"id\" = t0.\"id\" where (t0.\"date_v\" IN (?, ?)) order by t0.\"id\" asc limit ? offset ?",
+          "values": ["2016-02-29", "0000-00-00"],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "filter-logic-on-first-condition",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "filter": [{"logic": "AND", "column": "id", "op": "=", "value": "1"}],
+      "expect_error": "invalid_filter"
+    },
+    {
+      "name": "filter-empty-in-list",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "filter": [{"column": "total_cents", "op": "IN", "value": []}],
+      "expect_error": "invalid_filter"
+    },
+    {
+      "name": "filter-too-many-conditions",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "filter": [
+        {"column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"},
+        {"logic": "AND", "column": "id", "op": "IS NULL"}
+      ],
+      "expect_error": "invalid_filter"
+    },
+    {
+      "name": "sort-base-column-desc",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "sort": "total_cents",
+      "order": "desc",
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"total_cents\" desc, t0.\"id\" desc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t0.`total_cents` desc, t0.`id` desc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"total_cents\" desc, t0.\"id\" desc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "sort-joined-column-not-selected",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "sort": "full_name",
+      "sort_join": 1,
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t1.\"full_name\" asc, t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t1.`full_name` asc, t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t1.\"full_name\" asc, t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "sort-equal-to-the-key-is-not-repeated",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "sort": "id",
+      "order": "desc",
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" desc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t0.`id` desc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" desc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "order-without-sort-stays-ascending",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "order": "desc",
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 inner join \"public\".\"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 inner join \"users\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "sort-by-part-of-a-composite-key",
+      "join": {
+        "table": "page_hits",
+        "joins": [{"type": "left", "table": "orders", "on": [{"left": {"join": 0, "column": "hits"}, "right": "total_cents"}]}],
+        "columns": [{"join": 0, "column": "path"}]
+      },
+      "sort": "day",
+      "order": "desc",
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"path\"::text as c0 from \"public\".\"page_hits\" t0 left join \"public\".\"orders\" t1 on t1.\"total_cents\" = t0.\"hits\" order by t0.\"day\" desc, t0.\"path\" desc, t1.\"id\" desc limit $1 offset $2",
+          "values": [],
+          "labels": ["path"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`path` AS CHAR) as c0 from `ashurbanipal`.`page_hits` t0 left join `ashurbanipal`.`orders` t1 on t1.`total_cents` = t0.`hits` order by t0.`day` desc, t0.`path` desc, t1.`id` desc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"path\" AS TEXT) as c0 from \"page_hits\" t0 left join \"orders\" t1 on t1.\"total_cents\" = t0.\"hits\" order by t0.\"day\" desc, t0.\"path\" desc, t1.\"id\" desc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        }
+      }
+    },
+    {
+      "name": "no-key-and-no-sort-has-no-order-by",
+      "join": {
+        "table": "keyless",
+        "joins": [{"type": "inner", "table": "keyless", "on": [{"left": {"join": 0, "column": "order_id"}, "right": "order_id"}]}],
+        "columns": [{"join": 0, "column": "note"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"note\"::text as c0 from \"public\".\"keyless\" t0 inner join \"public\".\"keyless\" t1 on t1.\"order_id\" = t0.\"order_id\" limit $1 offset $2",
+          "values": [],
+          "labels": ["note"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`note` AS CHAR) as c0 from `ashurbanipal`.`keyless` t0 inner join `ashurbanipal`.`keyless` t1 on t1.`order_id` = t0.`order_id` limit ? offset ?",
+          "values": [],
+          "labels": ["note"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"note\" AS TEXT) as c0 from \"keyless\" t0 inner join \"keyless\" t1 on t1.\"order_id\" = t0.\"order_id\" limit ? offset ?",
+          "values": [],
+          "labels": ["note"]
+        }
+      }
+    },
+    {
+      "name": "sort-join-without-sort",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "sort_join": 1,
+      "expect_error": "invalid_parameter"
+    },
+    {
+      "name": "sort-join-out-of-range",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "sort": "id",
+      "sort_join": 2,
+      "expect_error": "invalid_parameter"
+    },
+    {
+      "name": "sort-unknown-column",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "sort": "nope",
+      "sort_join": 1,
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "sort-hostile-column-name",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}]},
+      "sort": "id; drop table users",
+      "expect_error": "unknown_column"
+    },
+    {
+      "name": "tie-break-prefers-the-shortest-unique-key",
+      "join": {
+        "table": "page_hits",
+        "joins": [{"type": "left", "table": "orders", "on": [{"left": {"join": 0, "column": "hits"}, "right": "total_cents"}]}],
+        "columns": [{"join": 0, "column": "path"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"path\"::text as c0 from \"public\".\"page_hits\" t0 left join \"public\".\"orders\" t1 on t1.\"total_cents\" = t0.\"hits\" order by t0.\"path\" asc, t0.\"day\" asc, t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["path"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`path` AS CHAR) as c0 from `ashurbanipal`.`page_hits` t0 left join `ashurbanipal`.`orders` t1 on t1.`total_cents` = t0.`hits` order by t0.`path` asc, t0.`day` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"path\" AS TEXT) as c0 from \"page_hits\" t0 left join \"orders\" t1 on t1.\"total_cents\" = t0.\"hits\" order by t0.\"path\" asc, t0.\"day\" asc, t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        }
+      }
+    },
+    {
+      "name": "tie-break-prefers-the-primary-key-over-a-shorter-key",
+      "join": {
+        "table": "key_choice",
+        "joins": [{"type": "inner", "table": "key_choice", "on": [{"left": {"join": 0, "column": "c"}, "right": "c"}]}],
+        "columns": [{"join": 0, "column": "a"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"a\"::text as c0 from \"public\".\"key_choice\" t0 inner join \"public\".\"key_choice\" t1 on t1.\"c\" = t0.\"c\" order by t0.\"a\" asc, t0.\"b\" asc, t1.\"a\" asc, t1.\"b\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["a"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`a` AS CHAR) as c0 from `ashurbanipal`.`key_choice` t0 inner join `ashurbanipal`.`key_choice` t1 on t1.`c` = t0.`c` order by t0.`a` asc, t0.`b` asc, t1.`a` asc, t1.`b` asc limit ? offset ?",
+          "values": [],
+          "labels": ["a"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"a\" AS TEXT) as c0 from \"key_choice\" t0 inner join \"key_choice\" t1 on t1.\"c\" = t0.\"c\" order by t0.\"a\" asc, t0.\"b\" asc, t1.\"a\" asc, t1.\"b\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["a"]
+        }
+      }
+    },
+    {
+      "name": "tie-break-equal-keys-go-by-name-skipping-a-hidden-column",
+      "join": {
+        "table": "key_tie",
+        "joins": [{"type": "inner", "table": "key_tie", "on": [{"left": {"join": 0, "column": "b"}, "right": "b"}]}],
+        "columns": [{"join": 0, "column": "b"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"b\"::text as c0 from \"public\".\"key_tie\" t0 inner join \"public\".\"key_tie\" t1 on t1.\"b\" = t0.\"b\" order by t0.\"a\" asc, t1.\"a\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["b"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`b` AS CHAR) as c0 from `ashurbanipal`.`key_tie` t0 inner join `ashurbanipal`.`key_tie` t1 on t1.`b` = t0.`b` order by t0.`a` asc, t1.`a` asc limit ? offset ?",
+          "values": [],
+          "labels": ["b"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"b\" AS TEXT) as c0 from \"key_tie\" t0 inner join \"key_tie\" t1 on t1.\"b\" = t0.\"b\" order by t0.\"a\" asc, t1.\"a\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["b"]
+        }
+      }
+    },
+    {
+      "name": "key-fully-bound-composite-is-left-out",
+      "join": {
+        "table": "page_hits",
+        "joins": [
+          {
+            "type": "inner",
+            "table": "page_hits",
+            "on": [{"left": {"join": 0, "column": "path"}, "right": "path"}, {"left": {"join": 0, "column": "day"}, "right": "day"}]
+          }
+        ],
+        "columns": [{"join": 0, "column": "path"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"path\"::text as c0 from \"public\".\"page_hits\" t0 inner join \"public\".\"page_hits\" t1 on t1.\"path\" = t0.\"path\" and t1.\"day\" = t0.\"day\" order by t0.\"path\" asc, t0.\"day\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["path"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`path` AS CHAR) as c0 from `ashurbanipal`.`page_hits` t0 inner join `ashurbanipal`.`page_hits` t1 on t1.`path` = t0.`path` and t1.`day` = t0.`day` order by t0.`path` asc, t0.`day` asc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"path\" AS TEXT) as c0 from \"page_hits\" t0 inner join \"page_hits\" t1 on t1.\"path\" = t0.\"path\" and t1.\"day\" = t0.\"day\" order by t0.\"path\" asc, t0.\"day\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        }
+      }
+    },
+    {
+      "name": "key-partly-bound-is-kept",
+      "join": {
+        "table": "page_hits",
+        "joins": [{"type": "inner", "table": "page_hits", "on": [{"left": {"join": 0, "column": "path"}, "right": "path"}]}],
+        "columns": [{"join": 0, "column": "path"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"path\"::text as c0 from \"public\".\"page_hits\" t0 inner join \"public\".\"page_hits\" t1 on t1.\"path\" = t0.\"path\" order by t0.\"path\" asc, t0.\"day\" asc, t1.\"path\" asc, t1.\"day\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["path"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`path` AS CHAR) as c0 from `ashurbanipal`.`page_hits` t0 inner join `ashurbanipal`.`page_hits` t1 on t1.`path` = t0.`path` order by t0.`path` asc, t0.`day` asc, t1.`path` asc, t1.`day` asc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"path\" AS TEXT) as c0 from \"page_hits\" t0 inner join \"page_hits\" t1 on t1.\"path\" = t0.\"path\" order by t0.\"path\" asc, t0.\"day\" asc, t1.\"path\" asc, t1.\"day\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["path"]
+        }
+      }
+    },
+    {
+      "name": "key-bound-across-types-is-kept",
+      "join": {
+        "table": "products",
+        "joins": [{"type": "inner", "table": "typed_samples", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"products\" t0 inner join \"public\".\"typed_samples\" t1 on t1.\"id\" = t0.\"id\" order by t0.\"id\" asc, t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`products` t0 inner join `ashurbanipal`.`typed_samples` t1 on t1.`id` = t0.`id` order by t0.`id` asc, t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"products\" t0 inner join \"typed_samples\" t1 on t1.\"id\" = t0.\"id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "key-bound-to-a-keyless-table-is-kept",
+      "join": {
+        "table": "keyless",
+        "joins": [{"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "order_id"}, "right": "id"}]}],
+        "columns": [{"join": 1, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t1.\"id\"::text as c0 from \"public\".\"keyless\" t0 inner join \"public\".\"orders\" t1 on t1.\"id\" = t0.\"order_id\" order by t1.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t1.`id` AS CHAR) as c0 from `ashurbanipal`.`keyless` t0 inner join `ashurbanipal`.`orders` t1 on t1.`id` = t0.`order_id` order by t1.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t1.\"id\" AS TEXT) as c0 from \"keyless\" t0 inner join \"orders\" t1 on t1.\"id\" = t0.\"order_id\" order by t1.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "left-out-key-still-fixes-its-table",
+      "join": {
+        "table": "order_extra",
+        "joins": [
+          {"type": "inner", "table": "orders", "on": [{"left": {"join": 0, "column": "order_id"}, "right": "id"}]},
+          {"type": "inner", "table": "users", "on": [{"left": {"join": 1, "column": "user_id"}, "right": "id"}]}
+        ],
+        "columns": [{"join": 0, "column": "order_id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"order_id\"::text as c0 from \"public\".\"order_extra\" t0 inner join \"public\".\"orders\" t1 on t1.\"id\" = t0.\"order_id\" inner join \"public\".\"users\" t2 on t2.\"id\" = t1.\"user_id\" order by t0.\"order_id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["order_id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`order_id` AS CHAR) as c0 from `ashurbanipal`.`order_extra` t0 inner join `ashurbanipal`.`orders` t1 on t1.`id` = t0.`order_id` inner join `ashurbanipal`.`users` t2 on t2.`id` = t1.`user_id` order by t0.`order_id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["order_id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"order_id\" AS TEXT) as c0 from \"order_extra\" t0 inner join \"orders\" t1 on t1.\"id\" = t0.\"order_id\" inner join \"users\" t2 on t2.\"id\" = t1.\"user_id\" order by t0.\"order_id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["order_id"]
+        }
+      }
+    },
+    {
+      "name": "one-binding-from-a-fixed-table-is-enough",
+      "join": {
+        "table": "orders",
+        "joins": [{"type": "left", "table": "orders", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"orders\" t0 left join \"public\".\"orders\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 left join `ashurbanipal`.`orders` t1 on t1.`id` = t0.`user_id` order by t0.`id` asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        },
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"orders\" t0 left join \"orders\" t1 on t1.\"id\" = t0.\"user_id\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    },
+    {
+      "name": "key-bound-across-collations-is-kept",
+      "join": {
+        "table": "collated",
+        "joins": [{"type": "inner", "table": "text_keyed", "on": [{"left": {"join": 0, "column": "name_a"}, "right": "code"}]}],
+        "columns": [{"join": 0, "column": "id"}]
+      },
+      "expect": {
+        "postgres": {
+          "sql": "t0.\"id\"::text as c0 from \"public\".\"collated\" t0 inner join \"public\".\"text_keyed\" t1 on t1.\"code\" = t0.\"name_a\" order by t0.\"id\" asc, t1.\"code\" asc limit $1 offset $2",
+          "values": [],
+          "labels": ["id"]
+        },
+        "mysql": {"error": "invalid_join"},
+        "sqlite": {
+          "sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"collated\" t0 inner join \"text_keyed\" t1 on t1.\"code\" = t0.\"name_a\" order by t0.\"id\" asc limit ? offset ?",
+          "values": [],
+          "labels": ["id"]
+        }
+      }
+    }
+  ]
+}

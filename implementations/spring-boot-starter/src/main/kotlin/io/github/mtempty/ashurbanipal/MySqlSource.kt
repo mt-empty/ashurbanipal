@@ -68,7 +68,7 @@ private data class ConstraintRow(
 
 private data class FkCandidate(val columnName: String, val refSchema: String?, val refTable: String?, val refColumn: String?)
 
-private val JOIN_DIALECT = JoinDialect(
+internal val MYSQL_DIALECT = JoinDialect(
     quote = ::quoteIdentMysql,
     castText = { "CAST($it AS CHAR)" },
     castParam = { ph, target -> "CAST($ph AS $target)" },
@@ -367,7 +367,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
 
         // The statement is built from catalog names and generated aliases
         // only; every value is a bound parameter.
-        val (body, values) = buildJoinSelect(plan, JOIN_DIALECT)
+        val (body, values) = buildJoinSelect(plan, MYSQL_DIALECT)
         val bindArgs: List<Any?> = values + (opts.limit + 1) + opts.offset
         val rows = try {
             query(dataSource, timedSelect(variant, queryTimeoutSecs, body), bindArgs) { rs ->
@@ -403,7 +403,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
             columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
         }
 
-        val whereClause = opts.filter?.let { tableWhereClause(it, meta, JOIN_DIALECT) } ?: WhereClause("", emptyList())
+        val whereClause = opts.filter?.let { tableWhereClause(it, meta, MYSQL_DIALECT) } ?: WhereClause("", emptyList())
 
         val selectList = columns.joinToString(", ") { "CAST(${quoteIdentMysql(it.name)} AS CHAR)" }
         val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdentMysql)

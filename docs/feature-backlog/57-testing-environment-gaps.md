@@ -142,17 +142,16 @@ that deploys.
 Story 35 owns FK parity between the three conformance seeds. These gaps are
 about what all three lack.
 
-**S1. No view, materialized view or partitioned table in any seed.** No
-test in any port creates a view either (searched every port's tests for
-`create view` and `materialized`). So nothing checks that `/api/tables`
-lists base tables only (spec §5.2). A port that started listing views would
-pass every check. Partitioned tables are covered only by port-local
-Postgres tests (Rust `referenced_by_partitioning.rs`, `structure_partitioning.rs`;
-Go `referenced_by_partitioning_test.go`; Spring `StructureIntegrationTest.kt:48`;
-Node and Flask in their Postgres integration tests). Story 25 plans to add
-a view and a materialized view to the seed; this gap is the exclusion test,
-which is needed whether or not story 25 ships. *Size:* S for a view plus a
-listing assertion on Postgres; M for all three seeds.
+**S1. No view or materialized view in any seed — DONE.** Each conformance
+seed now defines an `active_users` view, and the Postgres seed also defines
+an `order_totals_by_status` materialized view. The exact table-list checks
+(`conformance/runner/tables.rs`, `schemas.rs`) fail if a port lists either,
+and `table_data::a_view_is_not_an_allowed_table` checks the allow-list.
+Partitioned tables stay port-local (Rust `referenced_by_partitioning.rs`,
+`structure_partitioning.rs`; Go `referenced_by_partitioning_test.go`;
+Spring `StructureIntegrationTest.kt:48`; Node and Flask in their Postgres
+integration tests): each partition is a base table, so a shared fixture
+would change every port's exact table list.
 
 **S2. Several column classes are never asserted.**
 `table_data::columns_report_their_column_class`
@@ -358,23 +357,20 @@ one was not built here.
 
 ### V — Engine versions and CI
 
-**V1. One Postgres version, and no stated supported range.** CI, the
-devcontainer and PGlite all run Postgres 18 (`postgres:18-alpine` in every
-workflow; `.devcontainer/docker-compose.yml:17`). No supported Postgres
-range is stated in `readme.md`, `docs/`, `PORTING.md` or the port READMEs.
-The catalog queries need at least Postgres 11: Rust's structure query reads
-`pg_index.indnkeyatts` (`core/src/db/postgres.rs:252`), added in 11. Nothing
-checks which other version limits the ports have. *Size:* S to state a range; M to
-add one older version to a CI matrix.
+**V1. One Postgres version, and no stated supported range — DONE.**
+`docs/adapter-decisions.md` ("Supported engine versions") now states
+Postgres 15 and later, and `rust-axum-conformance.yml` runs the kit on
+`postgres:15-alpine` on each push to `main`. Checked by hand on 2026-11-14:
+axum passes on 14 and 15, and the seed does not load on 13.
 
-**V2. MySQL and MariaDB tags float, and the stated minimums are untested.**
-CI and the devcontainer use `mysql:8` and `mariadb:11`
-(`docker-compose.yml:32,49`). `adapter-decisions.md:259` says the port
-needs MySQL 8.0.13 and that checks exist from 8.0.16 and MariaDB 10.2.
-Line 242 records a MariaDB 12.1+ change to FK name uniqueness. No job runs
-8.0.x, MySQL 9, or MariaDB 12. A floating tag also means CI can change
-engine version with no commit. *Size:* M (pin tags; add a min and a latest
-entry).
+**V2. MySQL and MariaDB tags float, and the stated minimums are untested —
+DONE.** Every workflow and the devcontainer now name an exact image version
+(`postgres:18.4-alpine`, `mysql:8.4.13`, `mariadb:11.8.8`). The stated
+range is MySQL 8.4+ and MariaDB 10.11+ (`docs/adapter-decisions.md`,
+"Supported engine versions"). `rust-axum-conformance.yml` runs the kit on
+MariaDB 10.11, MySQL 9 and MariaDB 12 on each push to `main`; MySQL 8.4,
+the minimum, runs on every pull request. Nothing bumps the pinned tags:
+Dependabot does not read workflow service images.
 
 **V3. Each port uses its own SQLite build.** Rust uses sqlx's bundled
 library, Go `modernc.org/sqlite`, Spring `xerial` sqlite-jdbc, Node the
@@ -466,15 +462,56 @@ for before-and-after checks on a change. *Size:* M.
 
 ## 5. Suggested order
 
-1. **Q1** and **Q2**: set up `pg_stat_statements`, then check catalog-only
-   routes and per-route query counts. Neither depends on timing.
-2. **S1** (a view and the base-tables-only assertion), **S5**, **S7** and
-   **S6** on Postgres, in a new schema where possible to avoid C6's churn.
-   These unblock stories 25, 51 and 55.
-3. **D1** with **D4**'s sort fix: enrich the demo seeds with the same shapes.
-4. **E5**, then **E1**: a database client for e2e, then a chosen subset of
-   specs on SQLite and MySQL.
-5. **C1**, **V2**, **V1**, **Q3**: actix on other engines, pinned engine
-   versions, one older Postgres, and the paging plan check.
-6. **S2**, **S3**, **S4**, **S8**, **C2**, **C3**, **D3**, **E3**, **Q4**,
-   **Q5**: the larger fixture and contract work, alongside story 35.
+Postgres ranks first: it is Rust's default feature
+(`implementations/rust/core/Cargo.toml:28`), the devcontainer and demo
+engine (`.devcontainer/docker-compose.yml:17`,
+`frontend/src/demo/sources.ts:6`), and the first quick start
+(`readme.md:57`). Every page load calls sources, schemas, tables, table
+counts and table data (`frontend/src/bootstrap/boot-prefetch.ts:18-25`),
+while structure, common values and joins run only on demand
+(`frontend/src/features/structure.ts:81`,
+`frontend/src/features/filter-ui.ts:206`). All seven ports ship to a
+registry (`docs/publishing-checklist.md:18-24`), so no port outranks
+another; size breaks ties.
+
+1. **Q1**: set up `pg_stat_statements`, then check that `/api/table-counts`,
+   which every page load calls, never runs `COUNT(*)`. Size S.
+2. **S1** — DONE.
+3. **V1** — DONE.
+4. **E2**: one browser smoke spec per port. Five more ports serve the page
+   on every load, and only axum's CSP, caching and mount prefix are seen in
+   a browser.
+5. **S7** and **S6** on Postgres, in a new schema to avoid C6's churn. They
+   test paging, the grid and filter text on `/tables/data`, the route behind
+   every table view. They unblock stories 55 and 51.
+6. **Q3**, then **Q2**: the paging plan on `/tables/data`, then a query
+   bound per route, boot routes included. Both reuse Q1's set-up.
+7. **S4**: edge-case identifiers end to end. Catalog lookup and the filter
+   text sit on the core browse path, and real schemas have such names.
+8. **D4**'s sort fix, then **D1**: richer demo seeds. Visitors see the demo
+   first (`readme.md:9`), but no host runs it. D1's new PK-less and
+   composite tables need D4's fix first.
+9. **E5**, then **E1**: a database client for e2e, then a chosen subset of
+   specs on SQLite and MySQL, the second and third quick starts
+   (`readme.md:113,174`).
+10. **V2** — DONE. **S2**: the column classes the grid renders but no test
+    asserts.
+11. **S5** and **Q4**: self-referencing FKs for FK navigation and "referenced
+    by", which run on demand; a large opt-in schema for catalog cost on the
+    boot routes.
+12. **E3** and **D5**: mocks checked against `spec/openapi.yaml`, and more
+    demo smoke tests.
+13. **S8**, **C1**, **C2**, **S3**: privilege cases, actix on MySQL and
+    SQLite (its Postgres runs exist), and contract and type coverage on the
+    other engines, alongside story 35.
+14. **C7**, **C4**, **C3**: MariaDB's structure route and engine
+    differences, and mixed-backend sources. Each guards an on-demand route
+    or a secondary feature.
+15. **P3**, **V3**, **D3**: per-port topic gaps, the SQLite build version,
+    and the synthetic demo's own `/tables/data`.
+16. **Q5** and **V4**: a backend timing tool and `mise run check`'s scope.
+    Both are tooling only.
+
+No work is planned for D2 (accepted), C5 (in `COVERAGE.md`), C6 (a
+constraint), E4 and E7 (recorded limits), E6 (follows S) or S9 (folded into
+story 35).

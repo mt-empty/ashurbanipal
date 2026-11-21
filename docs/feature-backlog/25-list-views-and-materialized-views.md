@@ -83,9 +83,10 @@ Column metadata needs no change: `information_schema.columns` and
   predicate rows and the counts table).
 - The five backends: Rust core (axum and actix-web share it), Go, Node,
   Flask, Spring.
-- `conformance/seed` via `tools/seed-gen`: a view and a Postgres
-  materialized view, then `mise run conformance:seed-gen`. MySQL/SQLite
-  seed parity is story 35.
+- `conformance/seed`: every seed already has an `active_users` view, and
+  the Postgres seed an `order_totals_by_status` materialized view (story 57
+  S1). Add them to the expected list with their `kind`, and replace
+  `table_data::a_view_is_not_an_allowed_table` with reads that succeed.
 - The demos: the PGlite live demo uses the Node port; the synthetic demo
   (`frontend/src/demo/synthetic/serve.ts`) needs `kind` too.
 

@@ -89,19 +89,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         )
 
     def _error_response(err: DbError) -> Response:
-        if isinstance(err, NotAllowed):
-            return _problem_response(400, err.kind.value, f"not allowed: {err}")
-        if isinstance(err, FilterParseError):
-            return _problem_response(400, "invalid_filter", f"invalid filter: {err}")
-        if isinstance(err, BadJoin):
-            return _problem_response(400, "invalid_join", f"invalid join: {err}")
-        if isinstance(err, BadParam):
-            return _problem_response(400, "invalid_parameter", f"invalid parameter: {err}")
-        if isinstance(err, Unsortable):
-            return _problem_response(400, "unsortable_column", f"cannot sort by {err}: its type has no ordering")
-        if isinstance(err, QueryTimeout):
-            return _problem_response(500, "query_timeout", "query timed out")
-        return _problem_response(500, "database_error", f"database error: {err}")
+        return _problem_response(*problem_for(err))
 
     @bp.errorhandler(DbError)
     def _handle_db_error(err: DbError) -> Response:
@@ -300,6 +288,23 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         return jsonify(body)
 
     return bp
+
+
+def problem_for(err: DbError) -> tuple[int, str, str]:
+    """`(HTTP status, spec/protocol.md §2 code, title)` for a backend or filter error."""
+    if isinstance(err, NotAllowed):
+        return 400, err.kind.value, f"not allowed: {err}"
+    if isinstance(err, FilterParseError):
+        return 400, "invalid_filter", f"invalid filter: {err}"
+    if isinstance(err, BadJoin):
+        return 400, "invalid_join", f"invalid join: {err}"
+    if isinstance(err, BadParam):
+        return 400, "invalid_parameter", f"invalid parameter: {err}"
+    if isinstance(err, Unsortable):
+        return 400, "unsortable_column", f"cannot sort by {err}: its type has no ordering"
+    if isinstance(err, QueryTimeout):
+        return 500, "query_timeout", "query timed out"
+    return 500, "database_error", f"database error: {err}"
 
 
 def _table_to_dict(t: TableInfo) -> dict[str, Any]:

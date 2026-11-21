@@ -424,6 +424,8 @@
   --type-date: light-dark(#3f7a5c, #8cc4a8);
   /* Transient wash on rows added since the last manual refresh. */
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
+  /* Transient wash on cells whose value changed since the last refresh. */
+  --cell-changed-bg: light-dark(#ddebfb, #1d3047);
   /* The scroller's layers, lowest first. #chrome is on top at rest and drops
      to the header's level once the header pins (features/sticky-header.ts),
      where the header wins by coming later: the filter's suggestion list
@@ -629,8 +631,10 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .375rem 
 #refresh-pop input { accent-color: CanvasText; }
 #refresh-pop-foot { margin: .3rem 0 0; padding: .4rem .5rem .15rem; border-top: 1px solid var(--rule);
           font-size: .75rem; line-height: 1.4; color: var(--text-muted); }
-#row-new-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
+#row-new-chip, #row-changed-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
           background: var(--row-new-bg); color: CanvasText; font-size: .75rem; }
+#row-changed-chip { background: var(--cell-changed-bg); }
+#row-new-chip:not([hidden]) + #row-changed-chip { margin-left: .25rem; }
 
 /* ==== Data table ==== */
 /* Scoped to #data-table so the Other services grid doesn't inherit these;
@@ -732,8 +736,13 @@ td:hover .cell-actions, td:focus-within .cell-actions { opacity: 1; }
    background of its own, so the tr wash shows through. */
 tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 @keyframes row-new-fade { from { background: var(--row-new-bg); } to { background: transparent; } }
+/* Same fade on a changed cell. It paints over the row's hover background
+   while it lasts; grid.ts drops the class once the fade ends. */
+tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
+@keyframes cell-changed-fade { from { background: var(--cell-changed-bg); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) {
   tbody tr.row-new { animation: none; background: var(--row-new-bg); }
+  tbody td.cell-changed { animation: none; background: var(--cell-changed-bg); }
 }
 /* startViewTransition (table render, record dialog) cross-fades by default. */
 @media (prefers-reduced-motion: reduce) {
@@ -1362,13 +1371,13 @@ thead tr.bands + tr th { top: var(--band-h); }
         <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
       </div>
       <div id="meta">
-        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button><button id="sort-note-clear" type="button" aria-label="clear sort" title="clear sort">✕</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span></span>
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button><button id="sort-note-clear" type="button" aria-label="clear sort" title="clear sort">✕</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span><span id="row-changed-chip" hidden></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
           <button id="join-edit-btn" type="button" hidden title="change the tables, columns or join type of this view"><span aria-hidden="true">⋈</span> edit join</button>
           <button id="join-link-btn" type="button" hidden title="copy a link that opens this join"><span class="copy-icon" aria-hidden="true">⧉</span> copy link</button>
-          <span id="refresh-split"><button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8a6 6 0 0 1 6-6 6.5 6.5 0 0 1 4.49 1.83L14 5.33"/><path d="M14 2v3.33h-3.33"/><path d="M14 8a6 6 0 0 1-6 6 6.5 6.5 0 0 1-4.49-1.83L2 10.67"/><path d="M5.33 10.67H2V14"/></svg></span> refresh<span id="refresh-interval" hidden></span></button><button id="refresh-menu-btn" type="button" popovertarget="refresh-pop" disabled aria-label="auto-refresh interval" title="auto-refresh interval">▾</button></span>
+          <span id="refresh-split"><button id="refresh" type="button" disabled title="re-fetch this view; briefly highlight rows added and cells changed since the last look" aria-label="refresh"><span id="refresh-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8a6 6 0 0 1 6-6 6.5 6.5 0 0 1 4.49 1.83L14 5.33"/><path d="M14 2v3.33h-3.33"/><path d="M14 8a6 6 0 0 1-6 6 6.5 6.5 0 0 1-4.49-1.83L2 10.67"/><path d="M5.33 10.67H2V14"/></svg></span> refresh<span id="refresh-interval" hidden></span></button><button id="refresh-menu-btn" type="button" popovertarget="refresh-pop" disabled aria-label="auto-refresh interval" title="auto-refresh interval">▾</button></span>
           <button id="columns-btn" type="button" popovertarget="columns-pop" disabled title="show/hide columns">columns</button>
           <button id="structure-btn" type="button" disabled title="indexes and constraints for this table">structure</button>
           <button id="payload" disabled title="raw JSON response for the current view">payload</button>
@@ -2780,13 +2789,34 @@ function parseJoin(text, options = {}) {
 function rowKey(pkNames, row2) {
   return JSON.stringify(pkNames.map((n) => row2[n]));
 }
-function collectNewRowKeys(prev, next, opts) {
+function collectRowChanges(prev, next, opts) {
   if (!opts.highlightNew || !prev || !opts.sameScope) return { pkNames: [] };
   const pkNames = next.columns.filter((c) => c.key === "pk").map((c) => c.name);
   if (!pkNames.length) return { pkNames: [] };
-  const prevKeys = new Set(prev.rows.map((r) => rowKey(pkNames, r)));
-  const newRowKeys = new Set(next.rows.map((r) => rowKey(pkNames, r)).filter((k) => !prevKeys.has(k)));
-  return { newRowKeys, pkNames };
+  const prevNames = new Set(prev.columns.map((c) => c.name));
+  const shared = next.columns.map((c) => c.name).filter((n) => prevNames.has(n));
+  const prevRows = new Map(prev.rows.map((r) => [rowKey(pkNames, r), r]));
+  const newRowKeys = /* @__PURE__ */ new Set();
+  const changedCells = /* @__PURE__ */ new Map();
+  for (const row2 of next.rows) {
+    const key = rowKey(pkNames, row2);
+    const before = prevRows.get(key);
+    if (!before) {
+      newRowKeys.add(key);
+      continue;
+    }
+    const changed = shared.filter((n) => before[n] !== row2[n]);
+    if (changed.length) changedCells.set(key, new Set(changed));
+  }
+  return { newRowKeys, changedCells, pkNames };
+}
+function changedRowsText(changedCells, hidden) {
+  if (!changedCells?.size) return "";
+  const columns = /* @__PURE__ */ new Set();
+  for (const names of changedCells.values()) for (const name of names) columns.add(name);
+  const hiddenCount = [...columns].filter((name) => hidden.has(name)).length;
+  if (hiddenCount < columns.size) return `${changedCells.size} changed`;
+  return `${changedCells.size} changed in ${hiddenCount === 1 ? "a hidden column" : "hidden columns"}`;
 }
 
 // src/lib/scope-key.ts
@@ -3268,9 +3298,9 @@ function getLastPayload() {
   return lastPayload;
 }
 var lastRowDiffKey = null;
-function diffNewRows(data, highlightNew) {
+function diffRows(data, highlightNew) {
   const nowScope = rowDiffKey();
-  const result = collectNewRowKeys(lastPayload, data, {
+  const result = collectRowChanges(lastPayload, data, {
     highlightNew,
     sameScope: lastRowDiffKey === nowScope
   });
@@ -3626,14 +3656,18 @@ function noteTickFailed(e) {
     `Auto-refresh turned off after ${MAX_FAILURES} failed refreshes. Last error: ${message.replace(/\.$/, "")}.`
   );
 }
-function setNewChip(count) {
-  const chip = $("row-new-chip");
+function setRowChangeChips(newCount, changedText) {
+  const newChip = $("row-new-chip");
+  const changedChip = $("row-changed-chip");
   clearTimeout(chipTimer);
-  chip.hidden = count === 0;
-  if (count === 0) return;
-  chip.textContent = `+${count} new`;
+  newChip.hidden = newCount === 0;
+  newChip.textContent = newCount ? `+${newCount} new` : "";
+  changedChip.hidden = !changedText;
+  changedChip.textContent = changedText;
+  if (newChip.hidden && changedChip.hidden) return;
   chipTimer = setTimeout(() => {
-    chip.hidden = true;
+    newChip.hidden = true;
+    changedChip.hidden = true;
   }, CHIP_MS);
 }
 function startAutoRefresh() {
@@ -7415,12 +7449,18 @@ function showCellPop(e, text, col) {
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
 }
-function buildCell(col, row2, { hidden, meta }) {
+function buildCell(col, row2, { hidden, meta }, changed = false) {
   const raw = row2[col.name];
   const isNull = raw == null;
   const td = isNull ? document.createElement("td") : cellTemplate.content.cloneNode(true).firstElementChild;
   td.dataset.col = col.name;
   if (hidden.has(col.name)) td.classList.add("col-hidden");
+  else if (changed) {
+    td.classList.add("cell-changed");
+    td.addEventListener("animationend", (e) => {
+      if (e.target === td) td.classList.remove("cell-changed");
+    });
+  }
   if (isNull) {
     const span = el("span", "cell-text cell-null", "\u2205");
     span.title = "null";
@@ -7481,6 +7521,7 @@ function setHidden(next) {
     if (before.has(name) === after.has(name)) continue;
     for (const cell of tableEl.querySelectorAll(`[data-col="${CSS.escape(name)}"]`)) {
       cell.classList.toggle("col-hidden", after.has(name));
+      if (after.has(name)) cell.classList.remove("cell-changed");
     }
   }
   countColumns();
@@ -7614,7 +7655,7 @@ function buildRowActionCell(columns, rows, index) {
   qs(td, ".record-btn").onclick = () => openRecordView(columns, rows, index, def);
   return td;
 }
-function renderRows2(data, newRowKeys, pkNames = []) {
+function renderRows2(data, { newRowKeys, changedCells, pkNames } = { pkNames: [] }) {
   const { hidden, shown } = counts;
   if (data.rows.length === 0) {
     renderEmptyState(shown + 1);
@@ -7625,10 +7666,12 @@ function renderRows2(data, newRowKeys, pkNames = []) {
   tbody.replaceChildren(
     ...data.rows.map((row2, index) => {
       const tr = el("tr");
-      if (newRowKeys?.has(rowKey(pkNames, row2))) tr.classList.add("row-new");
+      const key = pkNames.length ? rowKey(pkNames, row2) : "";
+      if (newRowKeys?.has(key)) tr.classList.add("row-new");
+      const changed = changedCells?.get(key);
       tr.appendChild(buildRowActionCell(data.columns, data.rows, index));
       for (const col of data.columns) {
-        tr.appendChild(buildCell(col, row2, ctx));
+        tr.appendChild(buildCell(col, row2, ctx, changed?.has(col.name)));
       }
       return tr;
     })
@@ -7837,7 +7880,7 @@ async function runLoad({
   if (view.kind === "table") seedColumns(metaTables[0], data.columns);
   pruneHiddenColumns(data.columns.map((c) => c.name));
   updateViewChrome();
-  const { newRowKeys, pkNames } = diffNewRows(data, highlightNew && view.kind === "table");
+  const changes = diffRows(data, highlightNew && view.kind === "table");
   $("payload").disabled = false;
   $("refresh").disabled = false;
   $("refresh-menu-btn").disabled = false;
@@ -7852,7 +7895,7 @@ async function runLoad({
     useWidthScope(widthScope);
     const focusCapture = captureTableFocus();
     renderHeader(data.columns);
-    renderRows2(data, newRowKeys, pkNames);
+    renderRows2(data, changes);
     rememberColumnWidths();
     renderColumnMenu();
     syncGridLock();
@@ -7875,10 +7918,12 @@ async function runLoad({
     prefetch(tableDataPath({ ...req, offset: req.offset + state.limit }, scopeRef()), "view", NEXT_PAGE_TTL_MS);
   }
   noteLoadOk();
-  setNewChip(newRowKeys?.size ?? 0);
-  if (newRowKeys?.size) {
-    setStatus(`${newRowKeys.size} new`);
-  } else if (highlightNew && newRowKeys && !auto) {
+  const newCount = changes.newRowKeys?.size ?? 0;
+  const changedText = changedRowsText(changes.changedCells, new Set(hiddenColumns()));
+  setRowChangeChips(newCount, changedText);
+  if (newCount || changedText) {
+    setStatus([newCount ? `${newCount} new` : "", changedText].filter(Boolean).join(" \xB7 "));
+  } else if (highlightNew && changes.newRowKeys && !auto) {
     setStatus("no changes");
   }
   if (resetScroll) {
