@@ -1,6 +1,6 @@
 # Golden-SQL fixtures for the join builder
 
-> **Status:** DONE · **Area:** ports, conformance · **Ref:** `spec/fixtures/join-builder-tests.json`, run per engine in all five ports; per-engine `filter-builder-tests.json` still open
+> **Status:** DONE · **Area:** ports, conformance · **Ref:** `spec/fixtures/join-builder-tests.json`, run per engine in all five ports; per-engine `filter-builder-tests.json` is [60](60-per-engine-filter-builder-fixtures.md)
 
 **Ask:** add `spec/fixtures/join-builder-tests.json`, the join counterpart
 of `filter-builder-tests.json`. Each case gives a join spec plus the
@@ -21,7 +21,7 @@ ports without a shared binary or a canonical implementation.
 **Shape:** owned by `spec/fixtures/README.md`. SQL is pinned per engine
 against engine-native catalogs, so a dialect bug like #283 fails a unit
 test, not only HTTP conformance. Giving `filter-builder-tests.json`
-per-engine expectations too is a follow-up.
+per-engine expectations too is [60](60-per-engine-filter-builder-fixtures.md).
 
 **Done when:** the fixture file and its `spec/fixtures/README.md` section
 land with a runner in all five ports, and `PORTING.md` lists it among the

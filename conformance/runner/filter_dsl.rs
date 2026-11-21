@@ -8,12 +8,11 @@
 //! The bulk is fixture-driven: every case in
 //! `spec/fixtures/filter-builder-tests.json` (schema:
 //! `spec/fixtures/README.md`) is JSON-encoded into a real `filter` param
-//! exactly as the frontend would send it, and asserted 200 (valid AST) or
-//! 400 (structural violation / allow-list rejection). The same file drives
-//! `core/src/db/postgres.rs`'s `filter_builder_fixtures` unit runner, which
-//! additionally pins the exact WHERE fragment + bind values — over HTTP
-//! only acceptance is observable, so
-//! the named tests below add row-content assertions (against the
+//! exactly as the frontend would send it, and asserted 200 or 400 as the
+//! case expects for the engine under test. The same file drives every
+//! port's unit runner, which also pins each engine's exact WHERE fragment
+//! and bind values; over HTTP only acceptance is observable, so the named
+//! tests below add row-content assertions (against the
 //! deterministic seed — `tools/seed-gen`, fixed RNG) for the semantics
 //! that matter: equality narrowing, AND-tighter-than-OR precedence, NOT
 //! negation, IS NULL, typed comparison, IN/BETWEEN, and injection values
@@ -78,64 +77,37 @@ async fn column_classes(
 
 const TYPED_CLASSES: [&str; 4] = ["number", "float", "temporal", "time"];
 
-/// Every builder-fixture case over HTTP: valid ASTs are accepted, invalid
-/// ones (bad op/arity/logic, over-limit, oversize, malformed JSON,
-/// allow-list misses, values that do not fit a typed column) are 400s. One
-/// server for the whole sweep. An `invalid_value` case is 200 where this
-/// engine's seed declares the column as text, or where the engine skips the
-/// check (SQLite), because only an enforced typed column checks its values.
+/// Every builder-fixture case over HTTP, on this engine: a case it builds is
+/// a 200, a case it rejects (structurally, for an unknown column, or for a
+/// value that does not fit a typed column) is a 400, and a case with no
+/// expectation for it is skipped. One server for the whole sweep.
 #[tokio::test]
 async fn builder_fixture_cases_over_http() {
     let srv = TestServer::spawn().await;
     let file: serde_json::Value = serde_json::from_str(BUILDER_FIXTURES).unwrap();
     let cases = file["cases"].as_array().unwrap();
     assert!(!cases.is_empty());
-    let mut classes = std::collections::HashMap::new();
+    let engine = Backend::current().fixture_name();
     for case in cases {
         let name = case["name"].as_str().unwrap();
-        let table = case["table"].as_str().unwrap();
-        let filter = match case.get("raw") {
-            Some(raw) => raw.as_str().unwrap().to_string(),
-            None => serde_json::to_string(&case["conditions"]).unwrap(),
+        let rejected = match (case.get("expect_error"), case.get("expect")) {
+            (Some(kind), None) => kind.as_str(),
+            (None, Some(expect)) => match expect.get(engine) {
+                Some(want) => want.get("error").and_then(|k| k.as_str()),
+                None => continue,
+            },
+            _ => panic!("case {name}: needs exactly one of expect and expect_error"),
         };
-        // A case limited to other engines names a value only they store (`NaN`, ` BC`).
-        if case.get("engines").is_some_and(|e| {
-            !e.as_array()
-                .unwrap()
-                .iter()
-                .any(|v| v.as_str() == Some(Backend::current().fixture_name()))
-        }) {
-            continue;
+        let filter = match (case.get("raw"), case.get("conditions")) {
+            (Some(raw), None) => raw.as_str().unwrap().to_string(),
+            (None, Some(conditions)) => serde_json::to_string(conditions).unwrap(),
+            _ => panic!("case {name}: needs exactly one of raw and conditions"),
+        };
+        let resp = fetch(&srv, case["table"].as_str().unwrap(), &filter).await;
+        match rejected {
+            None => assert_status(&resp, 200, &format!("case {name}: valid on {engine}")),
+            Some(kind) => assert_status(&resp, 400, &format!("case {name}: {kind} on {engine}")),
         }
-        let resp = fetch(&srv, table, &filter).await;
-        if case.get("expect").is_some() {
-            assert_status(&resp, 200, &format!("case {name}: valid AST"));
-            continue;
-        }
-        let kind = case["expect_error"].as_str().unwrap();
-        if kind == "invalid_value" {
-            if Backend::current().typed_value_check() == TypedValueCheck::Skipped {
-                assert_status(&resp, 200, &format!("case {name}: check skipped"));
-                continue;
-            }
-            if !classes.contains_key(table) {
-                classes.insert(table.to_string(), column_classes(&srv, table).await);
-            }
-            let typed = case["conditions"].as_array().unwrap().iter().any(|c| {
-                classes[table]
-                    .get(c["column"].as_str().unwrap())
-                    .is_some_and(|class| TYPED_CLASSES.contains(&class.as_str()))
-            });
-            if !typed {
-                assert_status(
-                    &resp,
-                    200,
-                    &format!("case {name}: text column on this engine"),
-                );
-                continue;
-            }
-        }
-        assert_status(&resp, 400, &format!("case {name}: {kind}"));
     }
 }
 

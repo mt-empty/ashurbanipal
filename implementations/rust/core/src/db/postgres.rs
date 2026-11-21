@@ -1001,137 +1001,8 @@ mod tests {
     }
 
     use super::*;
-    use crate::filter;
 
-    /// Shared fixture runner over `spec/fixtures/filter-builder-tests.json`
-    /// (schema: `spec/fixtures/README.md`) — the same file every port's
-    /// runner and the black-box HTTP suite consume, so validation/building
-    /// behavior can't drift between them.
-    const FIXTURES: &str = include_str!("../../../../../spec/fixtures/filter-builder-tests.json");
-
-    #[derive(serde::Deserialize)]
-    struct FixtureFile {
-        tables:
-            std::collections::BTreeMap<String, std::collections::BTreeMap<String, FixtureColumn>>,
-        cases: Vec<FixtureCase>,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct FixtureCase {
-        name: String,
-        table: String,
-        conditions: Option<serde_json::Value>,
-        raw: Option<String>,
-        expect: Option<ExpectedWhere>,
-        expect_error: Option<String>,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct ExpectedWhere {
-        #[serde(rename = "where")]
-        where_clause: String,
-        values: Vec<String>,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct FixtureColumn {
-        #[serde(rename = "type")]
-        data_type: String,
-    }
-
-    /// The fixture's `tables` map in place of the live catalog lookup
-    /// (`spec/fixtures/README.md`).
-    fn seed_table(file: &FixtureFile, table: &str) -> TableMeta {
-        let columns = file.tables[table]
-            .iter()
-            .map(|(name, c)| ColMeta {
-                name: Ident::for_test(name),
-                compare: typed_compare(&c.data_type),
-                class: column_class(&c.data_type, "", "", false),
-                type_name: c.data_type.clone(),
-                collation: None,
-                key: None,
-                references: None,
-                comment: None,
-            })
-            .collect();
-        TableMeta {
-            schema: None,
-            name: Ident::for_test(table),
-            columns,
-            order_keys: Vec::new(),
-        }
-    }
-
-    /// The fixture numbers placeholders from `$1`; this backend binds limit
-    /// and offset first.
-    fn shift_placeholders(clause: &str, by: usize) -> String {
-        let mut out = String::new();
-        let mut rest = clause;
-        while let Some(i) = rest.find('$') {
-            out.push_str(&rest[..=i]);
-            rest = &rest[i + 1..];
-            let n = rest.bytes().take_while(u8::is_ascii_digit).count();
-            let num: usize = rest[..n].parse().unwrap();
-            out.push_str(&(num + by).to_string());
-            rest = &rest[n..];
-        }
-        out.push_str(rest);
-        out
-    }
-
-    #[test]
-    fn filter_builder_fixtures() {
-        let file: FixtureFile = serde_json::from_str(FIXTURES).unwrap();
-        assert!(!file.cases.is_empty());
-        for case in &file.cases {
-            let name = &case.name;
-            let raw = match (&case.raw, &case.conditions) {
-                (Some(raw), _) => raw.clone(),
-                (None, Some(conditions)) => serde_json::to_string(conditions).unwrap(),
-                (None, None) => panic!("case {name}: neither raw nor conditions"),
-            };
-            let parsed = filter::parse(&raw);
-            let table = seed_table(&file, &case.table);
-            let build = |conditions: &[filter::Condition]| {
-                join::table_where_clause(conditions, &table, &DIALECT)
-            };
-            match (&case.expect, case.expect_error.as_deref()) {
-                (Some(expected), None) => {
-                    let conditions =
-                        parsed.unwrap_or_else(|e| panic!("case {name}: parse failed: {e}"));
-                    let (where_clause, values) = build(&conditions)
-                        .unwrap_or_else(|e| panic!("case {name}: build failed: {e}"));
-                    let expected_clause = if expected.where_clause.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" where {}", shift_placeholders(&expected.where_clause, 2))
-                    };
-                    assert_eq!(where_clause, expected_clause, "case {name}: WHERE mismatch");
-                    assert_eq!(values, expected.values, "case {name}: bind values mismatch");
-                }
-                (None, Some(kind @ ("unknown_column" | "invalid_value"))) => {
-                    let conditions = parsed.unwrap_or_else(|e| {
-                        panic!("case {name}: should parse (rejection is builder-stage): {e}")
-                    });
-                    match (kind, build(&conditions)) {
-                        ("unknown_column", Err(DbError::NotAllowed(_)))
-                        | ("invalid_value", Err(DbError::FilterParse(_))) => {}
-                        (_, other) => panic!("case {name}: expected {kind}, got {other:?}"),
-                    }
-                }
-                (None, Some(kind)) => {
-                    assert!(
-                        parsed.is_err(),
-                        "case {name}: expected structural rejection ({kind}), but it parsed"
-                    );
-                }
-                _ => panic!("case {name}: exactly one of expect/expect_error required"),
-            }
-        }
-    }
-
-    fn join_fixture_column(c: &serde_json::Value) -> ColMeta {
+    fn fixture_column(c: &serde_json::Value) -> ColMeta {
         let s = |k: &str| c[k].as_str().unwrap();
         ColMeta {
             name: Ident::for_test(s("name")),
@@ -1153,13 +1024,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn join_builder_fixtures() {
-        super::super::join_fixture::run(super::super::join_fixture::Engine {
+    fn fixture_engine() -> super::super::catalog_fixture::Engine {
+        super::super::catalog_fixture::Engine {
             name: "postgres",
             dialect: &DIALECT,
             splices_schema: true,
-            column: join_fixture_column,
-        });
+            column: fixture_column,
+        }
+    }
+
+    #[test]
+    fn join_builder_fixtures() {
+        super::super::join_fixture::run(&fixture_engine());
+    }
+
+    #[test]
+    fn filter_builder_fixtures() {
+        super::super::filter_fixture::run(&fixture_engine());
     }
 }

@@ -158,7 +158,7 @@ impl Backend {
     /// dialect if [`record_from_seed`](Self::record_from_seed) saw one,
     /// otherwise `ASHURBANIPAL_CONFORMANCE_BACKEND`, otherwise Postgres —
     /// the reference.
-    /// The engine's name in a fixture case's `engines` list.
+    /// The engine's key in a fixture's `catalogs` and per-engine `expect`.
     pub fn fixture_name(&self) -> &'static str {
         match self {
             Backend::Postgres => "postgres",

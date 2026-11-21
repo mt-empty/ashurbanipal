@@ -1,3 +1,7 @@
+#[cfg(test)]
+mod catalog_fixture;
+#[cfg(test)]
+mod filter_fixture;
 mod ident;
 #[cfg(test)]
 mod join_fixture;

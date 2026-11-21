@@ -411,8 +411,9 @@ can't:
      actually requires (e.g. `Date`, `Server`).
 
    `spec/fixtures/parser-tests.json`, `filter-builder-tests.json` and
-   `join-builder-tests.json` are this pattern scoped to the filter DSL and
-   the join route; the conformance kit generalizes it to every route.
+   `join-builder-tests.json` (the last two over a shared `catalogs.json`)
+   are this pattern scoped to the filter DSL and the join route; the
+   conformance kit generalizes it to every route.
 
 Even all three together don't cover everything a port must get right —
 notably, none of them can prove the *absence* of a SQL-injection vector a
