@@ -22,6 +22,11 @@ all keeping v1 (they change nothing an existing caller observes — see
 `spec/protocol.md` §7): §5.7 `/api/schemas`, §5.8 `/api/sources`, §5.9
 `/api/tables/referenced-by`, §5.10 `/api/tables/structure`, §5.11 `/api/tables/join`.
 
+§5.4.3 no longer calls the engine's text cast timezone-independent. A
+zone-aware type (Postgres `timestamptz`, MySQL/MariaDB `TIMESTAMP`) renders
+in the database session's time zone, which the host's settings decide. A
+wording correction with no behaviour change, so v1 stands.
+
 Every API response also carries `X-Content-Type-Options: nosniff` (§2).
 Additive — a response header an existing caller can ignore — so v1 stands.
 

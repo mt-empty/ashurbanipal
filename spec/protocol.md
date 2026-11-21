@@ -475,7 +475,7 @@ A port that returns JSON numbers for numeric columns is **non-conformant**
 The text cast MUST happen in the query text itself (each engine's own cast
 syntax — see `docs/adapter-decisions.md`), not by decoding a column into a
 native type and then formatting it in application code. An engine's own
-cast is locale- and timezone-independent; a driver-level
+cast does not depend on the application's locale or time zone; a driver-level
 decode-then-restringify step can silently diverge from it (e.g. a JVM
 default locale using `,` as a decimal separator, or a timestamp formatted
 without the engine's own timezone-offset suffix) while still technically
@@ -483,6 +483,15 @@ satisfying "every value is a JSON string" — the shape is right but the
 *content* drifts from what every other implementation renders for the same
 row. This applies to every column-value read (`/tables/data`'s rows,
 `/tables/common-values`'s `value` field), not just numerics.
+
+The cast can still depend on the database session's time zone. A
+zone-aware type renders in that zone: Postgres `timestamptz` with its
+offset (`+00`, `+02`), MySQL/MariaDB `TIMESTAMP` with none. The host's
+database, role, connection string or driver settings decide the zone, so
+the same row can render differently on two hosts. A client that needs the
+instant reads it from the offset in the value; a value with no offset is a
+wall-clock reading in an unknown zone (per-engine detail in
+`docs/adapter-decisions.md`).
 
 #### 5.4.4 `total_approx`
 
