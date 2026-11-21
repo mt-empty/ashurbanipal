@@ -169,8 +169,7 @@ a row set is row data.
 
 ## 9. Relationship to other entries
 
-- `docs/feature-backlog/02-per-table-query-filter-history.md` — its
-  "consciously carve out an exception to R6" branch becomes the default if
-  this is accepted; the "session-only in-memory" branch is then moot.
+- `docs/feature-backlog/02-per-table-query-filter-history.md` — it still
+  chooses between session-only memory and persistence that changes R6c.
 - `docs/feature-backlog/10-structured-filter-builder-ui.md` — shares the
   "what encodes into the `filter` param" question (§7 above).

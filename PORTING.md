@@ -310,19 +310,21 @@ handling mirrors CSP:
 
 Known deviation — **Spring Boot / embedded Tomcat, request header size.**
 Tomcat's default `server.max-http-request-header-size` is 8 KiB, and that
-budget covers the whole request line. `spec/protocol.md` §5.4.2 caps the
-`filter` param at 8192 URL-*decoded* bytes; URL-encoding inflates a dense
+budget covers the whole request line. `spec/protocol.md` §5.4.2 suggests
+capping the `filter` param at 8192 URL-*decoded* bytes, the bound every
+port uses; URL-encoding inflates a dense
 filter's on-the-wire form well past that (measured worst case ~14.6x, for a
 many-short-conditions filter at the frontend's own 1024-byte DSL limit), so
 a filter the spec accepts can overrun Tomcat's request-line budget and draw
 Tomcat's stock `text/html` 400 — no protocol header — instead of the spec's
-`text/plain` "filter too long" 400. The other four ports' server layers
+`application/problem+json` 400 `invalid_filter`. The other four ports' server layers
 (hyper, `net/http`, llhttp, Werkzeug) sit far above this limit and are
 unaffected. A Spring host that needs full filter-size conformance raises
-`server.max-http-request-header-size`; the starter and its demo app do not
-ship that setting, since it changes the host's Tomcat connector globally —
-the schema-conformance CI job sets it via an env var for the fuzzer's
-benefit only (`spring-boot-conformance.yml`).
+`server.max-http-request-header-size`. The starter does not ship that
+setting, since it changes the host's Tomcat connector globally. The demo
+app sets it (`demo/src/main/resources/application.yml`), and the
+schema-conformance CI job sets it via an env var
+(`spring-boot-conformance.yml`).
 
 ## Listing bar
 

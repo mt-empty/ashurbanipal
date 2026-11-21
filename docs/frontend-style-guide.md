@@ -168,7 +168,7 @@ misplaced import shows up as a wrong-looking path.
   reimplement (see `spec/filter-dsl.md`, `spec/protocol.md`'s filter
   representation section). This is a deliberate reversal of an earlier
   rule; see the struck-through entry in §7 for why. It stays a distinct
-  concern from `quoteFilterValue()`/`applyFilterClause()` (click-to-filter,
+  concern from `quoteFilterValue()`/`applyFilter()` (click-to-filter,
   FK navigation, the common-values dropdown): those *compose* a clause from
   a column/value the server already gave us, never parsing or judging
   arbitrary user-typed text — keep that boundary when extending either.

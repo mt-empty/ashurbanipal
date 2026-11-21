@@ -1,18 +1,21 @@
 # Sibling health-check caching / background polling
 
-> **Status:** OPEN · **Area:** ports
+> **Status:** OPEN · **Area:** spec, ports
 
-**Where logged:** `design.md` §4.1 (siblings), §9 (deferred, with a
-concrete trigger).
+**What it is:** `/api/siblings` checks every sibling on each request, with
+no cache (`docs/design.md` §4.1, "Siblings are checked on request";
+`spec/protocol.md` §5.6). The frontend polls it only while the pop-up is
+open (`frontend/src/features/siblings.ts`).
 
-**What it is:** `/siblings` currently does parallel per-request HTTP health
-checks synchronously (no caching); the frontend fetches it at page load,
-then every ~15s only while the Other services pop-up is open (plus backoff
-retries, 15s to 60s, after a failure). The
-documented next step, *if* per-request checks turn out too chatty/slow with
-many configured siblings, is a background-polled cache at the same 15s
-cadence — not a vague someday, a named trigger condition.
+**Trigger:** a real deployment where that per-request fan-out to N
+siblings becomes measurable load (`docs/design.md` §9).
 
-**Tidbits:** worth revisiting if/when a real deployment's sibling count
-grows large enough that each open pop-up's 15s refresh fanning out into N parallel
-HTTP requests server-side becomes measurable load.
+**Fix:** a per-source cache filled on demand, with a 15 s TTL and one
+in-flight check shared by every caller. It caps the fan-out at once per
+15 s however many viewers there are, and does no work while nobody looks.
+A background poller gives the same cap but polls even when the tool sits
+idle, which is the usual case.
+
+**Needs:** a change to §5.6's "synchronously per request" rule and to
+`docs/design.md` §9's "background-polled cache", in the same PR as the
+ports that add the cache.

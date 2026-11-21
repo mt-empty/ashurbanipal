@@ -1,18 +1,16 @@
 # "Show DDL" source viewer for a table or view
 
-> **Status:** OPEN · **Area:** spec, frontend
+> **Status:** OPEN · **Area:** spec, ports, conformance, frontend
 
-Read-only — introspects system catalogs and prints text; never executes
-DDL. Split out of
-`docs/feature-backlog/28-feature-expansion-triage-remainder.md`.
+Read-only: reads system catalogs and prints text; never runs DDL.
 
 ## 1. The ask
 
-A button on a table or view (its table chip, or the metadata surface of
-stories 23 / 26) that shows the `CREATE …` statement for that object,
-rebuilt from the catalog: columns, types, defaults, PK / FK / unique /
-check constraints, indexes, and — for a view — its `SELECT` body. Shown in
-the same `<dialog>` chrome as the payload viewer, with a copy button.
+Show the `CREATE …` statement for the current table or view, rebuilt from
+the catalog: columns, types, defaults, PK / FK / unique / check
+constraints, indexes, and, for a view, its `SELECT` body. Show it from the
+structure dialog (`frontend/src/features/structure.ts`), with a copy
+button like the record dialog's.
 
 Why a dev reaches for it during feature work:
 
@@ -20,11 +18,11 @@ Why a dev reaches for it during feature work:
 - copy the column list into a query or a migration being written
 - read every FK / unique / check constraint at a glance
 - paste the schema into an agent's context, a ticket, or a chat thread
-- sanity-check the live schema against what a migration file claims
+- check the live schema against what a migration file claims
 
 ## 2. Examples
 
-Postgres table — `orders`:
+Postgres table `orders`:
 
 ```sql
 CREATE TABLE public.orders (
@@ -41,7 +39,7 @@ CREATE TABLE public.orders (
 CREATE INDEX orders_customer_id_idx ON public.orders (customer_id);
 ```
 
-Postgres view — `active_customers`:
+Postgres view `active_customers`:
 
 ```sql
 CREATE VIEW public.active_customers AS
@@ -50,47 +48,58 @@ CREATE VIEW public.active_customers AS
   WHERE c.deleted_at IS NULL;
 ```
 
-## 3. Per-backend — the catch
+## 3. Per-backend
 
-The three engines produce this completely differently; the divergence is a
-`docs/adapter-decisions.md` entry.
+Each engine produces this differently. Record the forms in
+`docs/adapter-decisions.md`.
 
-- **SQLite** — `sqlite_master.sql` stores the original `CREATE` text
-  verbatim. One column read; indexes are separate `sqlite_master` rows of
+- **SQLite:** `sqlite_master.sql` stores the original `CREATE` text. One
+  column read; indexes are separate `sqlite_master` rows with
   `type = 'index'`.
-- **MySQL / MariaDB** — native `SHOW CREATE TABLE <t>` /
-  `SHOW CREATE VIEW <v>`; the engine returns its own canonical text.
-- **Postgres** — no `pg_get_tabledef`. Assemble from `pg_catalog`:
-  `pg_get_constraintdef()`, `pg_get_indexdef()`, `pg_get_viewdef()`,
-  `format_type()` for column types. The result is a normalised
-  reconstruction — semantically equivalent, not a byte match of the
-  migration that created the object (constraint placement and formatting
-  differ; column order is preserved).
+- **MySQL/MariaDB:** `SHOW CREATE TABLE` / `SHOW CREATE VIEW` return the
+  engine's own canonical text. `SHOW` cannot bind a parameter, so the name
+  is spliced only after the allow-list check, through the port's identifier
+  quoting. `SHOW CREATE VIEW` also needs the `SHOW VIEW` privilege; decide
+  what a role without it gets.
+- **Postgres:** there is no `pg_get_tabledef`. Assemble the text from
+  `pg_catalog`: `format_type()` for column types, `pg_get_constraintdef()`,
+  `pg_get_indexdef()`, `pg_get_viewdef()`. The result is a normalised
+  rebuild: equivalent, not a byte match of the migration that created the
+  object (constraint placement and formatting differ; column order is
+  kept).
 
-Object name is allow-list-checked against the live catalog exactly as
-every other `table` parameter is, before any catalog function is called
-with it.
+The name is allow-list-checked against the live catalog, as every other
+`table` parameter is, before any catalog function sees it.
 
 ## 4. Touchpoints
 
-- `spec/protocol.md` — a new lazy route in the style of §5.9 and §5.10,
-  e.g. `GET {mount}/api/tables/ddl?table=…` returning `{ "ddl": "…" }`.
-  Story 26 settled that per-table metadata gets its own lazy route, not a
-  combined endpoint. Indexes and constraints are already served by §5.10;
-  this route adds only the assembled `CREATE` text, and the Postgres
-  assembly can reuse §5.10's catalog queries. Views included once story 25
-  lists them.
-- Frontend — reuse the payload-viewer `<dialog>` + copy button; no new
-  interaction model.
-- Conformance — a schema-test asserting the endpoint returns a non-empty
-  statement for a seed table on each engine, and that it round-trips
-  (parses as valid SQL for that engine); exact-text assertions only where
-  the engine emits canonical text (SQLite, MySQL).
+- `spec/protocol.md`: a new lazy route like §5.9 and §5.10, for example
+  `GET {mount}/api/tables/ddl?table=…` returning `{ "ddl": "…" }`. §5.10
+  already serves indexes and constraints; this route adds only the
+  assembled `CREATE` text, and the Postgres assembly can reuse §5.10's
+  catalog queries. Views come in once [[25-list-views-and-materialized-views]]
+  lists them. Update `spec/openapi.yaml` and `spec/CHANGELOG.md`.
+- Every port implements the route.
+- Frontend: a DDL section or button in the structure dialog, with a copy
+  button. No new interaction model.
+- Conformance: the route returns a non-empty statement for a seed table on
+  each engine. Exact-text checks only where the engine emits canonical
+  text (SQLite, MySQL/MariaDB).
 
 ## 5. Open questions
 
-- How faithful must the Postgres reconstruction be — is "valid and
-  semantically equivalent" enough, or do users expect it to match
-  `pg_dump` output?
-- Include storage / tablespace / `WITH (…)` options, or just the logical
+- Engine text or a frontend rebuild? A frontend renderer can build the
+  `CREATE` text from §5.4.1 and §5.10 once
+  [[23-inline-column-type-nullable-default-enum]] adds nullability and
+  defaults (put them on §5.10) and §5.10 gains a view definition. Output
+  is the same on every engine, with no new route in five ports and no
+  `SHOW` splice. The cost: it is never the engine's own canonical text.
+  Decide this together with story 23's §5.4.1-or-§5.10 question.
+
+- How faithful must the Postgres rebuild be: is "valid and equivalent"
+  enough, or do users expect `pg_dump` output?
+- Include storage, tablespace and `WITH (…)` options, or only the logical
   shape?
+- How to test that the text is valid SQL on each engine without running
+  DDL against the shared seed? A port-local test could replay it into a
+  scratch database.

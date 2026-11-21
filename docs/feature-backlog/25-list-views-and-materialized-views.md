@@ -2,30 +2,30 @@
 
 > **Status:** OPEN · **Area:** spec, ports, conformance, frontend, docs
 
-Read-only — a view read is the same code path as a table read.
+Read-only: a view read is the same code path as a table read.
 
 ## 1. The ask
 
-`GET {mount}/api/tables` lists base tables only (`relkind = 'r'` on
-Postgres, `BASE TABLE` on MySQL/MariaDB, `type = 'table'` on SQLite;
-`spec/protocol.md` §5.2). Services expose plenty of their model through
-views and materialized views, and a dev verifying a feature often needs to
-read one. Include them in the table chips, visibly marked, and browsable
-and filterable exactly like a table.
+`GET {mount}/api/tables` lists base tables only (`spec/protocol.md` §5.2;
+each engine's predicate is in `docs/adapter-decisions.md` §5.2/§5.3).
+Services expose plenty of their model through
+views and materialized views, and a dev checking a feature often needs to
+read one. List them in the table panel, visibly marked, and let users
+browse and filter them exactly like a table.
 
 - **View:** a saved `SELECT` with a name. It stores no rows; each read runs
   its query.
 - **Materialized view:** stores its result, stale until
-  `REFRESH MATERIALIZED VIEW`. Postgres only; MySQL, MariaDB and SQLite
-  have none. Reading one also shows whether a refresh job ran.
+  `REFRESH MATERIALIZED VIEW`. Postgres only. Reading one also shows
+  whether a refresh job ran.
 
 ## 2. Wire change
 
 - §5.2 entries gain a required `kind`: `table`, `view`, or
   `materialized_view`. Clients MUST treat an unknown value like `table`.
 - The §5.2 list is the allow-list every route checks `table` against, so
-  views become valid in each of them. Each route's answer for a view must
-  be stated (§4 below), not left to fall out of the code.
+  views become valid in each of them. State each route's answer for a view
+  (§4 below); do not leave it to fall out of the code.
 - Additive, so a `feat(protocol)`. Record it in `spec/CHANGELOG.md`, and
   update `spec/openapi.yaml`.
 
@@ -38,18 +38,20 @@ and filterable exactly like a table.
 
 ## 3. Catalog queries
 
-The listing, the counts, and the allow-list must keep sharing one
-predicate (`docs/adapter-decisions.md`, the Postgres row on the table
-allow-list — a past bug came from the two drifting apart).
+The listing, the counts and the allow-list must keep one shared predicate
+(`docs/adapter-decisions.md` §5.2 / §5.3).
 
 - **Postgres:** `relkind IN ('r', 'v', 'm')`. `has_table_privilege` works
   for views and materialized views, so the privilege gate carries over. In
-  Rust: `postgres.rs` (`readable_table_oid_in_tx`, `list_tables`, `table_counts`).
+  Rust: `postgres.rs` (`readable_table_oid_in_tx`, `list_tables`,
+  `table_counts`).
 - **MySQL/MariaDB:** `table_type IN ('BASE TABLE', 'VIEW')`. In Rust:
-  `mysql.rs` (`allowed_tables_in_tx`, `list_tables`, `table_counts`).
+  `mysql.rs` (`allowed_tables_in_tx`, `list_tables`, `table_counts`). Both
+  engines store the text `VIEW` in a view's `table_comment`; do not report
+  it as a §5.2 `comment`.
 - **SQLite:** `type IN ('table', 'view')`. In Rust: `sqlite.rs`
-  (`allowed_tables_on`, `list_tables`).
-- The same three changes in Go, Node, Flask and Spring.
+  (`allowed_tables_on`).
+- The same changes in Go, Node, Flask and Spring.
 
 Column metadata needs no change: `information_schema.columns` and
 `pragma_table_info` already cover views.
@@ -58,50 +60,44 @@ Column metadata needs no change: `information_schema.columns` and
 
 | Route | Answer for a view |
 |---|---|
-| §5.3 `/table-counts` and §5.4.4 `total_approx` | `-1` for a plain view. Postgres 14+ already stores `reltuples = -1` for a view (checked on 18.4); older versions store `0`, so map `relkind = 'v'` to `-1` explicitly. MySQL's `table_rows` is `NULL` for a view, which `table_counts` already maps to `-1`. Materialized views have a real estimate after `ANALYZE`. |
-| §5.4 `/tables/data` | Unchanged. No primary key, so the grid shows no FK links, no new-row tint and no record identity — the same as a PK-less table today. |
+| §5.3 `/table-counts` and §5.4.4 `total_approx` | `-1` for a plain view. Postgres 14 and later store `reltuples = -1` for a view (checked on 18.4), and 15 is the oldest supported version. MySQL's `table_rows` is `NULL` for a view, which `table_counts` already maps to `-1`. A materialized view has a real estimate after `ANALYZE`. |
+| §5.4 `/tables/data` | Unchanged. No primary key, so the grid shows no FK links, no new-row tint and no record identity, as for a PK-less table today. No tie-break key either, so rows come in the engine's order and pages MAY repeat or skip rows (§5.4). A materialized view with a NOT NULL unique index gets that index as its key. |
 | §5.5 `/tables/common-values` | Empty for a plain view: `pg_stats` has nothing for it. Materialized views have stats. The spec already allows empty. |
-| §5.9 `/tables/referenced-by` | `[]`. Nothing can hold a foreign key to a view. Today the target check uses its own `relkind = 'r'` test and would return 400; widen it to the shared predicate. |
-| §5.10 `/tables/structure` | Plain view: no indexes or constraints. Materialized view: its indexes. Showing the view's SQL is story 30. |
-| §5.11 `/tables/join` | Allowed by the shared allow-list. The builder can't suggest a pair (no FKs), but a typed join works. Decide whether to keep that on purpose (§7). |
+| §5.9 `/tables/referenced-by` | `[]`: nothing can hold a foreign key to a view. The target check already uses the shared gate (`readable_table_oid_in_tx` in Rust), so it widens with the predicate. The referrer filter `rc.relkind = 'r'` stays. |
+| §5.10 `/tables/structure` | Plain view: no indexes or constraints. Materialized view: its indexes. Showing the view's SQL is [[30-show-ddl-source-viewer]]. |
+| §5.11 `/tables/join` | Allowed by the shared allow-list. The join form cannot suggest a pair (no FKs), but a typed join works. Decide whether to keep that on purpose (§7). |
 
 ## 5. Frontend
 
 - A kind mark on the table chip and in the join picker
-  (`frontend/src/features/table-chips.ts`, `features/join-catalog.ts`).
-- The structure button stays enabled; an empty panel for a plain view says
-  "a view has no indexes or constraints" rather than looking broken.
+  (`frontend/src/features/table-chips.ts`, `tables-panel.ts`,
+  `join-catalog.ts`).
+- The structure button stays enabled. An empty panel for a plain view says
+  "a view has no indexes or constraints", so it does not look broken.
 - The AI-agent API reference (`frontend/src/features/api-reference.ts`)
   shows `kind` in its `/tables` example.
-- Check the design canvas boards before building the chip mark, and fit
-  it to story 54's side panel rows if that ships first.
+- Check the design canvas boards before building the chip mark.
 
-## 6. Touchpoints
+## 6. Touchpoints not covered above
 
-- `spec/protocol.md` §5.2, §5.9, §5.10; `spec/openapi.yaml`;
-  `spec/CHANGELOG.md`; `docs/adapter-decisions.md` (the allow-list
-  predicate rows and the counts table).
-- The five backends: Rust core (axum and actix-web share it), Go, Node,
-  Flask, Spring.
-- `conformance/seed`: every seed already has an `active_users` view, and
-  the Postgres seed an `order_totals_by_status` materialized view (story 57
-  S1). Add them to the expected list with their `kind`, and replace
-  `table_data::a_view_is_not_an_allowed_table` with reads that succeed.
-- The demos: the PGlite live demo uses the Node port; the synthetic demo
-  (`frontend/src/demo/synthetic/serve.ts`) needs `kind` too.
+- Conformance: every seed already has an `active_users` view, and the
+  Postgres seed has an `order_totals_by_status` materialized view. Add them
+  to the expected list with their `kind`. Replace
+  `table_data::a_view_is_not_an_allowed_table` with reads that succeed, and
+  rewrite `P5.2-BASE-TABLES-ONLY` in `conformance/runner/COVERAGE.md`.
+- The demos: both get `kind` from the Node port (the synthetic snapshot
+  copies `listTables`, `frontend/src/demo/build/snapshot.ts`). Rebuild the
+  committed `docs/demo/` snapshot.
 
 ## 7. Open questions
 
-- **Default order.** Answered by story 33 B1: a table with no primary
-  key or NOT NULL unique index gets no tie-break (`spec/protocol.md`
-  §5.4). A view has no key, so its rows come in the engine's order.
 - **Joins on views.** Keep them allowed, or limit `/tables/join` to
   `kind = table`?
 - **Partitioned tables** (`relkind = 'p'`) are also left out today
-  (`docs/adapter-decisions.md`). Add them in the same change, or a
-  separate story?
+  (`docs/adapter-decisions.md` §5.2 / §5.3). Add them in the same change,
+  or in a separate story?
 - **Column comments** on views: Postgres has them, MySQL and SQLite do
-  not — the same degraded-metadata pattern as elsewhere.
+  not. This is the same degraded-metadata pattern as elsewhere.
 
 ## 8. Notes
 
@@ -109,11 +105,11 @@ Column metadata needs no change: `information_schema.columns` and
   statement timeout covers a slow one; no extra gate.
 - **Privileges.** A Postgres view runs with its owner's rights (unless
   `security_invoker`), so it can show rows from tables the host's role
-  can't read directly. That adds no access: the host's role can already
+  cannot read directly. That adds no access: the host's role can already
   read the view. Say so in `docs/adapter-decisions.md`.
 - **Side effects.** A view over a volatile function is a theoretical
-  concern, but Ashurbanipal still only issues `SELECT`; not a reason to
-  gate views.
+  concern, but Ashurbanipal still only issues `SELECT`. It is not a reason
+  to gate views.
 
 ## 9. What "done" means
 

@@ -24,9 +24,7 @@ See the discussion that produced this triage.
 - **Row diff / compare** —
   `docs/feature-backlog/04-diff-viewer-for-rows.md`.
 - **Saved / recent filters per table** —
-  `docs/feature-backlog/02-per-table-query-filter-history.md` (its
-  "carve out an exception to R6" branch is largely resolved by
-  `docs/feature-backlog/20-persisted-and-shareable-filter-state.md`).
+  `docs/feature-backlog/02-per-table-query-filter-history.md`.
 - **Shareable filtered-view URL** —
   `docs/feature-backlog/20-persisted-and-shareable-filter-state.md`.
 - **"Show DDL" source viewer** —
