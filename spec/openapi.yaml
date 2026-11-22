@@ -1057,6 +1057,28 @@ components:
             Validated server-side against the table's real columns
             (case-sensitive) before reaching SQL; unknown column yields
             400.
+        path:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            oneOf:
+              - type: string
+                minLength: 1
+                pattern: '^[^"\\\u0000-\u001F]+$'
+                description: An object key of at most 255 UTF-8 bytes.
+              - type: integer
+                minimum: 0
+                maximum: 2147483647
+                description: An array index.
+          description: >
+            Reads the value at this path inside the column, which must be
+            of class json; any other class yields 400. Keys and indexes
+            are bound, never spliced into SQL. The value compares as text,
+            case-sensitive except for LIKE / ILIKE, which behave as on a
+            text column; a missing key, JSON null or
+            SQL NULL is NULL (spec/protocol.md §5.4.2).
+          example: ["prefs", "theme"]
         op:
           type: string
           enum: ["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"]

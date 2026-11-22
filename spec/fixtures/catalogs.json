@@ -162,6 +162,14 @@
           ],
           "unique_keys": [{"name": "typed_samples_pkey", "primary": true, "columns": ["id"]}]
         },
+        "public.json_docs": {
+          "columns": [
+            {"name": "id", "data_type": "integer", "udt_schema": "pg_catalog", "udt_name": "int4", "is_enum": false, "type": "integer"},
+            {"name": "doc", "data_type": "jsonb", "udt_schema": "pg_catalog", "udt_name": "jsonb", "is_enum": false, "type": "jsonb"},
+            {"name": "doc_json", "data_type": "json", "udt_schema": "pg_catalog", "udt_name": "json", "is_enum": false, "type": "json"}
+          ],
+          "unique_keys": [{"name": "json_docs_pkey", "primary": true, "columns": ["id"]}]
+        },
         "warehouse.carriers": {
           "columns": [
             {"name": "id", "data_type": "bigint", "udt_schema": "pg_catalog", "udt_name": "int8", "is_enum": false, "type": "bigint"},
@@ -391,6 +399,13 @@
           ],
           "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
         },
+        "ashurbanipal.json_docs": {
+          "columns": [
+            {"name": "id", "data_type": "int", "column_type": "int"},
+            {"name": "doc", "data_type": "json", "column_type": "json"}
+          ],
+          "unique_keys": [{"name": "PRIMARY", "primary": true, "columns": ["id"]}]
+        },
         "warehouse.carriers": {
           "columns": [
             {"name": "id", "data_type": "bigint", "column_type": "bigint"},
@@ -555,6 +570,13 @@
             {"name": "date_v", "declared": "DATE"},
             {"name": "datetime_v", "declared": "DATETIME"},
             {"name": "time_v", "declared": "TIME"}
+          ],
+          "unique_keys": [{"name": "", "primary": true, "columns": ["id"]}]
+        },
+        "main.json_docs": {
+          "columns": [
+            {"name": "id", "declared": "INTEGER"},
+            {"name": "doc", "declared": "JSON"}
           ],
           "unique_keys": [{"name": "", "primary": true, "columns": ["id"]}]
         },

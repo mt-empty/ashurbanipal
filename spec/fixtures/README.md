@@ -108,14 +108,17 @@ Each entry in `cases`:
   and implies the stage:
   - `unknown_column` — structurally valid AST, column fails the schema
     allow-list (builder stage).
+  - `path_not_json` — a `path` on a column whose class is not `json`
+    (builder stage). A unit runner may treat it like `invalid_value`: both
+    are the builder's own 400 `invalid_filter`.
   - `malformed`, `bad_op`, `bad_logic`, `missing_value`,
     `unexpected_value`, `bad_value` (wrong value shape for the op: an
     array where a string belongs, or a bad `IN`/`BETWEEN` list),
     `missing_logic`, `unexpected_logic`, `too_many_conditions`,
-    `oversize` — structural validation, rejected before any schema
-    access. A unit runner asserts only that the parse fails, not which
-    kind; error message text is implementation-defined
-    (`spec/protocol.md` §2).
+    `oversize`, `bad_path` (a `path` that breaks the step rules) —
+    structural validation, rejected before any schema access. A unit
+    runner asserts only that the parse fails, not which kind; error
+    message text is implementation-defined (`spec/protocol.md` §2).
 
   **Or** `expect` — one entry per engine the case applies to, either
   `{"error": "invalid_value"}` (the column compares typed there and a value
@@ -127,8 +130,13 @@ Each entry in `cases`:
     first; SQLite and MySQL `?`. `IN` and `BETWEEN` take one placeholder
     per item. A runner whose driver uses another placeholder spelling
     (`%s`, `?` on Postgres) substitutes it before comparing; everything
-    else is normative. An empty `where` means no WHERE clause.
-  - `values` — the bind values, in placeholder order.
+    else is normative. An empty `where` means no WHERE clause. A
+    condition with a `path` wraps the column in the engine's JSON path
+    expression (`docs/adapter-decisions.md`); the `path-hostile-keys-…`
+    case must build the same `where` as `path-plain-keys`.
+  - `values` — the bind values, in placeholder order, including each
+    path step (Postgres) or the path string, once per placeholder
+    (MySQL, SQLite).
 
   An engine missing from `expect` doesn't run the case (no such column
   there).

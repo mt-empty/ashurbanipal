@@ -363,8 +363,15 @@ Structural rules (violations → 400):
   an array of 1 to 1000 JSON strings; for `BETWEEN`, an array of exactly
   two JSON strings, the inclusive lower and upper bound. For every other
   op it MUST be a JSON string.
+- `path` is optional, and `null` means no path. Otherwise it MUST be an
+  array of 1 to 8 steps.
+  A step is either a JSON string, an object key of 1 to 255 UTF-8 bytes
+  with no `"`, no `\` and no character U+0000–U+001F, or a JSON number
+  whose value is a whole number from 0 to 2147483647, an array index
+  (`1.0` is index 1; `1.5` and `-1` → 400). The key `"0"` and the index
+  `0` are different steps.
 - At most **10** conditions; more → 400. An `IN` or `BETWEEN` condition
-  counts as one.
+  counts as one, and so does a condition with a `path`.
 - Input these rules do not name, such as a key repeated within one object or
   a lone UTF-16 surrogate escape, MAY be accepted or rejected with 400, but
   MUST NOT produce a 5xx. The same holds for `join` (§5.11.1).
@@ -407,6 +414,28 @@ Evaluation rules:
   - `IS NULL`/`IS NOT NULL` test the column the same way: a typed
     column itself, any other column through its text cast. (A Postgres
     composite whose fields are all NULL is itself NULL, yet has text.)
+- A condition with a `path` compares the value found at that path inside
+  its column, which MUST be of class `json` (§5.11.2); any other class →
+  400 `invalid_filter`. Steps are applied in order: a key reads an object
+  member, an index reads an array item.
+  - The SQL text MUST depend only on the column, the number and kind
+    (key or index) of the steps, and the op. Every key and index reaches
+    the query as a bound parameter, or inside one bound path string built
+    from the validated steps; keys a path string could not hold literally
+    are the ones the structural rule rejects, so no escaping is needed.
+  - A missing key, a JSON `null`, an SQL NULL, a step into the wrong kind
+    of value (a key on an array, an index on an object), and, where the
+    engine does not enforce JSON (SQLite), a cell that is not valid JSON,
+    all give NULL. `IS NULL` matches each of them.
+  - The value is always compared as text, never typed: a string as its
+    unescaped text, a number as the engine renders it, a boolean as
+    `true` or `false`, an object or array as its JSON text. Comparison
+    ops and `IN` are case-sensitive; `LIKE` and `ILIKE` behave as they
+    do on a class `text` column. Where
+    engines render the same number or object differently, the
+    differences are recorded in `docs/adapter-decisions.md`.
+  - An engine that cannot evaluate a path (SQLite built without JSON
+    functions) → 400 `invalid_filter`, never a 5xx.
 - Before binding, every value compared typed MUST match its class's form
   below; otherwise → 400 `invalid_filter`, whose `title` names the column
   and the expected form. The check makes engines agree: some would
@@ -952,7 +981,8 @@ comparison uses the columns' native types.
   limit of 10 conditions, the byte bound, the empty-array rule), with one
   addition: each condition MAY carry `join`, an integer position,
   default `0`. Out of range → 400 `invalid_filter`. A condition's `column`
-  MUST match a real column of the table at that position.
+  MUST match a real column of the table at that position. A `path`
+  applies to that column, as §5.4.2.
 - The comparison follows that column's class and the value checks of §5.4.2.
   Conditions are combined as §5.4.2 specifies.
 - On §5.4, a condition that carries `join` → 400 `invalid_filter`.
