@@ -13,7 +13,11 @@ class FilterValidatorFixtureTest {
     private data class Outcome(val where: String? = null, val values: List<String>? = null, val error: String? = null)
 
     /** Structural kinds all fail the parse before any schema access, so they compare as one. */
-    private fun kind(k: String): String = if (k == "unknown_column" || k == "invalid_value") k else STRUCTURAL
+    private fun kind(k: String): String = when (k) {
+        "unknown_column", "invalid_value" -> k
+        "path_not_json" -> "invalid_value" // the builder's own invalid_filter
+        else -> STRUCTURAL
+    }
 
     private fun expected(engine: CatalogFixture.Engine, case: JsonNode): Outcome? {
         require(case.has("expect") != case.has("expect_error")) {
