@@ -176,7 +176,8 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
   if (obj.join !== undefined && (typeof obj.join !== "number" || !Number.isInteger(obj.join) || obj.join < 0)) {
     throw new FilterError(`condition ${index} has an invalid "join" position`);
   }
-  if (obj.path !== undefined && obj.path !== null) checkPath(obj.path, index);
+  const path = obj.path ?? undefined;
+  if (path !== undefined) checkPath(path, index);
   return {
     logic: obj.logic as "AND" | "OR" | undefined,
     not: (obj.not as boolean | undefined) ?? false,
@@ -184,7 +185,7 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
     op: obj.op,
     value: obj.value as string | string[] | undefined,
     ...(obj.join !== undefined ? { join: obj.join as number } : {}),
-    ...(obj.path !== undefined && obj.path !== null ? { path: obj.path as PathStep[] } : {}),
+    ...(path !== undefined ? { path } : {}),
   };
 }
 

@@ -27,7 +27,6 @@ const fixture = readFixture<{ cases: FixtureCase[] }>("filter-builder-tests.json
 const STRUCTURAL = "structural";
 
 function kind(k: string): string {
-  if (k === "path_not_json") return "invalid_value"; // the builder's own invalid_filter
   return k === "unknown_column" || k === "invalid_value" ? k : STRUCTURAL;
 }
 

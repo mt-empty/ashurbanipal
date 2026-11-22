@@ -118,15 +118,15 @@ def _check_schema(schema: str | None) -> None:
         raise NotAllowed(f"schema {schema!r}", kind=NotAllowedKind.SCHEMA)
 
 
-def _json_path(expr: str, path: tuple[PathStep, ...]) -> tuple[str, list[str]]:
+def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, list[str]]:
     """SQLite does not enforce a declared JSON type and json_extract raises
     on a cell that is not JSON, hence json_valid. json_extract returns 1/0 for
     booleans and an INTEGER for a number, hence the json_type branch and the CAST."""
     p = json_path_string(path)
     sql = (
-        f"CAST(CASE WHEN json_valid({expr}) THEN CASE json_type({expr}, ?) "
+        f"CAST(CASE WHEN json_valid({expr}) THEN CASE json_type({expr}, {ph}) "
         f"WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' "
-        f"ELSE json_extract({expr}, ?) END END AS TEXT)"
+        f"ELSE json_extract({expr}, {ph}) END END AS TEXT)"
     )
     return sql, [p, p]
 

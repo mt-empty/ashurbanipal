@@ -730,9 +730,7 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
             .map_err(|e| DbError::FilterParse(format!("condition {i}: {e}")))?;
         let col = column_index(table, &c.column)?;
         check_path_column(i, &table.columns[col], c.path.as_deref())?;
-        if c.path.is_none() {
-            check_typed_values(&table.columns[col], c.op, c.value.as_ref())?;
-        }
+        check_typed_values(&table.columns[col], c)?;
         filter.push(ResolvedCondition {
             logic: c.logic,
             not: c.not,
@@ -846,15 +844,11 @@ fn check_path_column(i: usize, col: &ColMeta, path: Option<&[PathStep]>) -> Resu
 }
 
 /// The column-typed half of the `spec/protocol.md` §5.4.2 value check.
-fn check_typed_values(
-    col: &ColMeta,
-    op: FilterOp,
-    value: Option<&FilterValue>,
-) -> Result<(), DbError> {
-    let (Some(form), Some(value)) = (col.compare.and_then(|c| c.form), value) else {
+fn check_typed_values(col: &ColMeta, c: &Condition) -> Result<(), DbError> {
+    let (Some(form), Some(value)) = (col.compare.and_then(|c| c.form), c.value.as_ref()) else {
         return Ok(());
     };
-    if op.is_pattern() {
+    if c.op.is_pattern() || c.path.is_some() {
         return Ok(());
     }
     match value.items().iter().find(|v| !form.accepts(v)) {
@@ -968,9 +962,7 @@ pub(crate) fn table_where_clause(
             )));
         }
         check_path_column(i, col, c.path.as_deref())?;
-        if c.path.is_none() {
-            check_typed_values(col, c.op, c.value.as_ref())?;
-        }
+        check_typed_values(col, c)?;
         terms.push(FilterTerm {
             logic: c.logic,
             not: c.not,

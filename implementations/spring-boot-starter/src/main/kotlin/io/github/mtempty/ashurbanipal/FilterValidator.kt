@@ -38,7 +38,7 @@ data class Condition(
     val value: Any? = null,
     /** Table position, accepted only by `parse(raw, allowJoin = true)` (`spec/protocol.md` §5.11.3). */
     val join: Int? = null,
-    /** Steps into a JSON column: each a key [String] or an index [Int] once [pathSteps] has checked it. */
+    /** Steps into a JSON column, as decoded; [pathSteps] checks them and returns keys and [Int] indexes. */
     val path: List<Any?>? = null,
 ) {
     /** The values the condition binds, in order; call after [checkValueShape]. */
@@ -241,7 +241,8 @@ class FilterValidator {
                 throw FilterException("condition $i has invalid op ${condition.op}")
             }
             checkValueShape(condition, i)
-            if (condition.path != null) condition.copy(path = pathSteps(condition.path, i)) else condition
+            condition.path?.let { pathSteps(it, i) }
+            condition
         }
     }
 }

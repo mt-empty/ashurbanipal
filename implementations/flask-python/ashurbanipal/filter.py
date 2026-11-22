@@ -64,8 +64,15 @@ class _ConditionBase:
     join: int | None = None
     path: tuple[PathStep, ...] | None = None
 
+    def __post_init__(self) -> None:
+        if self.path is not None:
+            if (why := path_error(self.path)) is not None:
+                raise ValueError(why)
+            # Frozen: the stored path is the checked one, with each index as an int.
+            object.__setattr__(self, "path", path_steps(self.path))
 
-# Each class checks its op when built as well, since a host's DbSource code may not be type-checked.
+
+# Each class checks its op (and path) when built as well, since a host's DbSource code may not be type-checked.
 @dataclass(frozen=True, kw_only=True)
 class NullCheck(_ConditionBase):
     """`IS NULL` or `IS NOT NULL`: nothing to bind."""
@@ -74,6 +81,7 @@ class NullCheck(_ConditionBase):
     value: None = None
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not _is_null_op(self.op) or self.value is not None:
             raise ValueError(f"NullCheck takes IS NULL or IS NOT NULL and no value, not {self.op!r}")
 
@@ -84,6 +92,7 @@ class Comparison(_ConditionBase):
     value: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not _is_value_op(self.op) or not isinstance(self.value, str):
             raise ValueError(f"Comparison takes a value operator and a string value, not {self.op!r}")
 
@@ -96,6 +105,7 @@ class ListComparison(_ConditionBase):
     value: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not _is_list_op(self.op) or list_shape_error(self.op, self.value) is not None:
             raise ValueError(f"ListComparison takes IN or BETWEEN and a valid list, not {self.op!r}")
 
@@ -205,7 +215,7 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
         if raw_cond.get("path") is not None:
             if (why := path_error(raw_cond["path"])) is not None:
                 raise FilterError(f"condition {i}: {why}")
-            path = path_steps(raw_cond["path"])
+            path = tuple(raw_cond["path"])
 
         op = raw_cond.get("op")
         value = raw_cond.get("value")

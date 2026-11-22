@@ -25,7 +25,7 @@ use crate::common::TestServer;
 const BUILDER_FIXTURES: &str = include_str!("../../spec/fixtures/filter-builder-tests.json");
 
 /// GETs `/tables/data?table=...&filter=...` and returns the raw response.
-async fn fetch(srv: &TestServer, table: &str, filter: &str) -> reqwest::Response {
+pub(crate) async fn fetch(srv: &TestServer, table: &str, filter: &str) -> reqwest::Response {
     srv.client()
         .get(srv.url("/api/tables/data"))
         .query(&[("table", table), ("filter", filter)])
@@ -556,7 +556,7 @@ async fn a_value_that_does_not_fit_a_typed_column_is_invalid_filter() {
 
 /// Every row matching `filter`, keyed by `id` text, so a failure can name
 /// the row a value should have found.
-async fn ids(srv: &TestServer, table: &str, filter: &serde_json::Value) -> Vec<String> {
+pub(crate) async fn ids(srv: &TestServer, table: &str, filter: &serde_json::Value) -> Vec<String> {
     texts(&all_rows(srv, table, filter).await, "id")
 }
 

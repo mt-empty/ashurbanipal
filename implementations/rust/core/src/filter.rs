@@ -109,10 +109,8 @@ impl<'de> serde::Deserialize<'de> for PathStep {
             }
             fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<PathStep, E> {
                 u32::try_from(v)
-                    .ok()
-                    .filter(|&i| i <= MAX_PATH_INDEX)
                     .map(PathStep::Index)
-                    .ok_or_else(|| E::custom(format!("path index {v} is above {MAX_PATH_INDEX}")))
+                    .map_err(|_| E::custom(format!("path index {v} is above {MAX_PATH_INDEX}")))
             }
             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<PathStep, E> {
                 match u64::try_from(v) {
@@ -121,7 +119,7 @@ impl<'de> serde::Deserialize<'de> for PathStep {
                 }
             }
             fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<PathStep, E> {
-                if v.fract() != 0.0 || !(0.0..=f64::from(MAX_PATH_INDEX)).contains(&v) {
+                if v.fract() != 0.0 || !(0.0..=f64::from(u32::MAX)).contains(&v) {
                     return Err(E::custom(format!(
                         "path index {v} is not a whole number from 0 to {MAX_PATH_INDEX}"
                     )));
@@ -567,8 +565,7 @@ mod tests {
         );
         assert!(with_path(&format!(r#"["{}"]"#, "é".repeat(127))).is_ok());
         assert!(with_path(r#"["' OR 1=1 --", "$", ".", "[", "*"]"#).is_ok());
-        for whole in ["[1.0]", "[1e0]", "[-0]"] {
-            let index = if whole == "[-0]" { 0 } else { 1 };
+        for (whole, index) in [("[1.0]", 1), ("[1e0]", 1), ("[-0]", 0)] {
             let c = with_path(whole).unwrap();
             assert_eq!(c[0].path.as_deref().unwrap(), [PathStep::Index(index)]);
         }

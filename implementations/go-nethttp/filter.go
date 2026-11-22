@@ -148,13 +148,6 @@ func (s *PathStep) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (s PathStep) MarshalJSON() ([]byte, error) {
-	if s.IsIndex {
-		return json.Marshal(s.Index)
-	}
-	return json.Marshal(s.Key)
-}
-
 // checkPath refuses keys a path string could not hold literally, so no
 // dialect escapes one (spec/protocol.md §5.4.2).
 func checkPath(i int, path []PathStep) error {

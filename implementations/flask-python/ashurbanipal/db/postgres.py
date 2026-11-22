@@ -79,11 +79,11 @@ class _LenientTextLoader(TextLoader):
             return "<undecodable>"
 
 
-def _json_path(expr: str, path: tuple[PathStep, ...]) -> tuple[str, list[str]]:
-    """`(col -> %s::text -> %s::int ->> %s::text)`: one bind per step; the
+def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, list[str]]:
+    """`(col -> ph::text -> ph::int ->> ph::text)`: one bind per step; the
     cast picks the key or index form of the operator, on json and jsonb alike."""
     parts = [
-        f" {'->>' if i == len(path) - 1 else '->'} %s::{'int' if isinstance(s, int) else 'text'}"
+        f" {'->>' if i == len(path) - 1 else '->'} {ph}::{'int' if isinstance(s, int) else 'text'}"
         for i, s in enumerate(path)
     ]
     return f"({expr}{''.join(parts)})", [str(s) for s in path]

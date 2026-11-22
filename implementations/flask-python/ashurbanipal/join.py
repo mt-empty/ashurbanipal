@@ -26,8 +26,6 @@ from .filter import (
     describe_form,
     form_accepts,
     load_json,
-    path_error,
-    path_steps,
 )
 
 MAX_JOIN_BYTES = 8192
@@ -582,26 +580,22 @@ class Dialect:
     cast_param: Callable[[str, str], str]
     placeholder: str  # "%s" (psycopg, pymysql) or "?" (sqlite3)
     ilike: str  # "native", "like" or "lowered-like"
-    # The text at a validated path inside a JSON column expression, and the
-    # values it binds, in placeholder order.
-    json_path: Callable[[str, tuple[PathStep, ...]], tuple[str, list[str]]]
+    # The text at a checked path inside a JSON column expression, given the
+    # placeholder, and the values it binds in placeholder order.
+    json_path: Callable[[str, tuple[PathStep, ...], str], tuple[str, list[str]]]
 
 
 def json_path_string(path: tuple[PathStep, ...]) -> str:
     """`$."key"[0]…` for MySQL and SQLite, bound as one parameter; safe
-    unescaped only because `path_error` refuses `"`, `\\` and control
+    unescaped only because `filter.path_error` refuses `"`, `\\` and control
     characters in keys."""
     return "$" + "".join(f"[{s}]" if isinstance(s, int) else f'."{s}"' for s in path)
 
 
 def _check_path_column(i: int, col: ColMeta, cond: Condition) -> None:
-    """Re-checks a path for callers that bypass `parse`; a path is valid only
-    on a class json column."""
-    if cond.path is None:
-        return
-    if (why := path_error(cond.path)) is not None:
-        raise _FilterParseError(f"condition {i}: {why}")
-    if col.column_class != JSON:
+    """A path (already checked when the condition was built) is valid only on
+    a class json column."""
+    if cond.path is not None and col.column_class != JSON:
         raise _FilterParseError(f"condition {i}: column {col.name!r} is not JSON; only json columns take a path")
 
 
@@ -667,7 +661,7 @@ def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tupl
             return d.placeholder if target is None else d.cast_param(d.placeholder, target)
 
         if cond.path is not None:
-            lhs, path_values = d.json_path(expr, path_steps(cond.path))
+            lhs, path_values = d.json_path(expr, cond.path, d.placeholder)
             values.extend(path_values)
         else:
             lhs = expr if typed is not None else d.cast_text(expr)

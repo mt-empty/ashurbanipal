@@ -338,7 +338,7 @@ data class TableMeta(
     }
 }
 
-internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col: Int)
+internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col: Int, val path: List<Any>? = null)
 
 /** A request resolved against the catalog; every name in SQL text comes from [tables], never the request. */
 class JoinPlan internal constructor(
@@ -439,7 +439,7 @@ fun planJoin(spec: JoinSpec, tables: List<TableMeta>, opts: JoinOpts): JoinPlan 
         val col = tables[pos].index(cond.column)
         val path = checkPathColumn(i, tables[pos].columns[col], cond)
         checkTypedValues(tables[pos].columns[col], cond)
-        ResolvedCondition(if (path != null) cond.copy(path = path) else cond, pos, col)
+        ResolvedCondition(cond, pos, col, path)
     }
 
     if (opts.sort == null && opts.sortJoin != null) throw BadParameterException("sort_join needs sort")
@@ -592,11 +592,7 @@ internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<
     }
 
     val (clause, values) = filterSql(
-        plan.filter.map { rc ->
-            @Suppress("UNCHECKED_CAST")
-            val path = rc.cond.path as List<Any>?
-            FilterTerm(rc.cond, alias(rc.pos, rc.col), plan.tables[rc.pos].columns[rc.col], path)
-        },
+        plan.filter.map { rc -> FilterTerm(rc.cond, alias(rc.pos, rc.col), plan.tables[rc.pos].columns[rc.col], rc.path) },
         d,
     )
     if (clause.isNotEmpty()) sql.append(" where $clause")

@@ -1885,7 +1885,7 @@
       "name": "path-on-a-text-column",
       "table": "users",
       "conditions": [{"column": "email", "path": ["domain"], "op": "=", "value": "x"}],
-      "expect_error": "path_not_json"
+      "expect_error": "invalid_value"
     },
     {
       "name": "path-null-is-no-path",

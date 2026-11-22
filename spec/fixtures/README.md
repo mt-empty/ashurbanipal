@@ -108,9 +108,9 @@ Each entry in `cases`:
   and implies the stage:
   - `unknown_column` — structurally valid AST, column fails the schema
     allow-list (builder stage).
-  - `path_not_json` — a `path` on a column whose class is not `json`
-    (builder stage). A unit runner may treat it like `invalid_value`: both
-    are the builder's own 400 `invalid_filter`.
+  - `invalid_value` — the builder's own 400 `invalid_filter` on a known
+    column, here a `path` on a column whose class is not `json` (builder
+    stage).
   - `malformed`, `bad_op`, `bad_logic`, `missing_value`,
     `unexpected_value`, `bad_value` (wrong value shape for the op: an
     array where a string belongs, or a bad `IN`/`BETWEEN` list),
