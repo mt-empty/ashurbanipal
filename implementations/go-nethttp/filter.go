@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,6 +18,13 @@ const MaxConditions = 10
 
 // MaxInItems caps an IN list (spec/protocol.md §5.4.2).
 const MaxInItems = 1000
+
+// Path limits (spec/protocol.md §5.4.2).
+const (
+	MaxPathSteps    = 8
+	MaxPathKeyBytes = 255
+	MaxPathIndex    = math.MaxInt32
+)
 
 // Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
 var validOps = map[string]bool{
@@ -108,7 +116,66 @@ type Condition struct {
 	Value  *FilterValue `json:"value,omitempty"`
 	// Join is a table position, accepted only by ParseFilterForJoin
 	// (spec/protocol.md §5.11.3).
-	Join *int `json:"join,omitempty"`
+	Join *int       `json:"join,omitempty"`
+	Path []PathStep `json:"path,omitempty"`
+}
+
+// PathStep is one step of a condition's path into a JSON column: an object
+// key, or an array index when IsIndex.
+type PathStep struct {
+	Key     string
+	Index   int
+	IsIndex bool
+}
+
+func (s *PathStep) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimLeft(b, " \t\r\n"); len(t) > 0 && t[0] == '"' {
+		var key string
+		if err := json.Unmarshal(b, &key); err != nil {
+			return err
+		}
+		*s = PathStep{Key: key}
+		return nil
+	}
+	var n float64
+	if err := json.Unmarshal(b, &n); err != nil || string(bytes.TrimSpace(b)) == "null" {
+		return fmt.Errorf("a path step must be a key string or an index from 0 to %d", MaxPathIndex)
+	}
+	if n != math.Trunc(n) || n < 0 || n > MaxPathIndex {
+		return fmt.Errorf("path index %v is not a whole number from 0 to %d", n, MaxPathIndex)
+	}
+	*s = PathStep{Index: int(n), IsIndex: true}
+	return nil
+}
+
+func (s PathStep) MarshalJSON() ([]byte, error) {
+	if s.IsIndex {
+		return json.Marshal(s.Index)
+	}
+	return json.Marshal(s.Key)
+}
+
+// checkPath refuses keys a path string could not hold literally, so no
+// dialect escapes one (spec/protocol.md §5.4.2).
+func checkPath(i int, path []PathStep) error {
+	if len(path) < 1 || len(path) > MaxPathSteps {
+		return filterErr("condition %d: path needs 1 to %d steps, got %d", i, MaxPathSteps, len(path))
+	}
+	for _, s := range path {
+		if s.IsIndex {
+			if s.Index < 0 || s.Index > MaxPathIndex {
+				return filterErr("condition %d: path index %d is not from 0 to %d", i, s.Index, MaxPathIndex)
+			}
+			continue
+		}
+		if len(s.Key) < 1 || len(s.Key) > MaxPathKeyBytes {
+			return filterErr("condition %d: path key must be 1 to %d bytes, got %d", i, MaxPathKeyBytes, len(s.Key))
+		}
+		if strings.IndexFunc(s.Key, func(r rune) bool { return r == '"' || r == '\\' || r < 0x20 }) >= 0 {
+			return filterErr("condition %d: path key %q contains a quote, a backslash or a control character", i, s.Key)
+		}
+	}
+	return nil
 }
 
 type FilterError struct {
@@ -133,7 +200,7 @@ func ParseFilterForJoin(raw string) ([]Condition, error) {
 	return parseFilter(raw, true)
 }
 
-var conditionKeys = keyShape{"logic": nil, "not": nil, "column": nil, "op": nil, "value": nil, "join": nil}
+var conditionKeys = keyShape{"logic": nil, "not": nil, "column": nil, "op": nil, "value": nil, "join": nil, "path": nil}
 
 func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 	if len(raw) > MaxFilterBytes {
@@ -175,6 +242,11 @@ func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 		}
 		if err := checkValueShape(i, cond.Op, cond.Value); err != nil {
 			return nil, err
+		}
+		if cond.Path != nil {
+			if err := checkPath(i, cond.Path); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return conditions, nil

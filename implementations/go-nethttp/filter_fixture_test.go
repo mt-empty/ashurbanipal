@@ -28,8 +28,11 @@ type filterFixtureOutcome struct {
 const filterFixtureStructural = "structural"
 
 func filterFixtureKind(kind string) string {
-	if kind == "unknown_column" || kind == "invalid_value" {
+	switch kind {
+	case "unknown_column", "invalid_value":
 		return kind
+	case "path_not_json": // the builder's own invalid_filter, like invalid_value
+		return "invalid_value"
 	}
 	return filterFixtureStructural
 }
