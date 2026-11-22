@@ -8,6 +8,7 @@ const SEEDED_TABLES = [
   "feature_flags",
   "inventory_counts",
   "inventory_locations",
+  "json_docs",
   "order_extra",
   "orders",
   "page_hits",

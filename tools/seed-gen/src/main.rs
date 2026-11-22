@@ -229,6 +229,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
     // feature_flags is deliberately excluded from analyze below.
     write_page_hits(&mut out);
     write_typed_samples(&mut out);
+    write_json_docs(&mut out);
 
     write_carriers(&mut out, rng);
     let shipped_offsets_mins = write_shipments(&mut out, rng, &orders);
@@ -256,6 +257,7 @@ fn generate_postgres(rng: &mut StdRng) -> String {
          analyze inventory_counts;\n\
          analyze page_hits;\n\
          analyze typed_samples;\n\
+         analyze json_docs;\n\
          analyze warehouse.carriers;\n\
          analyze warehouse.shipments;\n\
          analyze warehouse.shipment_events;\n\
@@ -308,6 +310,7 @@ fn write_header(out: &mut String) {
          drop materialized view if exists order_totals_by_status;\n\
          drop view if exists active_users;\n\
          drop table if exists _conformance_meta cascade;\n\
+         drop table if exists json_docs cascade;\n\
          drop table if exists typed_samples cascade;\n\
          drop table if exists page_hits cascade;\n\
          drop table if exists feature_flags cascade;\n\
@@ -505,6 +508,14 @@ fn write_schema(out: &mut String) {
          \x20   timestamptz_v timestamptz,\n\
          \x20   time_v time,\n\
          \x20   timetz_v timetz\n\
+         );\n\n\
+         -- JSON path filter rows (spec/protocol.md §5.4.2): a JSON null, a missing\n\
+         -- key, a nested object, an array, booleans, a decimal, and keys holding\n\
+         -- `.`, a space, `*` and a non-ASCII letter. Row 6 never yields a value.\n\
+         create table json_docs (\n\
+         \x20   id integer primary key,\n\
+         \x20   doc jsonb,\n\
+         \x20   doc_json json\n\
          );\n\n\
          -- Conformance sentinel (conformance/runner reads this when it isn't asked\n\
          -- to apply the seed itself) — see write_conformance_meta().\n\
@@ -1457,6 +1468,18 @@ const TYPED_SAMPLES_INSERT: &str = "insert into typed_samples values\n\
     \x20   (6, 7, 7, 7, 1.50, '-0', '-0', '2016-02-29', '2016-02-29 00:00:00', '1900-01-01 00:00:00+00', '09:05:00', '09:05:00-03'),\n\
     \x20   (7, 7, 7, 7, 0.1, '1e-38', '5e-324', '1970-01-01', '1970-01-01 00:00:00.123', '2038-01-19 03:14:07+00', '00:00:00', '00:00:00+00'),\n\
     \x20   (8, null, null, null, null, null, null, null, null, null, null, null);\n\n";
+
+fn write_json_docs(out: &mut String) {
+    out.push_str(JSON_DOCS_INSERT);
+}
+
+const JSON_DOCS_INSERT: &str = "insert into json_docs (id, doc, doc_json) values\n\
+    \x20   (1, '{\"status\": \"failed\", \"n\": 10, \"flag\": true, \"price\": 1.50, \"nested\": {\"k\": \"V\"}, \"arr\": [{\"user id\": 42}], \"a.b\": \"dot\", \"a b\": \"space\", \"*\": \"star\", \"ü\": \"umlaut\"}', '{\"status\": \"failed\", \"n\": 10, \"flag\": true, \"price\": 1.50, \"nested\": {\"k\": \"V\"}, \"arr\": [{\"user id\": 42}], \"a.b\": \"dot\", \"a b\": \"space\", \"*\": \"star\", \"ü\": \"umlaut\"}'),\n\
+    \x20   (2, '{\"status\": \"FAILED\", \"n\": 9, \"flag\": false, \"nested\": null}', '{\"status\": \"FAILED\", \"n\": 9, \"flag\": false, \"nested\": null}'),\n\
+    \x20   (3, '{\"status\": null}', '{\"status\": null}'),\n\
+    \x20   (4, '{}', '{}'),\n\
+    \x20   (5, null, null),\n\
+    \x20   (6, '\"not json\"', '\"not json\"');\n\n";
 
 /// `feature_flags` — deliberately excluded from the `analyze` block in
 /// `main()`: the conformance fixture for a table with no planner statistics

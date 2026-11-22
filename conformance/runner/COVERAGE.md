@@ -123,6 +123,12 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.4.2-VALUE-FORM` | A value that does not fit a typed column's form → 400 `invalid_filter`; SQLite skips the check (200) | `filter_dsl::a_value_that_does_not_fit_a_typed_column_is_invalid_filter`, `filter_dsl::builder_fixture_cases_over_http` (`invalid_value`) |
 | `P5.4.2-IN` | `IN` takes 1-1000 strings and matches any; `not` + `IN` also drops NULL rows | `filter_dsl::in_and_not_in`, `filter_dsl::builder_fixture_cases_over_http` (`bad_value`) |
 | `P5.4.2-BETWEEN` | `BETWEEN` takes `[lo, hi]`, inclusive; reversed bounds match nothing | `filter_dsl::between_is_inclusive_and_typed`, `filter_dsl::builder_fixture_cases_over_http` (`bad_value`) |
+| `P5.4.2-PATH-SHAPE` | `path` is 1–8 steps: keys of 1–255 bytes without `"`, `\` or control characters, whole-number indexes 0–2³¹−1; otherwise 400 | `json_path::a_bad_path_is_invalid_filter`, `filter_dsl::builder_fixture_cases_over_http` (`bad_path`) |
+| `P5.4.2-PATH-JSON-ONLY` | `path` only on a class `json` column; otherwise 400 `invalid_filter` | `json_path::a_path_on_a_column_that_is_not_json_is_invalid_filter`, `filter_dsl::builder_fixture_cases_over_http` (`path_not_json`) |
+| `P5.4.2-PATH-READS` | Steps read object keys and array items in order; path-language characters in a key are literal | `json_path::a_path_reads_the_value_at_that_key`, `json_path::keys_that_mean_something_in_a_path_language_are_read_literally`, `json_path::json_and_jsonb_columns_read_the_same` |
+| `P5.4.2-PATH-NULL` | Missing key, JSON null, SQL NULL, wrong-kind step and non-JSON cell give NULL | `json_path::missing_keys_json_null_and_sql_null_are_all_null` |
+| `P5.4.2-PATH-TEXT` | The value compares as text, case-sensitive except `LIKE`/`ILIKE`; booleans as `true`/`false` | `json_path::values_compare_as_case_sensitive_text`, `json_path::booleans_compare_as_true_and_false` |
+| `P5.4.2-PATH-BOUND` | Keys never reach SQL text | not observable over HTTP beyond `json_path::keys_that_mean_something_in_a_path_language_are_read_literally` — each port's unit runner checks `path-hostile-keys-change-only-the-binds` against `path-plain-keys` in `filter-builder-tests.json` |
 
 ### §5.4.3 Value serialization
 
@@ -247,6 +253,7 @@ Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-o
 | `P5.11-ENUM-IDENTITY` | Two enum columns join only when they share one enumerated type (Postgres seed) | `join::enum_columns_join_only_to_the_same_enum` |
 | `P5.11-SORT-PARAMS` | `sort_join` needs `sort` and a real position, and bad `order`, → `invalid_parameter`; unknown sort column → `unknown_column` | `join::sort_parameters_are_validated` |
 | `P5.11-FILTER-RULES` | §5.4.2 structural rules apply; out-of-range `join` → `invalid_filter`; §5.4 rejects a `join` key | `join::filter_rules_hold_on_the_join_route` |
+| `P5.11-FILTER-PATH` | A §5.11.3 condition may carry `path` beside `join` | `json_path::the_join_route_takes_a_path_on_a_joined_table` |
 | `P5.11-HEADER` | Carries the protocol version header on 200 and 400 | `join::every_response_carries_the_protocol_version_header` |
 
 ## §6 Server invariants

@@ -87,7 +87,7 @@ func TestListsExactlySeededTablesInAlphabeticalOrder(t *testing.T) {
 	}
 	expected := []string{
 		"_conformance_meta", "audit_log", "events", "feature_flags", "inventory_counts",
-		"inventory_locations", "order_extra", "orders", "page_hits", "payments", "products", "reviews",
+		"inventory_locations", "json_docs", "order_extra", "orders", "page_hits", "payments", "products", "reviews",
 		"saved_reports", "sessions", "support_tickets", "typed_samples", "users",
 	}
 	if len(names) != len(expected) {

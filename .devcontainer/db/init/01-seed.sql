@@ -34,6 +34,7 @@ drop schema if exists warehouse cascade;
 drop materialized view if exists order_totals_by_status;
 drop view if exists active_users;
 drop table if exists _conformance_meta cascade;
+drop table if exists json_docs cascade;
 drop table if exists typed_samples cascade;
 drop table if exists page_hits cascade;
 drop table if exists feature_flags cascade;
@@ -243,6 +244,15 @@ create table typed_samples (
     timestamptz_v timestamptz,
     time_v time,
     timetz_v timetz
+);
+
+-- JSON path filter rows (spec/protocol.md §5.4.2): a JSON null, a missing
+-- key, a nested object, an array, booleans, a decimal, and keys holding
+-- `.`, a space, `*` and a non-ASCII letter. Row 6 never yields a value.
+create table json_docs (
+    id integer primary key,
+    doc jsonb,
+    doc_json json
 );
 
 -- Conformance sentinel (conformance/runner reads this when it isn't asked
@@ -53134,6 +53144,14 @@ insert into typed_samples values
     (7, 7, 7, 7, 0.1, '1e-38', '5e-324', '1970-01-01', '1970-01-01 00:00:00.123', '2038-01-19 03:14:07+00', '00:00:00', '00:00:00+00'),
     (8, null, null, null, null, null, null, null, null, null, null, null);
 
+insert into json_docs (id, doc, doc_json) values
+    (1, '{"status": "failed", "n": 10, "flag": true, "price": 1.50, "nested": {"k": "V"}, "arr": [{"user id": 42}], "a.b": "dot", "a b": "space", "*": "star", "ü": "umlaut"}', '{"status": "failed", "n": 10, "flag": true, "price": 1.50, "nested": {"k": "V"}, "arr": [{"user id": 42}], "a.b": "dot", "a b": "space", "*": "star", "ü": "umlaut"}'),
+    (2, '{"status": "FAILED", "n": 9, "flag": false, "nested": null}', '{"status": "FAILED", "n": 9, "flag": false, "nested": null}'),
+    (3, '{"status": null}', '{"status": null}'),
+    (4, '{}', '{}'),
+    (5, null, null),
+    (6, '"not json"', '"not json"');
+
 insert into warehouse.carriers (name, contact_email, is_active) values
     ('Northwind Freight', 'keira@example.com', true),
     ('BlueDart Logistics', 'maryjane@example.com', true),
@@ -53625,6 +53643,7 @@ analyze inventory_locations;
 analyze inventory_counts;
 analyze page_hits;
 analyze typed_samples;
+analyze json_docs;
 analyze warehouse.carriers;
 analyze warehouse.shipments;
 analyze warehouse.shipment_events;
@@ -53634,4 +53653,4 @@ analyze warehouse.users;
 create view active_users as select id, email, full_name from users where is_active;
 create materialized view order_totals_by_status as
     select status, count(*) as order_count, sum(total_cents) as total_cents from orders group by status;
-insert into _conformance_meta (seed_version, dialect, checksum) values ('9', 'postgres', 'ed7452298d7daabc');
+insert into _conformance_meta (seed_version, dialect, checksum) values ('10', 'postgres', 'fa48f0b35d2d4f15');
