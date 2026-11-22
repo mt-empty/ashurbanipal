@@ -19,6 +19,8 @@ const STRUCTURAL: &str = "structural";
 fn kind(kind: &str) -> String {
     match kind {
         "unknown_column" | "invalid_value" => kind.to_string(),
+        // Both are the builder's own 400 invalid_filter.
+        "path_not_json" => "invalid_value".to_string(),
         _ => STRUCTURAL.to_string(),
     }
 }

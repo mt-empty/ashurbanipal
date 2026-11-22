@@ -4,6 +4,9 @@
 pub const MAX_FILTER_BYTES: usize = 8192;
 pub const MAX_CONDITIONS: usize = 10;
 pub const MAX_IN_ITEMS: usize = 1000;
+pub const MAX_PATH_STEPS: usize = 8;
+pub const MAX_PATH_KEY_BYTES: usize = 255;
+pub const MAX_PATH_INDEX: u32 = i32::MAX as u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 pub enum Logic {
@@ -82,6 +85,84 @@ pub struct Condition {
     /// Table position, accepted only by [`parse_for_join`] (`spec/protocol.md` §5.11.3).
     #[serde(default)]
     pub join: Option<usize>,
+    #[serde(default)]
+    pub path: Option<Vec<PathStep>>,
+}
+
+/// One step of a condition's `path` into a JSON column.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathStep {
+    Key(String),
+    Index(u32),
+}
+
+impl<'de> serde::Deserialize<'de> for PathStep {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Step;
+        impl serde::de::Visitor<'_> for Step {
+            type Value = PathStep;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "a key string or an index from 0 to {MAX_PATH_INDEX}")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<PathStep, E> {
+                Ok(PathStep::Key(v.to_string()))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<PathStep, E> {
+                u32::try_from(v)
+                    .ok()
+                    .filter(|&i| i <= MAX_PATH_INDEX)
+                    .map(PathStep::Index)
+                    .ok_or_else(|| E::custom(format!("path index {v} is above {MAX_PATH_INDEX}")))
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<PathStep, E> {
+                match u64::try_from(v) {
+                    Ok(u) => self.visit_u64(u),
+                    Err(_) => Err(E::custom("a path index cannot be negative")),
+                }
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<PathStep, E> {
+                if v.fract() != 0.0 || !(0.0..=f64::from(MAX_PATH_INDEX)).contains(&v) {
+                    return Err(E::custom(format!(
+                        "path index {v} is not a whole number from 0 to {MAX_PATH_INDEX}"
+                    )));
+                }
+                Ok(PathStep::Index(v as u32))
+            }
+        }
+        d.deserialize_any(Step)
+    }
+}
+
+/// Checks a condition's `path` (`spec/protocol.md` §5.4.2): keys a path
+/// string could not hold literally are refused, so no port escapes one.
+pub fn check_path(path: &[PathStep]) -> Result<(), FilterError> {
+    if !(1..=MAX_PATH_STEPS).contains(&path.len()) {
+        return Err(err(format!(
+            "path needs 1 to {MAX_PATH_STEPS} steps, got {}",
+            path.len()
+        )));
+    }
+    for step in path {
+        let key = match step {
+            PathStep::Index(i) if *i > MAX_PATH_INDEX => {
+                return Err(err(format!("path index {i} is above {MAX_PATH_INDEX}")))
+            }
+            PathStep::Index(_) => continue,
+            PathStep::Key(key) => key,
+        };
+        if !(1..=MAX_PATH_KEY_BYTES).contains(&key.len()) {
+            return Err(err(format!(
+                "path key must be 1 to {MAX_PATH_KEY_BYTES} bytes, got {}",
+                key.len()
+            )));
+        }
+        if key.chars().any(|c| c == '"' || c == '\\' || c < '\u{20}') {
+            return Err(err(format!(
+                "path key {key:?} contains a quote, a backslash or a control character"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A string for most ops; an array for `IN` and `BETWEEN`.
@@ -454,6 +535,9 @@ fn parse_inner(raw: &str, allow_join: bool) -> Result<Vec<Condition>, FilterErro
         }
         check_value_shape(condition.op, condition.value.as_ref())
             .map_err(|e| err(format!("condition {i}: {e}")))?;
+        if let Some(path) = &condition.path {
+            check_path(path).map_err(|e| err(format!("condition {i}: {e}")))?;
+        }
     }
     Ok(conditions)
 }
@@ -461,6 +545,63 @@ fn parse_inner(raw: &str, allow_join: bool) -> Result<Vec<Condition>, FilterErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_path(path: &str) -> Result<Vec<Condition>, FilterError> {
+        parse(&format!(
+            r#"[{{"column": "doc", "path": {path}, "op": "=", "value": "x"}}]"#
+        ))
+    }
+
+    #[test]
+    fn path_steps_are_keys_or_indexes() {
+        let c = with_path(r#"["arr", 0, "0", "user id", 2147483647]"#).unwrap();
+        assert_eq!(
+            c[0].path.as_deref().unwrap(),
+            [
+                PathStep::Key("arr".into()),
+                PathStep::Index(0),
+                PathStep::Key("0".into()),
+                PathStep::Key("user id".into()),
+                PathStep::Index(MAX_PATH_INDEX),
+            ]
+        );
+        assert!(with_path(&format!(r#"["{}"]"#, "é".repeat(127))).is_ok());
+        assert!(with_path(r#"["' OR 1=1 --", "$", ".", "[", "*"]"#).is_ok());
+        for whole in ["[1.0]", "[1e0]", "[-0]"] {
+            let index = if whole == "[-0]" { 0 } else { 1 };
+            let c = with_path(whole).unwrap();
+            assert_eq!(c[0].path.as_deref().unwrap(), [PathStep::Index(index)]);
+        }
+    }
+
+    #[test]
+    fn bad_paths_are_rejected() {
+        let long = "k".repeat(MAX_PATH_KEY_BYTES + 1);
+        let wide = "é".repeat(128);
+        for bad in [
+            "[]",
+            r#"["a","b","c","d","e","f","g","h","i"]"#,
+            "[-1]",
+            "[-1.0]",
+            "[1.5]",
+            "[2147483648]",
+            "[2147483648.0]",
+            "[1e400]",
+            r#"[""]"#,
+            &format!(r#"["{long}"]"#),
+            &format!(r#"["{wide}"]"#),
+            r#"["say "hi""]"#,
+            r#"["a\b"]"#,
+            r#"["a"]"#,
+            r#""status""#,
+            "[null]",
+            "[true]",
+            r#"[["a"]]"#,
+        ] {
+            assert!(with_path(bad).is_err(), "accepted path {bad}");
+        }
+        assert!(check_path(&[PathStep::Index(MAX_PATH_INDEX + 1)]).is_err());
+    }
 
     #[test]
     fn value_forms() {
