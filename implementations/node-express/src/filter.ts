@@ -9,6 +9,14 @@ export const MAX_CONDITIONS = 10;
 /** Maximum items in an IN list (spec/protocol.md §5.4.2). */
 export const MAX_IN_ITEMS = 1000;
 
+/** Path limits (spec/protocol.md §5.4.2). */
+export const MAX_PATH_STEPS = 8;
+export const MAX_PATH_KEY_BYTES = 255;
+export const MAX_PATH_INDEX = 2147483647;
+
+/** One step of a condition's path into a JSON column: a key string or an array index. */
+export type PathStep = string | number;
+
 // Wire operators must come from this allow-list before reaching SQL (spec/protocol.md §5.4.2).
 export const VALID_OPS = new Set([
   "=",
@@ -79,6 +87,7 @@ export interface Condition {
   value?: string | string[];
   /** Table position, accepted only by {@link parseFilterForJoin} (spec/protocol.md §5.11.3). */
   join?: number;
+  path?: PathStep[];
 }
 
 /** Validates JSON ASTs (spec/protocol.md §5.4.2); the frontend parses DSL text (spec/filter-dsl.md). */
@@ -139,7 +148,7 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
     throw new FilterError(`condition ${index} must be a JSON object`);
   }
   const obj = raw as Record<string, unknown>;
-  const allowedKeys = new Set(["logic", "not", "column", "op", "value", ...(allowJoin ? ["join"] : [])]);
+  const allowedKeys = new Set(["logic", "not", "column", "op", "value", "path", ...(allowJoin ? ["join"] : [])]);
   for (const key of Object.keys(obj)) {
     if (!allowedKeys.has(key)) {
       throw new FilterError(`condition ${index} has unknown field "${key}"`);
@@ -167,6 +176,7 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
   if (obj.join !== undefined && (typeof obj.join !== "number" || !Number.isInteger(obj.join) || obj.join < 0)) {
     throw new FilterError(`condition ${index} has an invalid "join" position`);
   }
+  if (obj.path !== undefined && obj.path !== null) checkPath(obj.path, index);
   return {
     logic: obj.logic as "AND" | "OR" | undefined,
     not: (obj.not as boolean | undefined) ?? false,
@@ -174,7 +184,36 @@ function validateConditionShape(raw: unknown, index: number, allowJoin: boolean)
     op: obj.op,
     value: obj.value as string | string[] | undefined,
     ...(obj.join !== undefined ? { join: obj.join as number } : {}),
+    ...(obj.path !== undefined && obj.path !== null ? { path: obj.path as PathStep[] } : {}),
   };
+}
+
+/**
+ * Checks a condition's path (spec/protocol.md §5.4.2). Keys a path string
+ * could not hold literally are refused, so no dialect escapes one.
+ */
+export function checkPath(path: unknown, index: number): asserts path is PathStep[] {
+  const fail = (why: string): never => {
+    throw new FilterError(`condition ${index}: ${why}`);
+  };
+  if (!Array.isArray(path) || path.length < 1 || path.length > MAX_PATH_STEPS) {
+    fail(`path needs an array of 1 to ${MAX_PATH_STEPS} steps`);
+  }
+  for (const step of path as unknown[]) {
+    if (typeof step === "number") {
+      if (!Number.isInteger(step) || step < 0 || step > MAX_PATH_INDEX) {
+        fail(`path index ${step} is not a whole number from 0 to ${MAX_PATH_INDEX}`);
+      }
+    } else if (typeof step === "string") {
+      const bytes = Buffer.byteLength(step, "utf8");
+      if (bytes < 1 || bytes > MAX_PATH_KEY_BYTES) fail(`path key must be 1 to ${MAX_PATH_KEY_BYTES} bytes`);
+      if ([...step].some((c) => c === '"' || c === "\\" || c < " ")) {
+        fail(`path key ${JSON.stringify(step)} contains a quote, a backslash or a control character`);
+      }
+    } else {
+      fail("a path step must be a key string or an index");
+    }
+  }
 }
 
 /** Checks a condition's value against its op (spec/protocol.md §5.4.2). */

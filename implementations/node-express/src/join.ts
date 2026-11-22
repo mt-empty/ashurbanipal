@@ -2,12 +2,14 @@ import type { ColumnClassName, ColumnInfo, ColumnRef, KeyKind } from "./db/types
 import { FilterError, NotAllowedError } from "./errors.js";
 import {
   type Condition,
+  checkPath,
   checkValueShape,
   describeForm,
   formAccepts,
   opIsPattern,
   opSql,
   opTakesValue,
+  type PathStep,
   VALID_OPS,
   type ValueForm,
   valueItems,
@@ -514,6 +516,7 @@ export function planJoin(spec: JoinSpec, tables: TableMeta[], opts: JoinOpts): J
     }
     checkValueShape(cond, i);
     const col = columnIndex(tables[pos], cond.column);
+    checkPathColumn(tables[pos].columns[col], cond, i);
     checkTypedValues(tables[pos].columns[col], cond);
     return { cond, pos, col };
   });
@@ -539,12 +542,33 @@ export interface JoinDialect {
   /** `$n` placeholders (Postgres) instead of `?`. */
   numbered: boolean;
   ilike: IlikeStyle;
+  /** The text at a validated path inside a JSON column; `bind` records each value and returns its placeholder. */
+  jsonPath(expr: string, path: PathStep[], bind: (value: string) => string): string;
+}
+
+/**
+ * `$."key"[0]…` for MySQL and SQLite, bound as one parameter; safe unescaped
+ * only because {@link checkPath} refuses `"`, `\` and control characters in keys.
+ */
+export function jsonPathString(path: PathStep[]): string {
+  return "$" + path.map((s) => (typeof s === "number" ? `[${s}]` : `."${s}"`)).join("");
+}
+
+/** Re-checks a path for callers that bypass parseFilter; a path is valid only on a class json column. */
+function checkPathColumn(col: ColMeta, cond: Condition, index: number): void {
+  if (cond.path === undefined) return;
+  checkPath(cond.path, index);
+  if (col.class.kind !== "json") {
+    throw new FilterError(
+      `condition ${index}: column ${JSON.stringify(col.name)} is not JSON; only json columns take a path`,
+    );
+  }
 }
 
 /** The column-typed half of the spec/protocol.md §5.4.2 value check. */
 function checkTypedValues(col: ColMeta, cond: Condition): void {
   const form = col.compare?.form;
-  if (!form || opIsPattern(cond.op)) return;
+  if (!form || opIsPattern(cond.op) || cond.path !== undefined) return;
   const bad = valueItems(cond).find((v) => !formAccepts(form, v));
   if (bad !== undefined) {
     throw new FilterError(
@@ -567,16 +591,21 @@ interface FilterTerm {
 function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; values: string[] } {
   const values: string[] = [];
   let next = 3;
+  const bind = (v: string): string => {
+    values.push(v);
+    return d.numbered ? `$${next++}` : "?";
+  };
   let clause = "";
   terms.forEach(({ cond, expr, col }, i) => {
     const items = valueItems(cond);
-    const typed = opIsPattern(cond.op) || namesZeroDate(col.compare, items) ? undefined : col.compare;
+    const typed =
+      cond.path !== undefined || opIsPattern(cond.op) || namesZeroDate(col.compare, items) ? undefined : col.compare;
     const placeholder = (v: string): string => {
-      const p = d.numbered ? `$${next++}` : "?";
+      const p = bind(v);
       const target = typed && castFor(typed, v);
       return target ? d.castParam(p, target) : p;
     };
-    const lhs = typed ? expr : d.castText(expr);
+    const lhs = cond.path !== undefined ? d.jsonPath(expr, cond.path, bind) : typed ? expr : d.castText(expr);
     let inner: string;
     if (!opTakesValue(cond.op)) {
       inner = `${lhs} ${opSql(cond.op)}`;
@@ -595,7 +624,6 @@ function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; value
         inner = `${lhs} ${opSql(cond.op)} ${placeholder(v)}`;
       }
     }
-    values.push(...items);
     if (i > 0) clause += cond.logic === "OR" ? " OR " : " AND ";
     clause += cond.not ? `(NOT (${inner}))` : `(${inner})`;
   });
@@ -618,6 +646,7 @@ export function tableWhereClause(
     if (!VALID_OPS.has(cond.op)) throw new FilterError(`condition ${i} has invalid op "${cond.op}"`);
     checkValueShape(cond, i);
     if (i > 0 && cond.logic === undefined) throw new FilterError(`condition ${i} is missing logic`);
+    checkPathColumn(col, cond, i);
     checkTypedValues(col, cond);
     return { cond, expr: d.quote(col.name), col };
   });
