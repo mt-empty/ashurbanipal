@@ -734,6 +734,9 @@ func planJoin(spec JoinSpec, tables []tableMeta, opts JoinOpts) (*joinPlan, erro
 		if err != nil {
 			return nil, err
 		}
+		if err := checkPathColumn(i, tables[pos].columns[col], c); err != nil {
+			return nil, err
+		}
 		if err := checkTypedValues(tables[pos].columns[col], c); err != nil {
 			return nil, err
 		}
@@ -776,12 +779,46 @@ type joinDialect struct {
 	castParam func(placeholder, target string) string
 	numbered  bool // $n placeholders (Postgres) instead of ?
 	ilike     ilikeStyle
+	// jsonPath renders the text at a validated path inside a JSON column;
+	// bind records each value and returns its placeholder.
+	jsonPath func(expr string, path []PathStep, bind func(string) string) string
+}
+
+// jsonPathString is $."key"[0]… for MySQL and SQLite, bound as one
+// parameter; safe unescaped only because checkPath refuses ", \ and control
+// characters in keys.
+func jsonPathString(path []PathStep) string {
+	var b strings.Builder
+	b.WriteString("$")
+	for _, s := range path {
+		if s.IsIndex {
+			fmt.Fprintf(&b, "[%d]", s.Index)
+		} else {
+			b.WriteString(`."` + s.Key + `"`)
+		}
+	}
+	return b.String()
+}
+
+// checkPathColumn re-checks a path for callers that bypass ParseFilter; a
+// path is valid only on a class json column.
+func checkPathColumn(i int, col colMeta, c Condition) error {
+	if c.Path == nil {
+		return nil
+	}
+	if err := checkPath(i, c.Path); err != nil {
+		return err
+	}
+	if col.class != classJSON {
+		return filterErr("condition %d: column %q is not JSON; only json columns take a path", i, col.name)
+	}
+	return nil
 }
 
 // checkTypedValues is the column-typed half of the spec/protocol.md §5.4.2
 // value check.
 func checkTypedValues(col colMeta, c Condition) error {
-	if col.compare == nil || col.compare.form == formNone || c.Value == nil || opIsPattern(c.Op) {
+	if col.compare == nil || col.compare.form == formNone || c.Value == nil || opIsPattern(c.Op) || c.Path != nil {
 		return nil
 	}
 	for _, v := range c.Value.Items {
@@ -805,6 +842,14 @@ type filterTerm struct {
 func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 	var values []string
 	next := 3
+	bind := func(v string) string {
+		values = append(values, v)
+		if !d.numbered {
+			return "?"
+		}
+		next++
+		return fmt.Sprintf("$%d", next-1)
+	}
 	var clause strings.Builder
 	for i, t := range terms {
 		c := t.cond
@@ -813,25 +858,26 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 			items = c.Value.Items
 		}
 		typed := t.col.compare
-		if opIsPattern(c.Op) || typed.namesZeroDate(items) {
+		if c.Path != nil || opIsPattern(c.Op) || typed.namesZeroDate(items) {
 			typed = nil
 		}
+		var lhs string
+		switch {
+		case c.Path != nil:
+			lhs = d.jsonPath(t.expr, c.Path, bind)
+		case typed != nil:
+			lhs = t.expr
+		default:
+			lhs = d.castText(t.expr)
+		}
 		placeholder := func(v string) string {
-			p := "?"
-			if d.numbered {
-				p = fmt.Sprintf("$%d", next)
-				next++
-			}
+			p := bind(v)
 			if typed != nil {
 				if target := typed.castFor(v); target != "" {
 					return d.castParam(p, target)
 				}
 			}
 			return p
-		}
-		lhs := d.castText(t.expr)
-		if typed != nil {
-			lhs = t.expr
 		}
 		var inner string
 		switch c.Op {
@@ -858,7 +904,6 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 		default:
 			inner = fmt.Sprintf("%s %s %s", lhs, opSQL(c.Op), placeholder(items[0]))
 		}
-		values = append(values, items...)
 		if i > 0 {
 			if c.Logic != nil && *c.Logic == "OR" {
 				clause.WriteString(" OR ")
@@ -895,6 +940,9 @@ func tableWhereClause(conditions []Condition, table tableMeta, d joinDialect) (s
 		}
 		if i > 0 && c.Logic == nil {
 			return "", nil, filterErr("condition %d is missing logic", i)
+		}
+		if err := checkPathColumn(i, col, c); err != nil {
+			return "", nil, err
 		}
 		if err := checkTypedValues(col, c); err != nil {
 			return "", nil, err

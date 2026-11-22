@@ -71,6 +71,17 @@ var mysqlJoinDialect = joinDialect{
 	castParam: func(p, target string) string { return "CAST(" + p + " AS " + target + ")" },
 	numbered:  false,
 	ilike:     ilikeLoweredLike,
+	jsonPath:  mysqlJSONPath,
+}
+
+// mysqlJSONPath: only JSON_EXTRACT takes a bound path; the CASE maps a JSON
+// null to SQL NULL, with CONVERT for MariaDB's collation check. Left uncast so
+// the utf8mb4_bin text compares case-sensitively.
+func mysqlJSONPath(expr string, path []PathStep, bind func(string) string) string {
+	p := jsonPathString(path)
+	first, second := bind(p), bind(p)
+	return "CASE WHEN JSON_TYPE(JSON_EXTRACT(" + expr + ", " + first + ")) = CONVERT('NULL' USING utf8mb4) " +
+		"THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(" + expr + ", " + second + ")) END"
 }
 
 // mysqlTypedCompare is the typed filter comparison for an

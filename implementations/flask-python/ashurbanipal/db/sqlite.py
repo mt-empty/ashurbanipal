@@ -9,6 +9,7 @@ import re
 import sqlite3
 import time
 
+from ..filter import PathStep
 from ..join import (
     BINARY,
     BOOLEAN,
@@ -31,6 +32,7 @@ from ..join import (
     UniqueKey,
     build_select,
     group_unique_keys,
+    json_path_string,
     plan_join,
     table_order_clause,
     table_schemas,
@@ -116,12 +118,26 @@ def _check_schema(schema: str | None) -> None:
         raise NotAllowed(f"schema {schema!r}", kind=NotAllowedKind.SCHEMA)
 
 
+def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, list[str]]:
+    """SQLite does not enforce a declared JSON type and json_extract raises
+    on a cell that is not JSON, hence json_valid. json_extract returns 1/0 for
+    booleans and an INTEGER for a number, hence the json_type branch and the CAST."""
+    p = json_path_string(path)
+    sql = (
+        f"CAST(CASE WHEN json_valid({expr}) THEN CASE json_type({expr}, {ph}) "
+        f"WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' "
+        f"ELSE json_extract({expr}, {ph}) END END AS TEXT)"
+    )
+    return sql, [p, p]
+
+
 _JOIN_DIALECT = Dialect(
     quote=quote_ident,
     cast_text=lambda expr: f"CAST({expr} AS TEXT)",
     cast_param=lambda ph, target: f"CAST({ph} AS {target})",
     placeholder="?",
     ilike="like",
+    json_path=_json_path,
 )
 
 
@@ -130,7 +146,14 @@ def _execute_filtered(cur: sqlite3.Cursor, sql: str, params: tuple[object, ...])
     only 999 bound values, so a long `IN` list is a filter error there."""
     if len(params) > cur.connection.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER):
         raise FilterParseError(f"filter binds {len(params)} values, more than this SQLite allows")
-    cur.execute(sql, params)
+    try:
+        cur.execute(sql, params)
+    except sqlite3.OperationalError as e:
+        # The system SQLite may be built without JSON functions; only a path
+        # filter adds json_valid, so this is that filter's error, not a 500.
+        if "no such function: json_" in str(e) and "json_valid(" in sql:
+            raise FilterParseError("this source's SQLite has no JSON functions, so a path filter can't run") from e
+        raise
 
 
 def typed_compare(cls: ColumnClass) -> TypedCompare | None:

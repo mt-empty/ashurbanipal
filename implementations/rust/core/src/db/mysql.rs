@@ -54,12 +54,29 @@ fn cast_param(placeholder: &str, target: &str) -> String {
     format!("CAST({placeholder} AS {target})")
 }
 
+/// Only `JSON_EXTRACT` takes a bound path; the `CASE` maps a JSON `null` to
+/// SQL NULL, with `CONVERT` for MariaDB's collation check. Left uncast so the
+/// `utf8mb4_bin` text compares case-sensitively.
+fn json_path(
+    column: &str,
+    path: &[crate::filter::PathStep],
+    bind: &mut dyn FnMut(String) -> String,
+) -> String {
+    let p = crate::join::json_path_string(path);
+    let (first, second) = (bind(p.clone()), bind(p));
+    format!(
+        "CASE WHEN JSON_TYPE(JSON_EXTRACT({column}, {first})) = CONVERT('NULL' USING utf8mb4) \
+         THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT({column}, {second})) END"
+    )
+}
+
 const DIALECT: Dialect = Dialect {
     quote: quote_ident_mysql,
     cast_text,
     cast_param,
     numbered: false,
     ilike: IlikeStyle::LoweredLike,
+    json_path,
 };
 
 /// A column-level check MariaDB adds to every JSON column, matched exactly so a
@@ -1476,6 +1493,7 @@ mod tests {
             op: crate::filter::FilterOp::Ilike,
             value: Some("B@X.%".into()),
             join: Some(0),
+            path: None,
         }]);
         let one = source.query_join(None, &left, opts).await.unwrap();
         assert_eq!(one.rows.len(), 1);

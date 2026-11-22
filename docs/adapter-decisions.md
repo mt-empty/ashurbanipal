@@ -27,7 +27,7 @@ version reaches end of life, the range below drops it.
 | Postgres | 15 and later | 14 reached end of life in November 2026. Below 14 the adapter is wrong, not just untested: a never-analyzed table has `reltuples = 0`, not `-1`, so §5.3 reports 0 rows for a table that has rows. |
 | MySQL | 8.4 and later | 8.0 reached end of life in April 2026. |
 | MariaDB | 10.11 and later | 10.6, the long-term release before it, reached end of life in July 2026. |
-| SQLite | The library each port's driver bundles; Flask uses the Python build's own | 3.16 and later. The adapter calls pragmas as table-valued functions, which arrived in 3.16. Flask's tests pass on 3.16.0 and fail on 3.15.2; CI does not run this check. |
+| SQLite | The library each port's driver bundles; Flask uses the Python build's own | 3.16 and later. The adapter calls pragmas as table-valued functions, which arrived in 3.16. Flask's tests pass on 3.16.0 and fail on 3.15.2; CI does not run this check. A filter with a JSON `path` also needs the JSON functions, built in from 3.38 (§5.4.2, JSON path conditions). |
 
 CI runs Postgres 18, MySQL 8.4 and MariaDB 11.8 on every pull request. On
 each push to `main` it also runs Postgres 15, MariaDB 10.11, MySQL 9 and
@@ -158,6 +158,29 @@ condition like `in_stock = true` therefore matches only on Postgres; on
 MySQL and SQLite the value is `1`, and on MySQL `true` is a 400.
 `conformance/runner/filter_dsl.rs` selects the literal via
 `Backend::bool_true_literal()`.
+
+### JSON path conditions
+
+Protocol property: a condition's `path` reads the value at that path in a
+class `json` column and compares it as text; a missing key, JSON `null`,
+SQL NULL or wrong-kind step is NULL (`spec/protocol.md` §5.4.2). No key
+reaches SQL text: the SQL depends only on the column, the kind of each
+step and the op, and every key and index is bound.
+
+| Backend | Mechanism | Notes |
+|---------|-----------|-------|
+| Postgres | `(col -> $3::text -> $4::int ->> $5::text)`: one bind per step, `->>` on the last | The cast picks the key or index operator; the same form serves `json` and `jsonb`. `#>>`, `@>`, `@?` and `jsonb_path_*` would need a second quoting language, or work on `jsonb` only; `JSON_VALUE` needs Postgres 17. A GIN index does not help this form; the §6 timeout bounds the scan. |
+| MySQL/MariaDB | `CASE WHEN JSON_TYPE(JSON_EXTRACT(col, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(col, ?)) END`, with the path string `$."k"[0]` bound twice | `JSON_EXTRACT` is the only form that takes a bound path (`->`, `->>` and MySQL's `JSON_VALUE` need a literal). Every key is quoted: unquoted, `$.*` matches every member. Keys with `"`, `\` or a control character are rejected, so the path string needs no escaping. Without the `CASE` a JSON `null` reads as the text `null`; without the `CONVERT` MariaDB fails with "Illegal mix of collations". The class `text` cast `CAST(x AS CHAR)` is not applied: the extracted text is `utf8mb4_bin`, and the cast would make `=` ignore case. |
+| SQLite | `CAST(CASE WHEN json_valid(col) THEN CASE json_type(col, ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(col, ?) END END AS TEXT)`, path string bound twice | SQLite does not enforce a declared `JSON` type, and `json_extract` raises on a cell that is not JSON, so `json_valid` guards it (such a cell is NULL). `json_extract` returns `1`/`0` for booleans and an INTEGER for a number, hence the `json_type` branch and the `CAST` (`10 = '10'` is false). `->>` (3.38) and `#-N` indexes (3.47) are not used. JSONB blobs (3.45+) fail `json_valid` and read as NULL (accepted gap). JSON functions are built in from 3.38 and a common compile option before; every port bundles a recent SQLite except Flask, which maps `no such function: json_*` on a path filter to 400 `invalid_filter`. A key holding `"` cannot be addressed at all. |
+
+Accepted gaps, measured on Postgres 18, MySQL 8.4, MariaDB 11.8 and SQLite
+3.40: a stored `1.50` reads as `1.50` (Postgres, MariaDB) or `1.5` (MySQL,
+SQLite); index 0 on a scalar reads the scalar on Postgres `jsonb`, MySQL and
+MariaDB, and NULL on Postgres `json` and SQLite; an object or array leaf
+reads as the engine renders it (`{"k": "V"}` on Postgres `jsonb` and MySQL,
+as stored on Postgres `json` and MariaDB, `{"k":"V"}` on SQLite). Text
+comparison means `'10' < '9'`. MySQL raises error 3143 on a malformed path
+where MariaDB returns NULL; validation means no malformed path is built.
 
 ## §1 — resolved schema
 

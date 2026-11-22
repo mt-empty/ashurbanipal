@@ -56,6 +56,19 @@ var sqliteJoinDialect = joinDialect{
 	castParam: func(p, target string) string { return "CAST(" + p + " AS " + target + ")" },
 	numbered:  false,
 	ilike:     ilikeLike,
+	jsonPath:  sqliteJSONPath,
+}
+
+// sqliteJSONPath: SQLite does not enforce a declared JSON type and
+// json_extract raises on a cell that is not JSON, hence json_valid.
+// json_extract returns 1/0 for booleans and an INTEGER for a number, hence
+// the json_type branch and the CAST.
+func sqliteJSONPath(expr string, path []PathStep, bind func(string) string) string {
+	p := jsonPathString(path)
+	first, second := bind(p), bind(p)
+	return "CAST(CASE WHEN json_valid(" + expr + ") THEN CASE json_type(" + expr + ", " + first + ") " +
+		"WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
+		"ELSE json_extract(" + expr + ", " + second + ") END END AS TEXT)"
 }
 
 // sqliteTypedCompare is the typed filter comparison for a column class

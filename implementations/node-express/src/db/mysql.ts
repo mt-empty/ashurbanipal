@@ -14,6 +14,7 @@ import {
   joinColumnInfos,
   joinRows,
   joinTableRefs,
+  jsonPathString,
   planJoin,
   type TableMeta,
   type TypedCompare,
@@ -66,6 +67,17 @@ export const JOIN_DIALECT: JoinDialect = {
   castParam: (p, target) => `CAST(${p} AS ${target})`,
   numbered: false,
   ilike: "lowered-like",
+  // Only JSON_EXTRACT takes a bound path; the CASE maps a JSON null to SQL
+  // NULL, with CONVERT for MariaDB's collation check. Left uncast so the
+  // utf8mb4_bin text compares case-sensitively.
+  jsonPath: (expr, path, bind) => {
+    const p = jsonPathString(path);
+    const [first, second] = [bind(p), bind(p)];
+    return (
+      `CASE WHEN JSON_TYPE(JSON_EXTRACT(${expr}, ${first})) = CONVERT('NULL' USING utf8mb4) ` +
+      `THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(${expr}, ${second})) END`
+    );
+  },
 };
 
 /**

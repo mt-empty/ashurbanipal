@@ -49,6 +49,15 @@ export const JOIN_DIALECT: JoinDialect = {
   castParam: (p, target) => `${p}::${target}`,
   numbered: true,
   ilike: "native",
+  // (col -> $3::text -> $4::int ->> $5::text): one bind per step; the cast
+  // picks the key or index form of the operator, on json and jsonb alike.
+  jsonPath: (expr, path, bind) =>
+    `(${expr}${path
+      .map((s, i) => {
+        const arrow = i === path.length - 1 ? "->>" : "->";
+        return typeof s === "number" ? ` ${arrow} ${bind(String(s))}::int` : ` ${arrow} ${bind(s)}::text`;
+      })
+      .join("")})`,
 };
 
 /**

@@ -17,6 +17,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP DATABASE IF EXISTS `warehouse`;
 DROP VIEW IF EXISTS `active_users`;
 DROP TABLE IF EXISTS `_conformance_meta`;
+DROP TABLE IF EXISTS `json_docs`;
 DROP TABLE IF EXISTS `typed_samples`;
 DROP TABLE IF EXISTS `page_hits`;
 DROP TABLE IF EXISTS `feature_flags`;
@@ -236,6 +237,14 @@ CREATE TABLE `typed_samples` (
   `time_v`        time(6)
 );
 
+-- JSON path filter rows (spec/protocol.md §5.4.2): a JSON null, a missing
+-- key, a nested object, an array, booleans, a decimal, and keys holding
+-- `.`, a space, `*` and a non-ASCII letter. Row 6 never yields a value.
+CREATE TABLE `json_docs` (
+  `id`  int PRIMARY KEY,
+  `doc` json
+);
+
 CREATE TABLE `_conformance_meta` (
   `seed_version` varchar(20) NOT NULL,
   `dialect`      varchar(20) NOT NULL,
@@ -421,6 +430,14 @@ INSERT INTO `typed_samples` VALUES
   (6, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 SET SESSION sql_mode = @seed_sql_mode;
 
+INSERT INTO `json_docs` VALUES
+  (1, '{"status": "failed", "n": 10, "flag": true, "price": 1.50, "nested": {"k": "V"}, "arr": [{"user id": 42}], "a.b": "dot", "a b": "space", "*": "star", "ü": "umlaut"}'),
+  (2, '{"status": "FAILED", "n": 9, "flag": false, "nested": null}'),
+  (3, '{"status": null}'),
+  (4, '{}'),
+  (5, NULL),
+  (6, '"not json"');
+
 -- ------------------------------------------------------------- warehouse
 -- The cross-database fixture, the counterpart of seed.sql's `warehouse`
 -- schema: its tables reference this database's `orders` and `users`. This
@@ -513,10 +530,10 @@ ANALYZE TABLE `warehouse`.`carriers`, `warehouse`.`shipments`,
 -- stays NULL -> mapped to -1 by mysql.rs (the §5.3 "never analyzed" case).
 ANALYZE TABLE `users`, `orders`, `order_extra`, `products`, `events`, `sessions`,
   `reviews`, `support_tickets`, `payments`, `audit_log`, `saved_reports`,
-  `inventory_locations`, `inventory_counts`, `page_hits`, `typed_samples`;
+  `inventory_locations`, `inventory_counts`, `page_hits`, `typed_samples`, `json_docs`;
 
 -- Not a base table: /api/tables and its allow-list (spec §5.2) must leave it out.
 CREATE VIEW `active_users` AS SELECT `id`, `email`, `full_name` FROM `users` WHERE `is_active`;
 
 INSERT INTO `_conformance_meta` (`seed_version`, `dialect`, `checksum`, `generated_at`)
-VALUES ('9', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));
+VALUES ('10', 'mysql', 'mysql-hand-authored', TIMESTAMP('2026-07-19 00:00:00'));

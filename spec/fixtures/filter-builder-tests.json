@@ -1648,6 +1648,260 @@
         "mysql": {"where": "(CAST(`detail` AS CHAR) LIKE ?)", "values": ["%x%"]},
         "sqlite": {"where": "(CAST(\"detail\" AS TEXT) LIKE ?)", "values": ["%x%"]}
       }
+    },
+    {
+      "name": "path-one-key",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["status"], "op": "=", "value": "failed"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) = $4)", "values": ["status", "failed"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"status\"", "$.\"status\"", "failed"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"status\"", "$.\"status\"", "failed"]}
+      }
+    },
+    {
+      "name": "path-key-index-key",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["arr", 0, "user id"], "op": "=", "value": "42"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" -> $3::text -> $4::int ->> $5::text) = $6)", "values": ["arr", "0", "user id", "42"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"arr\"[0].\"user id\"", "$.\"arr\"[0].\"user id\"", "42"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"arr\"[0].\"user id\"", "$.\"arr\"[0].\"user id\"", "42"]}
+      }
+    },
+    {
+      "name": "path-key-zero-is-not-index-zero",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["arr", "0"], "op": "=", "value": "x"}, {"logic": "OR", "column": "doc", "path": ["arr", 0], "op": "=", "value": "x"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" -> $3::text ->> $4::text) = $5) OR ((\"doc\" -> $6::text ->> $7::int) = $8)", "values": ["arr", "0", "x", "arr", "0", "x"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?) OR (CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"arr\".\"0\"", "$.\"arr\".\"0\"", "x", "$.\"arr\"[0]", "$.\"arr\"[0]", "x"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?) OR (CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"arr\".\"0\"", "$.\"arr\".\"0\"", "x", "$.\"arr\"[0]", "$.\"arr\"[0]", "x"]}
+      }
+    },
+    {
+      "name": "path-in",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["n"], "op": "IN", "value": ["9", "10"]}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) IN ($4, $5))", "values": ["n", "9", "10"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END IN (?, ?))", "values": ["$.\"n\"", "$.\"n\"", "9", "10"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) IN (?, ?))", "values": ["$.\"n\"", "$.\"n\"", "9", "10"]}
+      }
+    },
+    {
+      "name": "path-between-compares-text",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["n"], "op": "BETWEEN", "value": ["10", "9"]}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) BETWEEN $4 AND $5)", "values": ["n", "10", "9"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END BETWEEN ? AND ?)", "values": ["$.\"n\"", "$.\"n\"", "10", "9"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) BETWEEN ? AND ?)", "values": ["$.\"n\"", "$.\"n\"", "10", "9"]}
+      }
+    },
+    {
+      "name": "path-like",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["status"], "op": "LIKE", "value": "fail%"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) LIKE $4)", "values": ["status", "fail%"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END LIKE ?)", "values": ["$.\"status\"", "$.\"status\"", "fail%"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) LIKE ?)", "values": ["$.\"status\"", "$.\"status\"", "fail%"]}
+      }
+    },
+    {
+      "name": "path-ilike",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["status"], "op": "ILIKE", "value": "failed"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) ILIKE $4)", "values": ["status", "failed"]},
+        "mysql": {"where": "(LOWER(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END) LIKE LOWER(?))", "values": ["$.\"status\"", "$.\"status\"", "failed"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) LIKE ?)", "values": ["$.\"status\"", "$.\"status\"", "failed"]}
+      }
+    },
+    {
+      "name": "path-is-null",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["nested"], "op": "IS NULL"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) IS NULL)", "values": ["nested"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END IS NULL)", "values": ["$.\"nested\"", "$.\"nested\""]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) IS NULL)", "values": ["$.\"nested\"", "$.\"nested\""]}
+      }
+    },
+    {
+      "name": "path-not",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["status"], "op": "!=", "value": "failed"}, {"logic": "AND", "not": true, "column": "doc", "path": ["flag"], "op": "=", "value": "true"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) != $4) AND (NOT ((\"doc\" ->> $5::text) = $6))", "values": ["status", "failed", "flag", "true"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END != ?) AND (NOT (CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?))", "values": ["$.\"status\"", "$.\"status\"", "failed", "$.\"flag\"", "$.\"flag\"", "true"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) != ?) AND (NOT (CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?))", "values": ["$.\"status\"", "$.\"status\"", "failed", "$.\"flag\"", "$.\"flag\"", "true"]}
+      }
+    },
+    {
+      "name": "path-on-json-not-jsonb",
+      "table": "json_docs",
+      "conditions": [{"column": "doc_json", "path": ["status"], "op": "=", "value": "failed"}],
+      "expect": {
+        "postgres": {"where": "((\"doc_json\" ->> $3::text) = $4)", "values": ["status", "failed"]}
+      }
+    },
+    {
+      "name": "path-binds-follow-placeholder-order",
+      "table": "json_docs",
+      "conditions": [{"column": "id", "op": ">", "value": "1"}, {"logic": "OR", "column": "doc", "path": ["n"], "op": "IN", "value": ["9", "10"]}, {"logic": "AND", "column": "id", "op": "<", "value": "5"}],
+      "expect": {
+        "postgres": {"where": "(\"id\" > $3::int8) OR ((\"doc\" ->> $4::text) IN ($5, $6)) AND (\"id\" < $7::int8)", "values": ["1", "n", "9", "10", "5"]},
+        "mysql": {"where": "(`id` > CAST(? AS DECIMAL(65,30))) OR (CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END IN (?, ?)) AND (`id` < CAST(? AS DECIMAL(65,30)))", "values": ["1", "$.\"n\"", "$.\"n\"", "9", "10", "5"]},
+        "sqlite": {"where": "(\"id\" > ?) OR (CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) IN (?, ?)) AND (\"id\" < ?)", "values": ["1", "$.\"n\"", "$.\"n\"", "9", "10", "5"]}
+      }
+    },
+    {
+      "name": "path-plain-keys",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["a", "b", "c", "d", "e", "f", "g"], "op": "=", "value": "x"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" -> $3::text -> $4::text -> $5::text -> $6::text -> $7::text -> $8::text ->> $9::text) = $10)", "values": ["a", "b", "c", "d", "e", "f", "g", "x"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"a\".\"b\".\"c\".\"d\".\"e\".\"f\".\"g\"", "$.\"a\".\"b\".\"c\".\"d\".\"e\".\"f\".\"g\"", "x"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"a\".\"b\".\"c\".\"d\".\"e\".\"f\".\"g\"", "$.\"a\".\"b\".\"c\".\"d\".\"e\".\"f\".\"g\"", "x"]}
+      }
+    },
+    {
+      "name": "path-hostile-keys-change-only-the-binds",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["' OR 1=1 --", "$", ".", "[", "*", "a b", "ü"], "op": "=", "value": "x"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" -> $3::text -> $4::text -> $5::text -> $6::text -> $7::text -> $8::text ->> $9::text) = $10)", "values": ["' OR 1=1 --", "$", ".", "[", "*", "a b", "ü", "x"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"' OR 1=1 --\".\"$\".\".\".\"[\".\"*\".\"a b\".\"ü\"", "$.\"' OR 1=1 --\".\"$\".\".\".\"[\".\"*\".\"a b\".\"ü\"", "x"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"' OR 1=1 --\".\"$\".\".\".\"[\".\"*\".\"a b\".\"ü\"", "$.\"' OR 1=1 --\".\"$\".\".\".\"[\".\"*\".\"a b\".\"ü\"", "x"]}
+      }
+    },
+    {
+      "name": "path-max-steps",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["a", 1, "b", 2, "c", 3, "d", 2147483647], "op": "=", "value": "x"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" -> $3::text -> $4::int -> $5::text -> $6::int -> $7::text -> $8::int -> $9::text ->> $10::int) = $11)", "values": ["a", "1", "b", "2", "c", "3", "d", "2147483647", "x"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"a\"[1].\"b\"[2].\"c\"[3].\"d\"[2147483647]", "$.\"a\"[1].\"b\"[2].\"c\"[3].\"d\"[2147483647]", "x"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"a\"[1].\"b\"[2].\"c\"[3].\"d\"[2147483647]", "$.\"a\"[1].\"b\"[2].\"c\"[3].\"d\"[2147483647]", "x"]}
+      }
+    },
+    {
+      "name": "path-key-of-255-bytes",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééék"], "op": "=", "value": "x"}],
+      "expect": {
+        "postgres": {"where": "((\"doc\" ->> $3::text) = $4)", "values": ["ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééék", "x"]},
+        "mysql": {"where": "(CASE WHEN JSON_TYPE(JSON_EXTRACT(`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(`doc`, ?)) END = ?)", "values": ["$.\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééék\"", "$.\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééék\"", "x"]},
+        "sqlite": {"where": "(CAST(CASE WHEN json_valid(\"doc\") THEN CASE json_type(\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(\"doc\", ?) END END AS TEXT) = ?)", "values": ["$.\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééék\"", "$.\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééék\"", "x"]}
+      }
+    },
+    {
+      "name": "path-empty",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-nine-steps",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["a", "b", "c", "d", "e", "f", "g", "h", "i"], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-negative-index",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [-1], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-fractional-index",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [1.5], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-index-above-2-31",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [2147483648], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-empty-key",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [""], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-key-of-256-bytes",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-key-with-quote",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["say \"hi\""], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-key-with-backslash",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["a\\b"], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-key-with-control-character",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": ["a\u0001"], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-not-an-array",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": "status", "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-null-step",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [null], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-boolean-step",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [true], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-nested-array-step",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": [["a"]], "op": "=", "value": "x"}],
+      "expect_error": "bad_path"
+    },
+    {
+      "name": "path-on-a-text-column",
+      "table": "users",
+      "conditions": [{"column": "email", "path": ["domain"], "op": "=", "value": "x"}],
+      "expect_error": "invalid_value"
+    },
+    {
+      "name": "path-null-is-no-path",
+      "table": "json_docs",
+      "conditions": [{"column": "doc", "path": null, "op": "IS NULL"}],
+      "expect": {
+        "postgres": {"where": "(\"doc\"::text IS NULL)", "values": []},
+        "mysql": {"where": "(CAST(`doc` AS CHAR) IS NULL)", "values": []},
+        "sqlite": {"where": "(CAST(\"doc\" AS TEXT) IS NULL)", "values": []}
+      }
+    },
+    {
+      "name": "path-index-of-400-digits",
+      "table": "json_docs",
+      "raw": "[{\"column\": \"doc\", \"path\": [10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000], \"op\": \"=\", \"value\": \"x\"}]",
+      "expect_error": "bad_path"
     }
   ]
 }

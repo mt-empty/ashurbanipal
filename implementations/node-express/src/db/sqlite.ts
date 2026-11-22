@@ -14,6 +14,7 @@ import {
   joinColumnInfos,
   joinRows,
   joinTableRefs,
+  jsonPathString,
   planJoin,
   type TableMeta,
   type TypedCompare,
@@ -184,6 +185,18 @@ export const JOIN_DIALECT: JoinDialect = {
   castParam: (p, target) => `CAST(${p} AS ${target})`,
   numbered: false,
   ilike: "like",
+  // SQLite does not enforce a declared JSON type and json_extract raises on a
+  // cell that is not JSON, hence json_valid. json_extract returns 1/0 for
+  // booleans and an INTEGER for a number, hence the json_type branch and the CAST.
+  jsonPath: (expr, path, bind) => {
+    const p = jsonPathString(path);
+    const [first, second] = [bind(p), bind(p)];
+    return (
+      `CAST(CASE WHEN json_valid(${expr}) THEN CASE json_type(${expr}, ${first}) ` +
+      `WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ` +
+      `ELSE json_extract(${expr}, ${second}) END END AS TEXT)`
+    );
+  },
 };
 
 /**

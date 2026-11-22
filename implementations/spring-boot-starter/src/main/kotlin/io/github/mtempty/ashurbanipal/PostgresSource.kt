@@ -15,6 +15,15 @@ internal val PG_DIALECT = JoinDialect(
     castText = { "$it::text" },
     castParam = { ph, target -> "$ph::$target" },
     ilike = "native",
+    // (col -> ?::text -> ?::int ->> ?::text): one bind per step; the cast picks
+    // the key or index form of the operator, on json and jsonb alike.
+    jsonPath = { expr, path ->
+        val steps = path.mapIndexed { i, s ->
+            val arrow = if (i == path.size - 1) "->>" else "->"
+            " $arrow ?::${if (s is Int) "int" else "text"}"
+        }
+        "($expr${steps.joinToString("")})" to path.map { it.toString() }
+    },
 )
 
 /**

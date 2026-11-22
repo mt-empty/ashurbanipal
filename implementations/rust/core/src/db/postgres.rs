@@ -33,12 +33,33 @@ fn cast_param(placeholder: &str, target: &str) -> String {
     format!("{placeholder}::{target}")
 }
 
+/// `(col -> $3::text -> $4::int ->> $5::text)`: one bind per step; the cast
+/// picks the key or index form of the operator, on `json` and `jsonb` alike.
+fn json_path(
+    column: &str,
+    path: &[crate::filter::PathStep],
+    bind: &mut dyn FnMut(String) -> String,
+) -> String {
+    let mut out = format!("({column}");
+    for (i, step) in path.iter().enumerate() {
+        let arrow = if i + 1 == path.len() { "->>" } else { "->" };
+        let p = match step {
+            crate::filter::PathStep::Key(k) => format!("{}::text", bind(k.clone())),
+            crate::filter::PathStep::Index(n) => format!("{}::int", bind(n.to_string())),
+        };
+        out.push_str(&format!(" {arrow} {p}"));
+    }
+    out.push(')');
+    out
+}
+
 const DIALECT: Dialect = Dialect {
     quote: quote_ident,
     cast_text,
     cast_param,
     numbered: true,
     ilike: IlikeStyle::Native,
+    json_path,
 };
 
 /// The typed filter comparison for an `information_schema.columns.data_type`

@@ -20,6 +20,7 @@ from .filter import (
     Comparison,
     Condition,
     NullCheck,
+    PathStep,
     ValueForm,
     condition_values,
     describe_form,
@@ -544,6 +545,7 @@ def plan_join(spec: JoinSpec, tables: list[TableMeta], opts: JoinOpts) -> JoinPl
         if pos < 0 or pos >= len(tables):
             raise _FilterParseError(f"condition {i}: join position {pos} is not in the join")
         col = tables[pos].index(cond.column)
+        _check_path_column(i, tables[pos].columns[col], cond)
         _check_typed_values(tables[pos].columns[col], cond)
         resolved_filter.append(_ResolvedCondition(cond=cond, pos=pos, col=col))
 
@@ -578,6 +580,23 @@ class Dialect:
     cast_param: Callable[[str, str], str]
     placeholder: str  # "%s" (psycopg, pymysql) or "?" (sqlite3)
     ilike: str  # "native", "like" or "lowered-like"
+    # The text at a checked path inside a JSON column expression, given the
+    # placeholder, and the values it binds in placeholder order.
+    json_path: Callable[[str, tuple[PathStep, ...], str], tuple[str, list[str]]]
+
+
+def json_path_string(path: tuple[PathStep, ...]) -> str:
+    """`$."key"[0]…` for MySQL and SQLite, bound as one parameter; safe
+    unescaped only because `filter.path_error` refuses `"`, `\\` and control
+    characters in keys."""
+    return "$" + "".join(f"[{s}]" if isinstance(s, int) else f'."{s}"' for s in path)
+
+
+def _check_path_column(i: int, col: ColMeta, cond: Condition) -> None:
+    """A path (already checked when the condition was built) is valid only on
+    a class json column."""
+    if cond.path is not None and col.column_class != JSON:
+        raise _FilterParseError(f"condition {i}: column {col.name!r} is not JSON; only json columns take a path")
 
 
 def join_order_keys(
@@ -614,7 +633,7 @@ def join_order_keys(
 def _check_typed_values(col: ColMeta, cond: Condition) -> None:
     """The column-typed half of the `spec/protocol.md` §5.4.2 value check."""
     form = col.compare.form if col.compare is not None else None
-    if form is None or cond.op in PATTERN_OPS:
+    if form is None or cond.op in PATTERN_OPS or cond.path is not None:
         return
     for v in condition_values(cond):
         if not form_accepts(form, v):
@@ -630,14 +649,22 @@ def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tupl
     clause = ""
     for i, (cond, expr, col) in enumerate(terms):
         typed = col.compare
-        if cond.op in PATTERN_OPS or (typed is not None and typed.names_zero_date(condition_values(cond))):
+        if (
+            cond.path is not None
+            or cond.op in PATTERN_OPS
+            or (typed is not None and typed.names_zero_date(condition_values(cond)))
+        ):
             typed = None
 
         def ph_for(value: str, typed: TypedCompare | None = typed) -> str:
             target = typed.cast_for(value) if typed is not None else None
             return d.placeholder if target is None else d.cast_param(d.placeholder, target)
 
-        lhs = expr if typed is not None else d.cast_text(expr)
+        if cond.path is not None:
+            lhs, path_values = d.json_path(expr, cond.path, d.placeholder)
+            values.extend(path_values)
+        else:
+            lhs = expr if typed is not None else d.cast_text(expr)
         if isinstance(cond, NullCheck):
             inner = f"{lhs} {OP_SQL[cond.op]}"
         elif isinstance(cond, Comparison):
@@ -671,6 +698,7 @@ def table_where_clause(conditions: list[Condition], table: TableMeta, d: Dialect
         col = table.columns[table.index(cond.column)]
         if i > 0 and cond.logic not in ("AND", "OR"):
             raise _FilterParseError(f"condition {i} is missing logic")
+        _check_path_column(i, col, cond)
         _check_typed_values(col, cond)
         terms.append((cond, d.quote(col.name), col))
     clause, values = _filter_sql(terms, d)

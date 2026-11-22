@@ -45,6 +45,15 @@ internal val SQLITE_DIALECT = JoinDialect(
     castText = { "CAST($it AS TEXT)" },
     castParam = { ph, target -> "CAST($ph AS $target)" },
     ilike = "like",
+    // SQLite does not enforce a declared JSON type and json_extract raises on a
+    // cell that is not JSON, hence json_valid. json_extract returns 1/0 for
+    // booleans and an INTEGER for a number, hence the json_type branch and the CAST.
+    jsonPath = { expr, path ->
+        val p = jsonPathString(path)
+        ("CAST(CASE WHEN json_valid($expr) THEN CASE json_type($expr, ?) " +
+            "WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
+            "ELSE json_extract($expr, ?) END END AS TEXT)") to listOf(p, p)
+    },
 )
 
 /**

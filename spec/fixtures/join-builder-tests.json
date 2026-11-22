@@ -1382,6 +1382,22 @@
           "labels": ["id"]
         }
       }
+    },
+    {
+      "name": "filter-path-on-a-joined-table",
+      "join": {"table": "json_docs", "joins": [{"type": "inner", "table": "json_docs", "on": [{"left": {"join": 0, "column": "id"}, "right": "id"}]}], "columns": [{"join": 0, "column": "id"}]},
+      "filter": [{"join": 1, "column": "doc", "path": ["arr", 0, "user id"], "op": "=", "value": "42"}],
+      "expect": {
+        "postgres": {"sql": "t0.\"id\"::text as c0 from \"public\".\"json_docs\" t0 inner join \"public\".\"json_docs\" t1 on t1.\"id\" = t0.\"id\" where ((t1.\"doc\" -> $3::text -> $4::int ->> $5::text) = $6) order by t0.\"id\" asc limit $1 offset $2", "values": ["arr", "0", "user id", "42"], "labels": ["id"]},
+        "mysql": {"sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`json_docs` t0 inner join `ashurbanipal`.`json_docs` t1 on t1.`id` = t0.`id` where (CASE WHEN JSON_TYPE(JSON_EXTRACT(t1.`doc`, ?)) = CONVERT('NULL' USING utf8mb4) THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT(t1.`doc`, ?)) END = ?) order by t0.`id` asc limit ? offset ?", "values": ["$.\"arr\"[0].\"user id\"", "$.\"arr\"[0].\"user id\"", "42"], "labels": ["id"]},
+        "sqlite": {"sql": "CAST(t0.\"id\" AS TEXT) as c0 from \"json_docs\" t0 inner join \"json_docs\" t1 on t1.\"id\" = t0.\"id\" where (CAST(CASE WHEN json_valid(t1.\"doc\") THEN CASE json_type(t1.\"doc\", ?) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE json_extract(t1.\"doc\", ?) END END AS TEXT) = ?) order by t0.\"id\" asc limit ? offset ?", "values": ["$.\"arr\"[0].\"user id\"", "$.\"arr\"[0].\"user id\"", "42"], "labels": ["id"]}
+      }
+    },
+    {
+      "name": "filter-path-on-a-non-json-joined-column",
+      "join": {"table": "orders", "joins": [{"type": "inner", "table": "users", "on": [{"left": {"join": 0, "column": "user_id"}, "right": "id"}]}], "columns": [{"join": 0, "column": "id"}]},
+      "filter": [{"join": 1, "column": "email", "path": ["domain"], "op": "=", "value": "x"}],
+      "expect_error": "invalid_filter"
     }
   ]
 }

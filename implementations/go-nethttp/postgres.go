@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,28 @@ var pgJoinDialect = joinDialect{
 	castParam: func(p, target string) string { return p + "::" + target },
 	numbered:  true,
 	ilike:     ilikeNative,
+	jsonPath:  pgJSONPath,
+}
+
+// pgJSONPath is (col -> $3::text -> $4::int ->> $5::text): one bind per
+// step; the cast picks the key or index form of the operator, on json and
+// jsonb alike.
+func pgJSONPath(expr string, path []PathStep, bind func(string) string) string {
+	var b strings.Builder
+	b.WriteString("(" + expr)
+	for i, s := range path {
+		arrow := "->"
+		if i == len(path)-1 {
+			arrow = "->>"
+		}
+		if s.IsIndex {
+			b.WriteString(" " + arrow + " " + bind(strconv.Itoa(s.Index)) + "::int")
+		} else {
+			b.WriteString(" " + arrow + " " + bind(s.Key) + "::text")
+		}
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // pgTypedCompare is the typed filter comparison for an

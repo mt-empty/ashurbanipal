@@ -73,6 +73,14 @@ internal val MYSQL_DIALECT = JoinDialect(
     castText = { "CAST($it AS CHAR)" },
     castParam = { ph, target -> "CAST($ph AS $target)" },
     ilike = "lowered-like",
+    // Only JSON_EXTRACT takes a bound path; the CASE maps a JSON null to SQL
+    // NULL, with CONVERT for MariaDB's collation check. Left uncast so the
+    // utf8mb4_bin text compares case-sensitively.
+    jsonPath = { expr, path ->
+        val p = jsonPathString(path)
+        ("CASE WHEN JSON_TYPE(JSON_EXTRACT($expr, ?)) = CONVERT('NULL' USING utf8mb4) " +
+            "THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT($expr, ?)) END") to listOf(p, p)
+    },
 )
 
 /**

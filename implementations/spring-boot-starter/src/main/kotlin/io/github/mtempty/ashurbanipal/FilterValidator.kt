@@ -9,6 +9,9 @@ import tools.jackson.module.kotlin.readValue
 const val MAX_FILTER_BYTES = 8192
 const val MAX_CONDITIONS = 10
 const val MAX_IN_ITEMS = 1000
+const val MAX_PATH_STEPS = 8
+const val MAX_PATH_KEY_BYTES = 255
+const val MAX_PATH_INDEX = Int.MAX_VALUE
 
 internal val VALID_OPS =
     setOf("=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL")
@@ -35,6 +38,8 @@ data class Condition(
     val value: Any? = null,
     /** Table position, accepted only by `parse(raw, allowJoin = true)` (`spec/protocol.md` §5.11.3). */
     val join: Int? = null,
+    /** Steps into a JSON column, as decoded; [pathSteps] checks them and returns keys and [Int] indexes. */
+    val path: List<Any?>? = null,
 ) {
     /** The values the condition binds, in order; call after [checkValueShape]. */
     fun items(): List<String> = when (value) {
@@ -42,6 +47,36 @@ data class Condition(
         is String -> listOf(value)
         is List<*> -> value.map { it as String }
         else -> throw FilterException("value must be a string or an array of strings")
+    }
+}
+
+/**
+ * Checks a condition's path and returns its steps as keys ([String]) and
+ * indexes ([Int]) (`spec/protocol.md` §5.4.2). Keys a path string could not
+ * hold literally are refused, so no dialect escapes one.
+ */
+internal fun pathSteps(path: List<Any?>, i: Int): List<Any> {
+    fun fail(why: String): Nothing = throw FilterException("condition $i: $why")
+    if (path.size !in 1..MAX_PATH_STEPS) fail("path needs 1 to $MAX_PATH_STEPS steps, got ${path.size}")
+    return path.map { step ->
+        when (step) {
+            is String -> {
+                val bytes = step.toByteArray(Charsets.UTF_8).size
+                if (bytes !in 1..MAX_PATH_KEY_BYTES) fail("path key must be 1 to $MAX_PATH_KEY_BYTES bytes, got $bytes")
+                if (step.any { it == '"' || it == '\\' || it < ' ' }) {
+                    fail("path key \"$step\" contains a quote, a backslash or a control character")
+                }
+                step
+            }
+            is Number -> {
+                val d = step.toDouble()
+                if (d % 1.0 != 0.0 || d < 0 || d > MAX_PATH_INDEX) {
+                    fail("path index $step is not a whole number from 0 to $MAX_PATH_INDEX")
+                }
+                d.toInt()
+            }
+            else -> fail("a path step must be a key string or an index")
+        }
     }
 }
 
@@ -206,6 +241,7 @@ class FilterValidator {
                 throw FilterException("condition $i has invalid op ${condition.op}")
             }
             checkValueShape(condition, i)
+            condition.path?.let { pathSteps(it, i) }
             condition
         }
     }

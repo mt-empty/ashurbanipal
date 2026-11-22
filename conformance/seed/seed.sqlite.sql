@@ -18,6 +18,7 @@
 PRAGMA foreign_keys = OFF;
 DROP VIEW IF EXISTS active_users;
 DROP TABLE IF EXISTS _conformance_meta;
+DROP TABLE IF EXISTS json_docs;
 DROP TABLE IF EXISTS typed_samples;
 DROP TABLE IF EXISTS page_hits;
 DROP TABLE IF EXISTS feature_flags;
@@ -208,6 +209,15 @@ CREATE TABLE typed_samples (
   time_v     TIME
 );
 
+-- JSON path filter rows (spec/protocol.md §5.4.2): a JSON null, a missing
+-- key, a nested object, an array, booleans, a decimal, and keys holding
+-- `.`, a space, `*` and a non-ASCII letter. Row 6 is not JSON at all:
+-- SQLite does not enforce the declared type.
+CREATE TABLE json_docs (
+  id  INTEGER PRIMARY KEY,
+  doc JSON
+);
+
 CREATE TABLE _conformance_meta (
   seed_version TEXT NOT NULL,
   dialect      TEXT NOT NULL,
@@ -392,5 +402,13 @@ ANALYZE;
 -- Not a base table: /api/tables and its allow-list (spec §5.2) must leave it out.
 CREATE VIEW active_users AS SELECT id, email, full_name FROM users WHERE is_active;
 
+INSERT INTO json_docs VALUES
+  (1, '{"status": "failed", "n": 10, "flag": true, "price": 1.50, "nested": {"k": "V"}, "arr": [{"user id": 42}], "a.b": "dot", "a b": "space", "*": "star", "ü": "umlaut"}'),
+  (2, '{"status": "FAILED", "n": 9, "flag": false, "nested": null}'),
+  (3, '{"status": null}'),
+  (4, '{}'),
+  (5, NULL),
+  (6, 'not json');
+
 INSERT INTO _conformance_meta (seed_version, dialect, checksum, generated_at)
-VALUES ('9', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');
+VALUES ('10', 'sqlite', 'sqlite-hand-authored', '2026-07-19 00:00:00');

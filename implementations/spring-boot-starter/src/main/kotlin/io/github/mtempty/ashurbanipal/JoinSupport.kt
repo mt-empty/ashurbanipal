@@ -338,7 +338,7 @@ data class TableMeta(
     }
 }
 
-internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col: Int)
+internal data class ResolvedCondition(val cond: Condition, val pos: Int, val col: Int, val path: List<Any>? = null)
 
 /** A request resolved against the catalog; every name in SQL text comes from [tables], never the request. */
 class JoinPlan internal constructor(
@@ -437,8 +437,9 @@ fun planJoin(spec: JoinSpec, tables: List<TableMeta>, opts: JoinOpts): JoinPlan 
         if (pos < 0 || pos >= tables.size) throw FilterException("condition $i: join position $pos is not in the join")
         checkValueShape(cond, i)
         val col = tables[pos].index(cond.column)
+        val path = checkPathColumn(i, tables[pos].columns[col], cond)
         checkTypedValues(tables[pos].columns[col], cond)
-        ResolvedCondition(cond, pos, col)
+        ResolvedCondition(cond, pos, col, path)
     }
 
     if (opts.sort == null && opts.sortJoin != null) throw BadParameterException("sort_join needs sort")
@@ -458,19 +459,38 @@ internal class JoinDialect(
     val castParam: (String, String) -> String,
     /** `native`, `like` or `lowered-like`. */
     val ilike: String,
+    /** The text at a validated path inside a JSON column expression, and the values it binds, in order. */
+    val jsonPath: (String, List<Any>) -> Pair<String, List<String>>,
 )
+
+/**
+ * `$."key"[0]…` for MySQL and SQLite, bound as one parameter; safe unescaped
+ * only because [pathSteps] refuses `"`, `\` and control characters in keys.
+ */
+internal fun jsonPathString(path: List<Any>): String =
+    "$" + path.joinToString("") { if (it is Int) "[$it]" else ".\"$it\"" }
+
+/** Re-checks a path for callers that bypass FilterValidator.parse; a path is valid only on a class json column. */
+private fun checkPathColumn(i: Int, col: ColMeta, cond: Condition): List<Any>? {
+    val path = cond.path ?: return null
+    val steps = pathSteps(path, i)
+    if (col.columnClass != ColumnClass.JSON) {
+        throw FilterException("condition $i: column \"${col.name}\" is not JSON; only json columns take a path")
+    }
+    return steps
+}
 
 /** The column-typed half of the `spec/protocol.md` §5.4.2 value check. */
 private fun checkTypedValues(col: ColMeta, cond: Condition) {
     val form = col.compare?.form ?: return
-    if (cond.op in PATTERN_OPS) return
+    if (cond.op in PATTERN_OPS || cond.path != null) return
     cond.items().firstOrNull { !form.accepts(it) }?.let { bad ->
         throw FilterException("value \"$bad\" for column \"${col.name}\" must be ${form.description}")
     }
 }
 
 /** One condition with its column resolved; [expr] is the column as SQL. */
-private class FilterTerm(val cond: Condition, val expr: String, val col: ColMeta)
+private class FilterTerm(val cond: Condition, val expr: String, val col: ColMeta, val path: List<Any>? = null)
 
 /** The conditions joined by their logic, without `where`, and the values in placeholder order. */
 private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, List<String>> {
@@ -479,9 +499,15 @@ private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, Lis
     terms.forEachIndexed { i, t ->
         val cond = t.cond
         val items = cond.items()
-        val typed = t.col.compare.takeIf { cond.op !in PATTERN_OPS && it?.namesZeroDate(items) != true }
+        val typed = t.col.compare.takeIf {
+            t.path == null && cond.op !in PATTERN_OPS && it?.namesZeroDate(items) != true
+        }
         fun ph(value: String) = typed?.castFor(value)?.let { d.castParam("?", it) } ?: "?"
-        val lhs = if (typed != null) t.expr else d.castText(t.expr)
+        val lhs = when {
+            t.path != null -> d.jsonPath(t.expr, t.path).let { (sql, pathValues) -> values.addAll(pathValues); sql }
+            typed != null -> t.expr
+            else -> d.castText(t.expr)
+        }
         val inner = when (cond.op) {
             in OPS_WITHOUT_VALUE -> "$lhs ${opSqlKeyword(cond.op)}"
             "IN" -> "$lhs IN (${items.joinToString(", ") { ph(it) }})"
@@ -512,8 +538,9 @@ internal fun tableWhereClause(conditions: List<Condition>, table: TableMeta, d: 
         if (cond.op !in VALID_OPS) throw FilterException("condition $i has invalid op ${cond.op}")
         checkValueShape(cond, i)
         if (i > 0 && cond.logic == null) throw FilterException("condition $i is missing logic")
+        val path = checkPathColumn(i, col, cond)
         checkTypedValues(col, cond)
-        FilterTerm(cond, d.quote(col.name), col)
+        FilterTerm(cond, d.quote(col.name), col, path)
     }
     val (clause, values) = filterSql(terms, d)
     return WhereClause(if (clause.isEmpty()) "" else " where $clause", values)
@@ -565,7 +592,7 @@ internal fun buildJoinSelect(plan: JoinPlan, d: JoinDialect): Pair<String, List<
     }
 
     val (clause, values) = filterSql(
-        plan.filter.map { rc -> FilterTerm(rc.cond, alias(rc.pos, rc.col), plan.tables[rc.pos].columns[rc.col]) },
+        plan.filter.map { rc -> FilterTerm(rc.cond, alias(rc.pos, rc.col), plan.tables[rc.pos].columns[rc.col], rc.path) },
         d,
     )
     if (clause.isNotEmpty()) sql.append(" where $clause")

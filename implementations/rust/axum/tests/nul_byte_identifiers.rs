@@ -119,6 +119,7 @@ async fn nul_byte_filter_value_is_rejected_as_filter_parse_not_a_500() {
             op: FilterOp::Eq,
             value: Some("ashb\0nul".into()),
             join: None,
+            path: None,
         }]),
         ..base_opts()
     };

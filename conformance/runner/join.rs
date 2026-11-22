@@ -23,7 +23,7 @@ async fn get_join(srv: &TestServer, join: &Value, extra: &[(&str, String)]) -> r
         .unwrap()
 }
 
-async fn ok_body(srv: &TestServer, join: &Value, extra: &[(&str, String)]) -> Value {
+pub(crate) async fn ok_body(srv: &TestServer, join: &Value, extra: &[(&str, String)]) -> Value {
     let resp = get_join(srv, join, extra).await;
     assert_status(&resp, 200, "join request");
     resp.json().await.unwrap()
@@ -100,7 +100,7 @@ fn label(body: &Value, join: u64, column: &str) -> String {
         .to_string()
 }
 
-fn rows(body: &Value) -> &Vec<Value> {
+pub(crate) fn rows(body: &Value) -> &Vec<Value> {
     body["rows"].as_array().unwrap()
 }
 

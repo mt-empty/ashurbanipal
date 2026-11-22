@@ -253,12 +253,31 @@ fn cast_param(placeholder: &str, target: &str) -> String {
     format!("CAST({placeholder} AS {target})")
 }
 
+/// SQLite does not enforce a declared JSON type, and `json_extract` raises on
+/// a cell that is not JSON, hence `json_valid`. `json_extract` returns 1/0 for
+/// booleans and an INTEGER for a number, hence the `json_type` branch and the
+/// `CAST`.
+fn json_path(
+    column: &str,
+    path: &[crate::filter::PathStep],
+    bind: &mut dyn FnMut(String) -> String,
+) -> String {
+    let p = crate::join::json_path_string(path);
+    let (first, second) = (bind(p.clone()), bind(p));
+    format!(
+        "CAST(CASE WHEN json_valid({column}) THEN CASE json_type({column}, {first}) \
+         WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' \
+         ELSE json_extract({column}, {second}) END END AS TEXT)"
+    )
+}
+
 const DIALECT: Dialect = Dialect {
     quote: quote_ident,
     cast_text,
     cast_param,
     numbered: false,
     ilike: IlikeStyle::Like,
+    json_path,
 };
 
 async fn table_meta(
@@ -1315,6 +1334,7 @@ mod tests {
             op: crate::filter::FilterOp::Like,
             value: Some("a@%".into()),
             join: Some(1),
+            path: None,
         }]);
         opts.sort = Some("email".into());
         opts.sort_join = Some(1);

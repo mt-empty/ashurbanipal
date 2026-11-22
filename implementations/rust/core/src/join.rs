@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{ColumnInfo, ColumnRef, DbError, Ident, KeyKind, NotAllowedKind};
-use crate::filter::{check_value_shape, Condition, FilterOp, FilterValue, Logic, ValueForm};
+use crate::filter::{
+    check_path, check_value_shape, Condition, FilterOp, FilterValue, Logic, PathStep, ValueForm,
+};
 
 pub const MAX_JOIN_BYTES: usize = 8192;
 pub const MAX_TABLES: usize = 4;
@@ -480,6 +482,7 @@ struct ResolvedCondition {
     not: bool,
     op: FilterOp,
     value: Option<FilterValue>,
+    path: Option<Vec<PathStep>>,
     pos: usize,
     col: usize,
 }
@@ -726,12 +729,14 @@ pub fn plan(spec: &JoinSpec, tables: Vec<TableMeta>, opts: &JoinOpts) -> Result<
         check_value_shape(c.op, c.value.as_ref())
             .map_err(|e| DbError::FilterParse(format!("condition {i}: {e}")))?;
         let col = column_index(table, &c.column)?;
-        check_typed_values(&table.columns[col], c.op, c.value.as_ref())?;
+        check_path_column(i, &table.columns[col], c.path.as_deref())?;
+        check_typed_values(&table.columns[col], c)?;
         filter.push(ResolvedCondition {
             logic: c.logic,
             not: c.not,
             op: c.op,
             value: c.value.clone(),
+            path: c.path.clone(),
             pos,
             col,
         });
@@ -798,18 +803,52 @@ pub struct Dialect {
     /// `$n` placeholders (Postgres) instead of `?`.
     pub numbered: bool,
     pub ilike: IlikeStyle,
+    pub json_path: JsonPathFn,
+}
+
+/// Renders the text at a validated `path` inside a JSON column expression;
+/// the callback binds each value it is given and returns its placeholder.
+pub type JsonPathFn = fn(&str, &[PathStep], &mut dyn FnMut(String) -> String) -> String;
+
+/// `$."key"[0]…` for MySQL and SQLite, bound as one parameter. Safe without
+/// escaping only because [`check_path`] refuses keys with `"`, `\` or a
+/// control character.
+#[cfg(any(feature = "mysql", feature = "sqlite"))]
+pub(crate) fn json_path_string(path: &[PathStep]) -> String {
+    let mut out = String::from("$");
+    for step in path {
+        match step {
+            PathStep::Key(k) => {
+                out.push_str(".\"");
+                out.push_str(k);
+                out.push('"');
+            }
+            PathStep::Index(i) => out.push_str(&format!("[{i}]")),
+        }
+    }
+    out
+}
+
+/// A `path` is checked again here for callers that bypass `filter::parse`,
+/// and is valid only on a class `json` column.
+fn check_path_column(i: usize, col: &ColMeta, path: Option<&[PathStep]>) -> Result<(), DbError> {
+    let Some(path) = path else { return Ok(()) };
+    check_path(path).map_err(|e| DbError::FilterParse(format!("condition {i}: {e}")))?;
+    if col.class != ColumnClass::Json {
+        return Err(DbError::FilterParse(format!(
+            "condition {i}: column {:?} is not JSON; only json columns take a path",
+            col.name.as_str()
+        )));
+    }
+    Ok(())
 }
 
 /// The column-typed half of the `spec/protocol.md` §5.4.2 value check.
-fn check_typed_values(
-    col: &ColMeta,
-    op: FilterOp,
-    value: Option<&FilterValue>,
-) -> Result<(), DbError> {
-    let (Some(form), Some(value)) = (col.compare.and_then(|c| c.form), value) else {
+fn check_typed_values(col: &ColMeta, c: &Condition) -> Result<(), DbError> {
+    let (Some(form), Some(value)) = (col.compare.and_then(|c| c.form), c.value.as_ref()) else {
         return Ok(());
     };
-    if op.is_pattern() {
+    if c.op.is_pattern() || c.path.is_some() {
         return Ok(());
     }
     match value.items().iter().find(|v| !form.accepts(v)) {
@@ -828,6 +867,7 @@ struct FilterTerm<'a> {
     not: bool,
     op: FilterOp,
     value: Option<&'a FilterValue>,
+    path: Option<&'a [PathStep]>,
     expr: String,
     col: &'a ColMeta,
 }
@@ -837,30 +877,34 @@ struct FilterTerm<'a> {
 /// offset.
 fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
     let mut next_param = 3;
-    let mut clause = String::new();
     let mut values = Vec::new();
+    let mut bind = |value: String| {
+        values.push(value);
+        if d.numbered {
+            next_param += 1;
+            format!("${}", next_param - 1)
+        } else {
+            "?".to_string()
+        }
+    };
+    let mut clause = String::new();
     for (i, t) in terms.iter().enumerate() {
         let items = t.value.map(FilterValue::items).unwrap_or_default();
         let typed = t
             .col
             .compare
-            .filter(|c| !t.op.is_pattern() && !c.names_zero_date(items));
+            .filter(|c| t.path.is_none() && !t.op.is_pattern() && !c.names_zero_date(items));
+        let lhs = match (t.path, typed) {
+            (Some(path), _) => (d.json_path)(&t.expr, path, &mut bind),
+            (None, Some(_)) => t.expr.clone(),
+            (None, None) => (d.cast_text)(&t.expr),
+        };
         let mut placeholder = |value: &str| {
-            let p = if d.numbered {
-                next_param += 1;
-                format!("${}", next_param - 1)
-            } else {
-                "?".to_string()
-            };
+            let p = bind(value.to_string());
             match typed.and_then(|c| c.cast_for(value)) {
                 Some(target) => (d.cast_param)(&p, target),
                 None => p,
             }
-        };
-        let lhs = if typed.is_some() {
-            t.expr.clone()
-        } else {
-            (d.cast_text)(&t.expr)
         };
         let inner = match t.op {
             FilterOp::IsNull | FilterOp::IsNotNull => {
@@ -883,7 +927,6 @@ fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
             },
             op => format!("{lhs} {} {}", crate::db::op_sql(op), placeholder(&items[0])),
         };
-        values.extend(items.iter().cloned());
         if i > 0 {
             clause.push_str(match t.logic {
                 Some(Logic::Or) => " OR ",
@@ -918,12 +961,14 @@ pub(crate) fn table_where_clause(
                 "condition {i} is missing logic"
             )));
         }
-        check_typed_values(col, c.op, c.value.as_ref())?;
+        check_path_column(i, col, c.path.as_deref())?;
+        check_typed_values(col, c)?;
         terms.push(FilterTerm {
             logic: c.logic,
             not: c.not,
             op: c.op,
             value: c.value.as_ref(),
+            path: c.path.as_deref(),
             expr: (d.quote)(&col.name),
             col,
         });
@@ -988,6 +1033,7 @@ pub fn build_select(plan: &Plan, d: &Dialect) -> (String, Vec<String>) {
             not: c.not,
             op: c.op,
             value: c.value.as_ref(),
+            path: c.path.as_deref(),
             expr: alias(c.pos, c.col),
             col: &plan.tables[c.pos].columns[c.col],
         })
@@ -1143,6 +1189,7 @@ mod tests {
             cast_param: |p, t| format!("{p}::{t}"),
             numbered: true,
             ilike: IlikeStyle::Native,
+            json_path: |_, _, _| unreachable!(),
         };
         let table = TableMeta {
             schema: None,
@@ -1164,6 +1211,7 @@ mod tests {
             op,
             value: Some(value),
             join: None,
+            path: None,
         };
         let list = |v: &[&str]| FilterValue::List(v.iter().map(|s| s.to_string()).collect());
         for (filter, want) in [
