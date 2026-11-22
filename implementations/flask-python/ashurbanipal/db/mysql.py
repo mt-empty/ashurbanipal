@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 import pymysql
 from pymysql.cursors import Cursor
 
+from ..filter import PathStep
 from ..join import (
     BINARY,
     JSON,
@@ -26,6 +27,7 @@ from ..join import (
     build_select,
     enum_class,
     group_unique_keys,
+    json_path_string,
     plan_join,
     table_order_clause,
     table_schemas,
@@ -112,12 +114,25 @@ def _decode_cell(value: bytes | None, encoding: str) -> str | None:
         return "<undecodable>"
 
 
+def _json_path(expr: str, path: tuple[PathStep, ...]) -> tuple[str, list[str]]:
+    """Only JSON_EXTRACT takes a bound path; the CASE maps a JSON null to SQL
+    NULL, with CONVERT for MariaDB's collation check. Left uncast so the
+    utf8mb4_bin text compares case-sensitively."""
+    p = json_path_string(path)
+    sql = (
+        f"CASE WHEN JSON_TYPE(JSON_EXTRACT({expr}, %s)) = CONVERT('NULL' USING utf8mb4) "
+        f"THEN NULL ELSE JSON_UNQUOTE(JSON_EXTRACT({expr}, %s)) END"
+    )
+    return sql, [p, p]
+
+
 _JOIN_DIALECT = Dialect(
     quote=_quote_ident,
     cast_text=lambda expr: f"CAST({expr} AS CHAR)",
     cast_param=lambda ph, target: f"CAST({ph} AS {target})",
     placeholder="%s",
     ilike="lowered-like",
+    json_path=_json_path,
 )
 
 

@@ -7,6 +7,7 @@ from psycopg.abc import Buffer
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.types.string import TextLoader
 
+from ..filter import PathStep
 from ..join import (
     ARRAY,
     BINARY,
@@ -78,12 +79,23 @@ class _LenientTextLoader(TextLoader):
             return "<undecodable>"
 
 
+def _json_path(expr: str, path: tuple[PathStep, ...]) -> tuple[str, list[str]]:
+    """`(col -> %s::text -> %s::int ->> %s::text)`: one bind per step; the
+    cast picks the key or index form of the operator, on json and jsonb alike."""
+    parts = [
+        f" {'->>' if i == len(path) - 1 else '->'} %s::{'int' if isinstance(s, int) else 'text'}"
+        for i, s in enumerate(path)
+    ]
+    return f"({expr}{''.join(parts)})", [str(s) for s in path]
+
+
 _JOIN_DIALECT = Dialect(
     quote=quote_ident,
     cast_text=lambda expr: f"{expr}::text",
     cast_param=lambda ph, target: f"{ph}::{target}",
     placeholder="%s",
     ilike="native",
+    json_path=_json_path,
 )
 
 

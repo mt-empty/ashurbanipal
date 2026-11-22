@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeGuard, get_args
 
 MAX_FILTER_BYTES = 8192
 MAX_CONDITIONS = 10
 MAX_IN_ITEMS = 1000
+MAX_PATH_STEPS = 8
+MAX_PATH_KEY_BYTES = 255
+MAX_PATH_INDEX = 2**31 - 1
+
+# One step of a condition's path into a JSON column: a key, or an array index.
+type PathStep = str | int
 
 # Wire operators must come from these allow-lists before reaching SQL (spec/protocol.md §5.4.2).
 type NullOp = Literal["IS NULL", "IS NOT NULL"]
@@ -22,7 +28,7 @@ LIST_OPS: frozenset[str] = frozenset(get_args(ListOp.__value__))
 # LIKE/ILIKE always compare the text cast, whatever the column's class.
 PATTERN_OPS: frozenset[str] = frozenset({"LIKE", "ILIKE"})
 VALID_LOGIC = {"AND", "OR"}
-_CONDITION_FIELDS = {"logic", "not", "column", "op", "value"}
+_CONDITION_FIELDS = {"logic", "not", "column", "op", "value", "path"}
 
 
 def _is_null_op(op: str) -> TypeGuard[NullOp]:
@@ -56,6 +62,7 @@ class _ConditionBase:
     not_: bool = False
     # Table position, accepted only by `parse_for_join` (spec/protocol.md §5.11.3).
     join: int | None = None
+    path: tuple[PathStep, ...] | None = None
 
 
 # Each class checks its op when built as well, since a host's DbSource code may not be type-checked.
@@ -95,6 +102,29 @@ class ListComparison(_ConditionBase):
 
 # A backend narrows on the class before binding, so a value is never missing.
 Condition = NullCheck | Comparison | ListComparison
+
+
+def path_error(path: object) -> str | None:
+    """Why `path` is not a valid path (spec/protocol.md §5.4.2), or None. Keys
+    a path string could not hold literally are refused, so no dialect escapes one."""
+    if not isinstance(path, (list, tuple)) or not 1 <= len(path) <= MAX_PATH_STEPS:
+        return f"path needs an array of 1 to {MAX_PATH_STEPS} steps"
+    for step in path:
+        if isinstance(step, str):
+            if not 1 <= len(step.encode("utf-8")) <= MAX_PATH_KEY_BYTES:
+                return f"path key must be 1 to {MAX_PATH_KEY_BYTES} bytes"
+            if any(c in '"\\' or c < " " for c in step):
+                return f"path key {step!r} contains a quote, a backslash or a control character"
+        elif isinstance(step, bool) or not isinstance(step, (int, float)):
+            return "a path step must be a key string or an index"
+        elif (isinstance(step, float) and not step.is_integer()) or not 0 <= step <= MAX_PATH_INDEX:
+            return f"path index {step!r} is not a whole number from 0 to {MAX_PATH_INDEX}"
+    return None
+
+
+def path_steps(path: Sequence[Any]) -> tuple[PathStep, ...]:
+    """A path `path_error` accepted, with each index as an int."""
+    return tuple(s if isinstance(s, str) else int(s) for s in path)
 
 
 def condition_values(cond: Condition) -> tuple[str, ...]:
@@ -171,6 +201,12 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
         if join is not None and (not isinstance(join, int) or isinstance(join, bool) or join < 0):
             raise FilterError(f'condition {i} has an invalid "join" position')
 
+        path = None
+        if raw_cond.get("path") is not None:
+            if (why := path_error(raw_cond["path"])) is not None:
+                raise FilterError(f"condition {i}: {why}")
+            path = path_steps(raw_cond["path"])
+
         op = raw_cond.get("op")
         value = raw_cond.get("value")
         if not isinstance(op, str):
@@ -178,17 +214,21 @@ def _parse(raw: str, *, allow_join: bool) -> list[Condition]:
         if _is_null_op(op):
             if value is not None:
                 raise FilterError(f"op {op!r} takes no value")
-            conditions.append(NullCheck(column=column, op=op, logic=logic, not_=not_, join=join))
+            conditions.append(NullCheck(column=column, op=op, logic=logic, not_=not_, join=join, path=path))
         elif _is_value_op(op):
             if not isinstance(value, str):
                 raise FilterError(f"op {op!r} requires a string value")
-            conditions.append(Comparison(column=column, op=op, logic=logic, not_=not_, join=join, value=value))
+            conditions.append(
+                Comparison(column=column, op=op, logic=logic, not_=not_, join=join, path=path, value=value)
+            )
         elif _is_list_op(op):
             if (why := list_shape_error(op, value)) is not None:
                 raise FilterError(f"condition {i}: {why}")
             assert isinstance(value, list)
             conditions.append(
-                ListComparison(column=column, op=op, logic=logic, not_=not_, join=join, value=tuple(value))
+                ListComparison(
+                    column=column, op=op, logic=logic, not_=not_, join=join, path=path, value=tuple(value)
+                )
             )
         else:
             raise FilterError(f"condition {i} has invalid op {op!r}")

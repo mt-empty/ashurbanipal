@@ -365,3 +365,13 @@ def test_too_many_bound_values_is_a_filter_error() -> None:
     params = tuple(str(i) for i in range(1000))
     with pytest.raises(FilterParseError, match="1000 values"):
         _execute_filtered(conn.cursor(), f"select 1 where 1 in ({', '.join('?' * 1000)})", params)
+
+
+def test_a_sqlite_without_json_functions_makes_a_path_filter_a_filter_error() -> None:
+    # Stands in for a system SQLite built without JSON1: the function is missing.
+    conn = sqlite3.connect(":memory:")
+    sql = "select 1 where json_nope('{}') and json_valid('{}')"
+    with pytest.raises(FilterParseError, match="no JSON functions"):
+        _execute_filtered(conn.cursor(), sql, ())
+    with pytest.raises(sqlite3.OperationalError):
+        _execute_filtered(conn.cursor(), "select json_nope('{}')", ())

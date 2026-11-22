@@ -19,6 +19,8 @@ _STRUCTURAL = "structural"
 
 
 def _kind(kind: str) -> str:
+    if kind == "path_not_json":  # the builder's own invalid_filter
+        return "invalid_value"
     return kind if kind in ("unknown_column", "invalid_value") else _STRUCTURAL
 
 
