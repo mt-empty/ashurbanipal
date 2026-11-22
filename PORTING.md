@@ -421,7 +421,11 @@ port's source, once per port, before it's added to the registry.
    black-box HTTP testing can't prove a negative. Requires an explicit
    query-construction code review: every identifier is allow-list-checked
    against the live schema, every value is bound, nothing is ever
-   concatenated.
+   concatenated. A condition's JSON `path` is part of this: each key and
+   index is bound (or goes into one bound path string), keys that would
+   need escaping are rejected rather than escaped, and the port has no
+   escaping routine for them (`docs/adapter-decisions.md`, JSON path
+   conditions).
 7. **Catalog SQL is diffed against `postgres.rs`, not independently
    "reimplemented."** The `information_schema`/`pg_stats` queries are
    hand-copied per language, in each language's own SQL dialect quirks.
