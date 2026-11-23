@@ -1,4 +1,4 @@
-import type { FilterCondition, FilterOp } from "../core/types.js";
+import type { FilterCondition, FilterOp, PathStep } from "../core/types.js";
 
 // ==== Filter DSL parser (box text → wire AST) ====
 // The single canonical implementation of spec/filter-dsl.md — no backend
@@ -9,6 +9,10 @@ import type { FilterCondition, FilterOp } from "../core/types.js";
 // input, same convention the DSL-era backend parser reported.
 const FILTER_MAX_DSL_BYTES = 1024;
 const FILTER_MAX_CONDITIONS = 10;
+// spec/protocol.md §5.4.2: the server refuses anything past these, so the parser does too.
+const PATH_MAX_STEPS = 8;
+const PATH_MAX_KEY_BYTES = 255;
+const PATH_MAX_INDEX = 2 ** 31 - 1;
 
 const utf8 = new TextEncoder();
 
@@ -37,7 +41,23 @@ class FilterDslError extends Error {
   }
 }
 
-type SimpleCondition = { column: string; join?: number; op: FilterOp; value?: string | string[]; not?: boolean };
+type ColumnRef = { column: string; join?: number; path?: PathStep[] };
+type SimpleCondition = ColumnRef & { op: FilterOp; value?: string | string[]; not?: boolean };
+
+// Why a key cannot go in a path (spec/protocol.md §5.4.2 refuses it), or null when it can.
+function badPathKey(key: string): string | null {
+  if (key === "") return "a key can't be empty";
+  if (/["\\]/.test(key)) return "a key can't contain \" or \\";
+  for (const c of key) if (c < " ") return "a key can't contain a control character";
+  if (utf8.encode(key).length > PATH_MAX_KEY_BYTES) return `a key is at most ${PATH_MAX_KEY_BYTES} bytes`;
+  return null;
+}
+
+// The arrow at `i` (`->>` before `->`, so `a->>b` is one arrow), as its length; 0 if none.
+function arrowAt(text: string, i: number): number {
+  if (text.startsWith("->>", i)) return 3;
+  return text.startsWith("->", i) ? 2 : 0;
+}
 
 // `aliases` are a join view's table aliases in position order (spec/filter-dsl.md
 // §3): qualified columns resolve against them and every condition carries its
@@ -122,12 +142,12 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
     if (name === "") throw err("empty table alias", start);
     return name;
   };
-  const parseColumn = (): { column: string; join?: number } => {
+  const parseColumnName = (): ColumnRef => {
     const start = pos;
     const quoted = aliases !== undefined && peek() === '"';
     const first = quoted ? parseQuotedQualifier() : parseName();
     if (!quoted && peek() !== ".") return { column: first, ...(aliases ? { join: 0 } : {}) };
-    if (!aliases) throw err("qualified column names are only allowed in a join view", start);
+    if (!aliases) throw err("qualified column names are only allowed in a join view; a JSON key takes ->", start);
     if (peek() !== ".") throw err("expected . after the table alias", pos);
     pos += 1;
     const column = parseName();
@@ -156,6 +176,58 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
       }
     }
     return value;
+  };
+  const parsePathStep = (): PathStep => {
+    const start = pos;
+    const c = peek();
+    if (c === "'") {
+      const key = parseQuotedValue();
+      const bad = badPathKey(key);
+      if (bad) throw err(bad, start);
+      return key;
+    }
+    if (c !== null && c >= "0" && c <= "9") {
+      while (/^[0-9]$/.test(peek() ?? "")) pos += 1;
+      const index = Number(input.slice(start, pos));
+      if (index > PATH_MAX_INDEX) throw err(`an index is at most ${PATH_MAX_INDEX}`, start);
+      return index;
+    }
+    if (c === null || !/^[a-zA-Z_]$/.test(c)) throw err("expected a key or an index after ->", start);
+    return parseName();
+  };
+  // `before` is the column and path up to the misplaced spaces; the hint names the step after them.
+  const spacesError = (before: string, at: number, stepAt: number): FilterDslError => {
+    const step = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|'(?:[^']|'')*')/.exec(input.slice(stepAt));
+    return err(`remove the spaces around ->${step ? `: write ${before}->${step[0]}` : ""}`, at);
+  };
+  // A column with its path; no whitespace inside, the same rule as the alias dot.
+  const parseColumn = (): ColumnRef => {
+    const columnStart = pos;
+    const ref = parseColumnName();
+    const path: PathStep[] = [];
+    for (;;) {
+      const arrowStart = pos;
+      const arrow = arrowAt(input, pos);
+      if (arrow === 0) {
+        skipWsOptional();
+        const spaced = pos > arrowStart ? arrowAt(input, pos) : 0;
+        if (spaced > 0) {
+          const at = pos;
+          pos += spaced;
+          skipWsOptional();
+          throw spacesError(input.slice(columnStart, arrowStart), at, pos);
+        }
+        pos = arrowStart;
+        if (peek() === "[" || input.startsWith("#>", pos)) throw err("write a JSON path with ->", pos);
+        break;
+      }
+      pos += arrow;
+      skipWsOptional();
+      if (pos > arrowStart + arrow) throw spacesError(input.slice(columnStart, arrowStart), pos, pos);
+      if (path.length === PATH_MAX_STEPS) throw err(`a path has at most ${PATH_MAX_STEPS} steps`, pos);
+      path.push(parsePathStep());
+    }
+    return path.length > 0 ? { ...ref, path } : ref;
   };
   // AND/OR/NOT are always keywords, never bare values — quote them to use
   // as a literal.
@@ -220,7 +292,7 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
   // Speculatively tries the word-operator branches (IS [NOT] NULL, [NOT] IN,
   // [NOT] BETWEEN) and rewinds to right after the column if none applies.
   const parseSimpleCondition = (): SimpleCondition => {
-    const { column, join } = parseColumn();
+    const ref = parseColumn();
     const afterColumn = pos;
     const wsChar = peek();
     if (wsChar !== null && isWs(wsChar)) {
@@ -230,20 +302,20 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
         const isNot = consumeKeyword("NOT");
         if (isNot) skipWsRequired();
         if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
-        return { column, join, op: isNot ? "IS NOT NULL" : "IS NULL" };
+        return { ...ref, op: isNot ? "IS NOT NULL" : "IS NULL" };
       }
       const notStart = pos;
       const negated = consumeKeyword("NOT");
       if (negated) skipWsRequired();
       const wordOp = (): SimpleCondition | null => {
-        if (consumeKeyword("IN")) return { column, join, op: "IN", value: parseList() };
+        if (consumeKeyword("IN")) return { ...ref, op: "IN", value: parseList() };
         if (!consumeKeyword("BETWEEN")) return null;
         skipWsRequired();
         const lo = parseBound();
         skipWsRequired();
         if (!consumeKeyword("AND")) throw err("expected AND between the BETWEEN bounds", pos);
         skipWsRequired();
-        return { column, join, op: "BETWEEN", value: [lo, parseBound()] };
+        return { ...ref, op: "BETWEEN", value: [lo, parseBound()] };
       };
       const simple = wordOp();
       if (simple) return negated ? { ...simple, not: true } : simple;
@@ -253,7 +325,7 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
     skipWsOptional();
     const op = parseOperator();
     skipWsOptional();
-    return { column, join, op, value: parseValue() };
+    return { ...ref, op, value: parseValue() };
   };
 
   const conditions: FilterCondition[] = [];
@@ -275,6 +347,7 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
       ...(not ? { not: true } : {}),
       column: simple.column,
       ...(simple.join !== undefined ? { join: simple.join } : {}),
+      ...(simple.path ? { path: simple.path } : {}),
       op: simple.op,
       ...(simple.value !== undefined ? { value: simple.value } : {}),
     };
@@ -332,6 +405,32 @@ export function eqClause(column: string, raw: string | null): string | null {
   if (filterTooLong(raw)) return null;
   const clause = filterClause(column, "=", raw);
   return filterTooLong(clause) ? null : clause;
+}
+
+// A column with its path as the box writes it: a bare name, digits for an
+// index, else a quoted key. Null when a key can't be written or the path is too deep.
+export function pathText(column: string, path: readonly PathStep[]): string | null {
+  if (path.length > PATH_MAX_STEPS) return null;
+  let text = column;
+  for (const step of path) {
+    const written = pathStepText(step);
+    if (written === null) return null;
+    text += `->${written}`;
+  }
+  return text;
+}
+
+// One path step as the box writes it, or null for a key it can't hold.
+export function pathStepText(step: PathStep): string | null {
+  if (typeof step === "number") return String(step);
+  if (badPathKey(step)) return null;
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(step) ? step : quoted(step);
+}
+
+// eqClause for a value inside a JSON column.
+export function pathEqClause(column: string, path: readonly PathStep[], raw: string | null): string | null {
+  const lhs = pathText(column, path);
+  return lhs === null ? null : eqClause(lhs, raw);
 }
 
 // AND of `column = value`: the composite-key drill-in from referenced-by.

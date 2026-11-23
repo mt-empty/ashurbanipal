@@ -47,6 +47,9 @@
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
   /* Transient wash on cells whose value changed since the last refresh. */
   --cell-changed-bg: light-dark(#ddebfb, #1d3047);
+  /* A JSON path's keys in the filter box, and the wash on the member a path filter matched. */
+  --filter-key: light-dark(#9a5b13, #e0a96d);
+  --json-match-bg: light-dark(#f6e7cf, #4a3820);
   /* The scroller's layers, lowest first. #chrome is on top at rest and drops
      to the header's level once the header pins (features/sticky-header.ts),
      where the header wins by coming later: the filter's suggestion list
@@ -360,6 +363,9 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 /* Same fade on a changed cell. It paints over the row's hover background
    while it lasts; grid.ts drops the class once the fade ends. */
 tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
+mark.json-match { background: var(--json-match-bg); color: inherit; border-radius: 3px; padding: 0 2px; }
+/* The same member marked in the cell popup's and record view's trees. */
+.json-line.json-match, .json-node.json-match { background: var(--json-match-bg); border-radius: 3px; }
 @keyframes cell-changed-fade { from { background: var(--cell-changed-bg); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) {
   tbody tr.row-new { animation: none; background: var(--row-new-bg); }
@@ -392,6 +398,8 @@ tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
 .t-op { color: var(--text-muted); }
 .t-keyword { color: var(--type-uuid); }
 .t-value { color: var(--json-number); }
+.t-arrow { color: var(--text-muted); }
+.t-key { color: var(--filter-key); }
 .t-err { text-decoration: underline wavy var(--danger); text-underline-offset: .2em; }
 /* Forced colors repaint the input's text anyway, so the copy would double it. */
 @media (forced-colors: active) {
@@ -450,6 +458,7 @@ tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
                            color: inherit; padding: 0 .15rem; border-radius: 3px; }
 #protocol-warning button:hover { background: var(--hover); }
 .empty td { text-align: center; opacity: .6; padding: 1rem; }
+.empty-hint { white-space: normal; max-width: 40rem; margin: 0 auto; font-family: inherit; }
 
 /* Small uppercase heading inside dialogs and popovers. */
 .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
@@ -590,6 +599,11 @@ dialog dl .record-acts:hover { opacity: 1; }
    (#cell-pop / dialog dl dd's plain-text case). */
 .json-tree { white-space: normal; }
 .json-line { display: flex; }
+/* A leaf's = and ⧉ show on hover or focus, like a record field's. */
+.json-line:has(> .json-acts):hover { background: var(--hover); border-radius: 4px; }
+.json-acts { display: flex; gap: 2px; margin-left: auto; padding-left: .75rem; opacity: 0; }
+.json-line:hover > .json-acts, .json-acts:focus-within { opacity: .7; }
+.json-acts:hover { opacity: 1; }
 .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
 .json-fold { all: unset; cursor: pointer; flex: none; width: 1rem; text-align: center;
              color: var(--border-strong); transform-origin: 45% 50%; }
@@ -757,7 +771,9 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #filter-suggest button { display: flex; align-items: baseline; width: 100%; box-sizing: border-box; white-space: nowrap;
           background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
-#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#filter-suggest .section-label { margin: 0; padding: .25rem .5rem .1rem; }
+/* The padding keeps an underscore, which sits below the line box, inside the clip. */
+#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-bottom: .15em; }
 /* Pushed to the right edge, so the types of every row line up. */
 #filter-suggest .sg-note { align-self: baseline; margin-left: auto; padding-left: 1.25rem;
           font-family: var(--font-mono); font-size: .75rem; }

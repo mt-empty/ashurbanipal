@@ -5,6 +5,7 @@ import snapshotData from "virtual:demo-snapshot";
 import type { ClassedColumn, FilterCondition, FilterOp } from "../../core/types.js";
 import { FILTER_OPERATORS } from "../../lib/filter-tokens.js";
 import { columnTypeClass } from "../../lib/format.js";
+import { compareText, nodeAt, scanJson } from "../../lib/json-doc.js";
 import { SIBLINGS, SIBLINGS_INSTANCE } from "../siblings.js";
 import { DEMO_ENGINE } from "../sources.js";
 import { type ApiResponse, json, problem } from "../wire.js";
@@ -106,6 +107,15 @@ function matches(col: ClassedColumn, cell: Cell, cond: FilterCondition): boolean
   }
   return cond.not ? !result : result;
 }
+// A path's value as the server compares it: text, NULL when the path misses
+// (spec/protocol.md §5.4.2).
+const TEXT_COLUMN: ClassedColumn = { type: "text", class: "text" };
+function pathCell(cell: Cell, path: readonly (string | number)[]): Cell {
+  const doc = cell === null ? null : scanJson(cell);
+  const node = doc && nodeAt(doc.root, path);
+  return doc && node ? compareText(doc, node) : null;
+}
+
 // AND binds tighter than OR (spec/protocol.md §5.4.2): fold the flat
 // condition list into OR-of-AND groups on each "OR" logic token.
 function matchesFilter(table: SnapshotTable, row: Cell[], conditions: FilterCondition[]): boolean {
@@ -116,7 +126,11 @@ function matchesFilter(table: SnapshotTable, row: Cell[], conditions: FilterCond
     else groups[groups.length - 1].push(c);
   }
   const at = (column: string) => table.columns.findIndex((c) => c.name === column);
-  return groups.some((g) => g.every((c) => matches(table.columns[at(c.column)], row[at(c.column)], c)));
+  const test = (c: FilterCondition): boolean => {
+    const i = at(c.column);
+    return c.path ? matches(TEXT_COLUMN, pathCell(row[i], c.path), c) : matches(table.columns[i], row[i], c);
+  };
+  return groups.some((g) => g.every(test));
 }
 
 function tableData(params: URLSearchParams): ApiResponse {
@@ -137,6 +151,8 @@ function tableData(params: URLSearchParams): ApiResponse {
     for (const c of conditions) {
       if (!VALID_OPS.has(c.op)) return problem(400, "invalid_filter", `unknown filter op: ${c.op}`);
       if (!has(c.column)) return problem(400, "unknown_column", `column ${JSON.stringify(c.column)}`);
+      const col = table.columns.find((col) => col.name === c.column);
+      if (c.path && col?.class !== "json") return problem(400, "invalid_filter", "a path needs a json column");
     }
     rows = rows.filter((r) => matchesFilter(table, r, conditions));
   }

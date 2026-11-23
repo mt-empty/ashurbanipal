@@ -52,8 +52,20 @@ export function showViewNotice(text: string): void {
   renderNote();
 }
 
+// The view and filter offerViewNotice last ran for.
+let offeredFor: string | null = null;
+
+// A plain note offered once per view and filter, so a sort, refresh or other
+// page keeps it or its dismissal. It gives way to any note already up.
+export function offerViewNotice(text: string | null): void {
+  const key = noticeKey(state.view, state.filter);
+  if (key === offeredFor) return;
+  offeredFor = key;
+  if (text !== null && shownFor !== key) showViewNotice(text);
+}
+
 // Called once the boot load settles: whatever the URL asked for that the page
-// did not end up on gets the note. Ends the URL-intent window either way.
+// did not end up on gets the note, over any plain note. Ends the URL-intent window either way.
 export function showBootFallbackNote(): void {
   shownSwaps = swapsFrom(takeUrlIntent(), {
     // A name with nothing to choose from (not in the URL either) is no swap.
@@ -62,6 +74,7 @@ export function showBootFallbackNote(): void {
     filter: state.filter || null,
   });
   if (shownSwaps.length === 0) return;
+  customText = null;
   shownFor = noticeKey(state.view, state.filter);
   $("view-notice").hidden = false;
   renderNote();

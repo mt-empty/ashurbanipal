@@ -107,12 +107,16 @@ export type FilterOp =
   | "IS NULL"
   | "IS NOT NULL";
 
+export type PathStep = string | number;
+
 export interface FilterCondition {
   logic?: "AND" | "OR";
   not?: boolean;
   // Table position in a join view (spec/protocol.md §5.11.3); absent otherwise.
   join?: number;
   column: string;
+  // Steps into a JSON column (spec/protocol.md §5.4.2): a key, or an array index.
+  path?: PathStep[];
   op: FilterOp;
   // A string for most ops; the items for IN, [lo, hi] for BETWEEN.
   value?: string | string[];

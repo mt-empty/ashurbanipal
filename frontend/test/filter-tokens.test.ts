@@ -157,3 +157,55 @@ test("completion inside IN lists and BETWEEN", () => {
   for (const text of ["id N", "id NOT I", "id NOT B", "t BETWEEN 1 A"])
     assert.equal(endsInUnfinishedWord(text), true, text);
 });
+
+test("a path is column, arrows and keys; a space breaks it", () => {
+  assert.deepEqual(kinds("metadata->prefs->>'a b'->0 = x"), [
+    "column:metadata",
+    "arrow:->",
+    "key:prefs",
+    "arrow:->>",
+    "key:'a b'",
+    "arrow:->",
+    "key:0",
+    "op:=",
+    "value:x",
+  ]);
+  assert.deepEqual(kinds("metadata->n>5"), ["column:metadata", "arrow:->", "key:n", "op:>", "value:5"]);
+  assert.deepEqual(kinds("metadata -> role"), ["column:metadata", "plain:->", "plain:role"]);
+  assert.deepEqual(kinds("metadata-> role"), ["column:metadata", "arrow:->", "plain:role"]);
+});
+
+test("completion knows the column and the path steps so far", () => {
+  const at = (text: string) => {
+    const { expect, partial, head, column, path } = completionAt(text);
+    return { expect, partial, head, column, path };
+  };
+  assert.deepEqual(at("metadata->"), {
+    expect: "pathKey",
+    partial: "",
+    head: "metadata->",
+    column: "metadata",
+    path: [],
+  });
+  assert.deepEqual(at("metadata->prefs->th"), {
+    expect: "pathKey",
+    partial: "th",
+    head: "metadata->prefs->",
+    column: "metadata",
+    path: ["prefs"],
+  });
+  assert.deepEqual(at("a = 1 AND doc->arr->0->'it''s' "), {
+    expect: "operator",
+    partial: "",
+    head: "a = 1 AND doc->arr->0->'it''s' ",
+    column: "doc",
+    path: ["arr", 0, "it's"],
+  });
+  assert.deepEqual(at("metadata->role = ad"), {
+    expect: "value",
+    partial: "ad",
+    head: "metadata->role = ",
+    column: "metadata",
+    path: ["role"],
+  });
+});

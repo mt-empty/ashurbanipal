@@ -1,18 +1,17 @@
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $ } from "../core/dom.js";
-import { scopeIdentity, scopeSettled, state, viewKey } from "../core/state.js";
+import { scopeSettled, viewIdentity } from "../core/state.js";
 
 // The scope and view the grid was drawn for; null before the first render.
 let gridKey: string | null = null;
-const stateKey = (): string => JSON.stringify([scopeIdentity(), viewKey(state.view)]);
 
 export function markGridDrawn(): void {
-  gridKey = stateKey();
+  gridKey = viewIdentity();
 }
 
 // The grid shows another view than the one in the state, after a switch that could not wait.
 export function gridIsStale(): boolean {
-  return gridKey !== null && gridKey !== stateKey();
+  return gridKey !== null && gridKey !== viewIdentity();
 }
 
 // A switch that could not wait for its rows (a schema, source or history

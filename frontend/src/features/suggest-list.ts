@@ -13,6 +13,8 @@ export interface Suggestion {
   key?: KeyDescription | null;
   // The row shows greyed and cannot be taken.
   blocked?: boolean;
+  // Accepting it goes straight on to the next part, with no space after it (an object key's `->`).
+  continues?: boolean;
 }
 
 interface SuggestOptions {
@@ -26,10 +28,12 @@ interface SuggestOptions {
   accept: (suggestion: Suggestion, head: string) => void;
   // Runs once the popup is visible, for positioning it.
   place?: () => void;
+  // A muted line above the rows, for a list that needs to say where it comes from.
+  heading?: HTMLElement;
 }
 
 export interface SuggestList {
-  show(matches: Suggestion[], head: string): void;
+  show(matches: Suggestion[], head: string, heading?: string): void;
   close(): void;
   // Bumped on every show and close, so a slow lookup can tell its text has changed.
   token(): number;
@@ -131,9 +135,13 @@ export function createSuggestList(opts: SuggestOptions): SuggestList {
   });
 
   return {
-    show(next, nextHead) {
+    show(next, nextHead, heading) {
       matches = next;
       head = nextHead;
+      if (opts.heading) {
+        opts.heading.textContent = heading ?? "";
+        opts.heading.hidden = !heading;
+      }
       index = -1;
       render();
       popup.hidden = false;

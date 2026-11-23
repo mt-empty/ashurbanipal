@@ -2,13 +2,15 @@ import { $, copyText, el } from "../core/dom.js";
 import { qualifiedTable, state, tableInView, viewKey } from "../core/state.js";
 import type { Column, ConstraintFk, JoinDef, Row, TableRef } from "../core/types.js";
 import { compositeLabel, refTarget } from "../lib/column-key.js";
-import { eqClause } from "../lib/filter-dsl.js";
+import { eqClause, pathEqClause } from "../lib/filter-dsl.js";
 import { columnTypeClass, formatCellValue, rendersAsJson, warnBadJsonCell } from "../lib/format.js";
+import { scanJson } from "../lib/json-doc.js";
 import { recordJson } from "../lib/json-text.js";
-import { renderJsonTree } from "../lib/json-tree.js";
+import { foldDoc, type LeafActions, renderJsonTree } from "../lib/json-tree.js";
 import { copyButton, eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
 import { applyFilter } from "./filter-ui.js";
 import { columnKey, displayName, tableGroups } from "./join-view.js";
+import { matchedPath, numberFilterable } from "./json-path.js";
 import { renderReferencedBy } from "./referenced-by.js";
 import { keyDescriptionOf, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
@@ -37,13 +39,50 @@ function fieldNote(col: Column, compositeFk: ConstraintFk | undefined): string {
   return [col.comment, where].filter(Boolean).join(" · ");
 }
 
-function fieldValue(col: Column, raw: string, row: Row, { meta, act }: RecordContext): HTMLElement {
+// A cell's JSON as a tree, with the members the applied filter matched marked.
+// Throws on text it can't scan (not JSON, or nested past the scan's depth cap);
+// the callers fall back to plain text.
+export function jsonTreeOf(col: Column, raw: string, leafActions?: LeafActions): HTMLElement {
+  const doc = scanJson(raw);
+  if (!doc) throw new SyntaxError("not JSON the tree can draw");
+  return renderJsonTree(foldDoc(doc), { leafActions, isMatched: matchedPath(col, doc) });
+}
+
+// The `=` and ⧉ on each leaf of a class json column's tree; only that class takes
+// a path. `wrap` runs the filter the way the tree's container needs (closing it first).
+export function jsonLeafActions(
+  col: Column,
+  filterName: string,
+  wrap: (run: () => void) => () => void,
+): LeafActions | undefined {
+  if (col.class !== "json") return undefined;
+  return (path, value, scalar) => {
+    // A lone top-level value filters from the field's own =, on the column's text.
+    if (path.length === 0) return [];
+    const acts: Node[] = [];
+    const reads = scalar !== "number" || value === null || numberFilterable(value);
+    const clause = reads ? pathEqClause(filterName, path, value) : null;
+    if (clause !== null) {
+      const eq = eqButton(
+        value === null,
+        wrap(() => applyFilter(clause)),
+      );
+      eq.title = clause;
+      eq.setAttribute("aria-label", `filter by ${clause}`);
+      acts.push(eq);
+    }
+    if (value !== null) acts.push(copyButton(value));
+    return acts;
+  };
+}
+
+function fieldValue(col: Column, raw: string, row: Row, { def, meta, act }: RecordContext): HTMLElement {
   const dd = el("dd");
   if (rendersAsJson(col, raw)) {
     try {
       // Parse and render share one catch: a malformed tree build degrades
       // to plain text the same as unparseable JSON.
-      dd.appendChild(renderJsonTree(JSON.parse(raw)));
+      dd.appendChild(jsonTreeOf(col, raw, jsonLeafActions(col, columnKey(col, def), act)));
       dd.classList.add("json-tree");
     } catch (e) {
       warnBadJsonCell(col, e);
@@ -77,7 +116,9 @@ function nullValue(): HTMLElement {
 
 function fieldActions(col: Column, raw: string | null, { def, act }: RecordContext): HTMLElement {
   const acts = el("span", "record-acts");
-  const eq = eqClause(columnKey(col, def), raw);
+  // A json object or array with members filters from its tree's leaves; any other value keeps the field's own =.
+  const fromTree = raw != null && col.class === "json" && /^\s*[[{]\s*[^\s\]}]/.test(raw);
+  const eq = fromTree ? null : eqClause(columnKey(col, def), raw);
   if (eq !== null)
     acts.appendChild(
       eqButton(

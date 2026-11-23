@@ -1,7 +1,8 @@
 import { $ } from "../core/dom.js";
 import { joinAliases } from "../core/state.js";
 import { filterDslErrorAt } from "../lib/filter-dsl.js";
-import { endsInUnfinishedWord, tokenizeFilterDsl } from "../lib/filter-tokens.js";
+import { endsInUnfinishedWord, type Token, tokenizeFilterDsl } from "../lib/filter-tokens.js";
+import { columnNamed } from "./join-view.js";
 import { attachOverlayHighlight, tokenSpans } from "./overlay-highlight.js";
 
 // A coloured copy of #filter's text drawn behind the transparent-text input, so
@@ -32,7 +33,10 @@ function render(): void {
   let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
   const bad = tokens.find((t) => t.start <= at && at < t.end);
   if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
-  textEl.replaceChildren(...tokenSpans(text, tokens, (t) => t.start <= at && at < t.end));
+  // Only a json column takes a path, which the parser can't know (features/json-path.ts says why on submit).
+  const notJson = (t: Token): boolean =>
+    (t.kind === "arrow" || t.kind === "key") && (columnNamed(t.column)?.class ?? "json") !== "json";
+  textEl.replaceChildren(...tokenSpans(text, tokens, (t) => (t.start <= at && at < t.end) || notJson(t)));
   wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
 }
 
