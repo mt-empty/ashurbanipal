@@ -66,6 +66,35 @@ export function flashIcon(el: HTMLElement, glyph: string): void {
   }, 800);
 }
 
+// execCommand is the only way a script edit joins the field's native undo
+// history, but it types into whatever has focus, so it runs only once the
+// field holds it. On touch screens a focus during a tap can flash the
+// on-screen keyboard, so an unfocused field there just gets its value set.
+export function replaceFieldText(field: HTMLInputElement | HTMLTextAreaElement, text: string): void {
+  if (field.value === text) return;
+  const prior = document.activeElement;
+  if (prior !== field && matchMedia("(pointer: coarse)").matches) {
+    field.value = text;
+    return;
+  }
+  field.focus({ preventScroll: true });
+  if (document.activeElement !== field) {
+    field.value = text;
+    return;
+  }
+  field.select();
+  let ok = false;
+  try {
+    ok = text === "" ? document.execCommand("delete") : document.execCommand("insertText", false, text);
+  } catch {
+    ok = false;
+  }
+  if (!ok || field.value !== text) field.value = text;
+  if (prior === field) return;
+  if (prior instanceof HTMLElement && prior !== document.body) prior.focus({ preventScroll: true });
+  else field.blur();
+}
+
 // ---- per-cell copy (Clipboard API) ----
 export async function copyText(text: string, btn: HTMLElement): Promise<void> {
   const mark = btn.querySelector<HTMLElement>(".copy-icon") ?? btn;

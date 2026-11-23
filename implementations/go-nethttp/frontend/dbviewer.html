@@ -1306,6 +1306,30 @@ function flashIcon(el2, glyph) {
     el2.textContent = rest;
   }, 800);
 }
+function replaceFieldText(field, text) {
+  if (field.value === text) return;
+  const prior = document.activeElement;
+  if (prior !== field && matchMedia("(pointer: coarse)").matches) {
+    field.value = text;
+    return;
+  }
+  field.focus({ preventScroll: true });
+  if (document.activeElement !== field) {
+    field.value = text;
+    return;
+  }
+  field.select();
+  let ok = false;
+  try {
+    ok = text === "" ? document.execCommand("delete") : document.execCommand("insertText", false, text);
+  } catch {
+    ok = false;
+  }
+  if (!ok || field.value !== text) field.value = text;
+  if (prior === field) return;
+  if (prior instanceof HTMLElement && prior !== document.body) prior.focus({ preventScroll: true });
+  else field.blur();
+}
 async function copyText(text, btn) {
   const mark = btn.querySelector(".copy-icon") ?? btn;
   let glyph = "\u2713";
@@ -6568,8 +6592,14 @@ function submitFilter(text) {
   state.offset = 0;
   loadData();
 }
+var prefilling = false;
 function applyFilter(clause) {
-  $("filter").value = clause;
+  prefilling = true;
+  try {
+    replaceFieldText($("filter"), clause);
+  } finally {
+    prefilling = false;
+  }
   submitFilter(clause);
 }
 $("filter-form").onsubmit = (e) => {
@@ -6643,9 +6673,14 @@ var suggest = createSuggestList({
   heading: $("filter-suggest-heading"),
   // A key that continues (an object's `->`) goes straight on to the keys under it.
   accept: (suggestion, head) => {
-    filterInput.value = `${head}${suggestion.insert}${suggestion.continues ? "" : " "}`;
-    filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
     suggest.close();
+    prefilling = true;
+    try {
+      replaceFieldText(filterInput, `${head}${suggestion.insert}${suggestion.continues ? "" : " "}`);
+    } finally {
+      prefilling = false;
+    }
+    filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
     filterInput.focus();
     updateFilterSuggestions();
   },
@@ -6740,6 +6775,7 @@ function suggestPathKeys(ctx) {
   showFilterSuggestions(ctx, rows, heading);
 }
 function updateFilterSuggestions() {
+  if (prefilling) return;
   const input2 = filterInput;
   if (input2.selectionStart !== input2.value.length) {
     suggest.close();
