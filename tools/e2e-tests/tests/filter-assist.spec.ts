@@ -75,6 +75,18 @@ test("Tab accepts the first suggestion", async ({ page }) => {
   await expect(page.locator("#filter")).toHaveValue(`category = ${first} `);
 });
 
+test("undo after accepting a suggestion brings back the part-typed text", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const filter = page.locator("#filter");
+  await filter.fill("stat");
+  await expect(suggestions(page).first()).toBeVisible();
+  await filter.press("Tab");
+  await expect(filter).toHaveValue("status ");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(filter).toHaveValue("stat");
+});
+
 test("Enter submits what is typed even while a value list is open", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "orders");

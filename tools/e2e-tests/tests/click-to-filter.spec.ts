@@ -19,6 +19,26 @@ test("clicking a cell's filter button composes and submits an exact-match filter
     .toBe(true);
 });
 
+test("undo in the filter box brings back what was typed before a cell's filter button", async ({ page }) => {
+  await gotoApp(page);
+  await selectTable(page, "orders");
+  const filter = page.locator("#filter");
+  await filter.fill("status = draft");
+  const firstStatusCell = page.locator("#tbody tr").first().locator('td[data-col="status"]');
+  const value = await firstStatusCell.locator(".cell-text").textContent();
+  await firstStatusCell.hover();
+  await firstStatusCell.locator(".filter-eq").click();
+  await expect(filter).toHaveValue(`status = ${value}`);
+  await expect(filter).not.toBeFocused();
+  await expect(page.locator("#filter-suggest")).toBeHidden();
+
+  await filter.focus();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(filter).toHaveValue("status = draft");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(filter).toHaveValue(`status = ${value}`);
+});
+
 test("clicking a null cell's filter button composes IS NULL", async ({ page }) => {
   await gotoApp(page);
   await selectTable(page, "users");

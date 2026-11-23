@@ -1,6 +1,6 @@
 import { loadData } from "../bootstrap/reload.js";
 import { api } from "../core/api.js";
-import { $, el, reportError } from "../core/dom.js";
+import { $, el, replaceFieldText, reportError } from "../core/dom.js";
 import {
   columnTable,
   getLastPayload,
@@ -45,8 +45,16 @@ export function submitFilter(text: string): void {
   loadData();
 }
 
+// Set while a prefill or accepted suggestion writes the box: its focus and input event are not the user typing.
+let prefilling = false;
+
 export function applyFilter(clause: string): void {
-  $<HTMLInputElement>("filter").value = clause;
+  prefilling = true;
+  try {
+    replaceFieldText($<HTMLInputElement>("filter"), clause);
+  } finally {
+    prefilling = false;
+  }
   submitFilter(clause);
 }
 
@@ -152,9 +160,14 @@ const suggest = createSuggestList({
   heading: $("filter-suggest-heading"),
   // A key that continues (an object's `->`) goes straight on to the keys under it.
   accept: (suggestion, head) => {
-    filterInput.value = `${head}${suggestion.insert}${suggestion.continues ? "" : " "}`;
-    filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
     suggest.close();
+    prefilling = true;
+    try {
+      replaceFieldText(filterInput, `${head}${suggestion.insert}${suggestion.continues ? "" : " "}`);
+    } finally {
+      prefilling = false;
+    }
+    filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
     filterInput.focus();
     updateFilterSuggestions();
   },
@@ -287,6 +300,7 @@ function suggestPathKeys(ctx: Completion): void {
 }
 
 function updateFilterSuggestions(): void {
+  if (prefilling) return;
   const input = filterInput;
   if (input.selectionStart !== input.value.length) {
     suggest.close();
