@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { eqClause, filterTooLong, parseFilterDsl, quoteFilterValue, quoteListItem } from "../src/lib/filter-dsl.ts";
+import {
+  eqClause,
+  filterTooLong,
+  parseFilterDsl,
+  pathEqClause,
+  pathText,
+  quoteFilterValue,
+  quoteListItem,
+} from "../src/lib/filter-dsl.ts";
 
 // The single canonical DSL-text -> wire-AST parser (spec/filter-dsl.md). Cases
 // come from spec/fixtures/parser-tests.json, generated from the doc's §5
@@ -80,4 +88,57 @@ test("eqClause writes = or IS NULL, and nothing past the limit", () => {
   assert.equal(eqClause("status", null), "status IS NULL");
   assert.equal(eqClause("status", "x".repeat(1025)), null);
   assert.equal(eqClause("status", "é".repeat(600)), null);
+});
+
+test("pathText writes bare keys, digits for an index, and quotes the rest", () => {
+  assert.equal(pathText("metadata", ["prefs", "theme"]), "metadata->prefs->theme");
+  assert.equal(pathText("doc", ["arr", 0, "user id"]), "doc->arr->0->'user id'");
+  assert.equal(pathText("doc", ["0", "it's", "ü", "$", "a.b"]), "doc->'0'->'it''s'->'ü'->'$'->'a.b'");
+});
+
+test("pathText round-trips through the parser", () => {
+  const paths: (string | number)[][] = [
+    ["a"],
+    ["arr", 3, "x y"],
+    ["0"],
+    ["it's"],
+    ["*", ".", "["],
+    ["a", "b", "c", "d", "e", "f", "g", "h"],
+  ];
+  for (const path of paths) {
+    const parsed = parseFilterDsl(`${pathText("doc", path)} = 1`);
+    assert.deepEqual(parsed[0].path, path);
+  }
+});
+
+test("pathText refuses a key the box can't write, and a path past 8 steps", () => {
+  for (const key of ['say "hi"', "a\\b", "a\u0001", "", "k".repeat(256)])
+    assert.equal(pathText("doc", [key]), null, key);
+  assert.equal(pathText("doc", ["a", "b", "c", "d", "e", "f", "g", "h", "i"]), null);
+});
+
+test("pathEqClause writes = or IS NULL on the path", () => {
+  assert.equal(pathEqClause("metadata", ["prefs", "theme"], "dark"), "metadata->prefs->theme = dark");
+  assert.equal(
+    pathEqClause("metadata", ["beta_features", 0], "new dashboard"),
+    "metadata->beta_features->0 = 'new dashboard'",
+  );
+  assert.equal(pathEqClause("o.metadata", ["x"], null), "o.metadata->x IS NULL");
+  assert.equal(pathEqClause("doc", ['"'], "v"), null);
+});
+
+test("the parser's path errors point where BU underlines", () => {
+  const errorAt = (input: string) => {
+    try {
+      parseFilterDsl(input);
+    } catch (e) {
+      return (e as Error).message;
+    }
+    return null;
+  };
+  assert.equal(errorAt("metadata -> role = admin"), "remove the spaces around ->: write metadata->role at position 9");
+  assert.equal(errorAt("metadata-> role = admin"), "remove the spaces around ->: write metadata->role at position 11");
+  assert.equal(errorAt("p->a->b->c->d->e->f->g->h->i = 1"), "a path has at most 8 steps at position 27");
+  assert.equal(errorAt(`metadata->'say "hi"' = yes`), "a key can't contain \" or \\ at position 10");
+  assert.equal(errorAt('data["k"] = 1'), "write a JSON path with -> at position 4");
 });

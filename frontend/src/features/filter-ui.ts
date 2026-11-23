@@ -13,11 +13,13 @@ import {
   tableLabelOf,
 } from "../core/state.js";
 import type { Column, CommonValue, FilterCondition, TableRef } from "../core/types.js";
-import { filterClause, parseFilterDsl, quoteFilterValue, quoteListItem } from "../lib/filter-dsl.js";
-import { type Completion, completionAt, expectsValue, optionsFor } from "../lib/filter-tokens.js";
+import { filterClause, parseFilterDsl, pathStepText, quoteFilterValue, quoteListItem } from "../lib/filter-dsl.js";
+import { type Completion, completionAt, expectsValue, optionsFor, stepOf } from "../lib/filter-tokens.js";
 import { truncateType } from "../lib/join-types.js";
+import { type Doc, keysAt, valuesAt } from "../lib/json-doc.js";
 import { refKey, tableParams } from "../lib/table-ref.js";
-import { columnKey } from "./join-view.js";
+import { columnKey, columnNamed } from "./join-view.js";
+import { docsOf, numberFilterable, pathColumnProblem } from "./json-path.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
 import { keyDescriptionOf, tableMeta } from "./table-meta.js";
 
@@ -28,6 +30,11 @@ export function submitFilter(text: string): void {
       ast = parseFilterDsl(text, joinAliases());
     } catch (e) {
       reportError(e);
+      return;
+    }
+    const problem = pathColumnProblem(ast);
+    if (problem) {
+      reportError(new Error(problem));
       return;
     }
   }
@@ -142,8 +149,10 @@ const suggest = createSuggestList({
   popup: $("filter-suggest"),
   list: $("filter-suggest-list"),
   idPrefix: "filter-suggest",
+  heading: $("filter-suggest-heading"),
+  // A key that continues (an object's `->`) goes straight on to the keys under it.
   accept: (suggestion, head) => {
-    filterInput.value = `${head}${suggestion.insert} `;
+    filterInput.value = `${head}${suggestion.insert}${suggestion.continues ? "" : " "}`;
     filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
     suggest.close();
     filterInput.focus();
@@ -221,8 +230,9 @@ function commonValuesFor(table: TableRef, column: string): Promise<string[]> {
   return values;
 }
 
-function showFilterSuggestions(ctx: Completion, all: Suggestion[]): void {
-  const partial = ctx.partial.toLowerCase();
+function showFilterSuggestions(ctx: Completion, all: Suggestion[], heading?: string): void {
+  // A quoted key is matched on what is inside the quote.
+  const partial = (ctx.expect === "pathKey" ? String(stepOf(ctx.partial)) : ctx.partial).toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
   // A column also matches mid-name (`at` finds created_at), after the prefix matches.
   if (ctx.expect === "column" && partial !== "") {
@@ -231,18 +241,49 @@ function showFilterSuggestions(ctx: Completion, all: Suggestion[]): void {
     );
   }
   // Nothing left to complete: a lone row identical to what is typed, except columns.
-  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
+  const done =
+    matches.length === 1 &&
+    matches[0].label.toLowerCase() === partial &&
+    ctx.expect !== "column" &&
+    ctx.expect !== "pathKey";
   if (matches.length === 0 || done) {
     suggest.close();
     return;
   }
-  suggest.show(matches, ctx.head);
+  suggest.show(matches, ctx.head, heading);
 }
 
-// In a join view a plain name is the start table's column (spec/filter-dsl.md).
-function columnNamed(name: string | null): Column | undefined {
-  if (name === null) return undefined;
-  return getLastPayload()?.columns.find((c) => columnKey(c) === name || (c.join === 0 && c.column === name));
+// A JSON column's parsed cells on the page, which are all a path suggestion has:
+// a database keeps no statistics inside JSON.
+function loadedDocs(column: string | null): { docs: Doc[]; rows: number } | null {
+  const col = columnNamed(column);
+  const data = getLastPayload();
+  if (col?.class !== "json" || !data) return null;
+  return { docs: docsOf(data, col), rows: data.rows.length };
+}
+
+// Keys (or indexes) one step down. A key holding an object or array goes on with ->.
+function suggestPathKeys(ctx: Completion): void {
+  const loaded = loadedDocs(ctx.column);
+  if (!loaded) return;
+  const keys = keysAt(loaded.docs, ctx.path);
+  const under = ctx.path.at(-1);
+  const isArray = keys.length > 0 && keys.every((k) => typeof k.step === "number");
+  const heading =
+    under === undefined
+      ? `keys in ${loaded.rows} loaded rows`
+      : isArray
+        ? `${String(under)} is an array`
+        : `keys under ${String(under)}`;
+  const rows: Suggestion[] = [];
+  for (const k of keys) {
+    const step = pathStepText(k.step);
+    if (step === null) continue; // a key the box can't write
+    const deeper = k.kind === "object" || k.kind === "array";
+    const note = typeof k.step === "number" ? `${k.count} rows` : `${k.kind} · ${k.count}`;
+    rows.push({ label: String(k.step), insert: deeper ? `${step}->` : step, note, continues: deeper });
+  }
+  showFilterSuggestions(ctx, rows, heading);
 }
 
 function updateFilterSuggestions(): void {
@@ -253,7 +294,7 @@ function updateFilterSuggestions(): void {
   }
   const ctx = completionAt(input.value);
   suggest.close();
-  if (ctx.partial.startsWith("'")) return; // inside a quoted value
+  if (ctx.partial.startsWith("'") && ctx.expect !== "pathKey") return; // inside a quoted value
   const token = suggest.token();
   const plain = (labels: readonly string[]): Suggestion[] => labels.map((label) => ({ label, insert: label }));
   if (ctx.expect === "column") {
@@ -268,6 +309,8 @@ function updateFilterSuggestions(): void {
         key: keyDescriptionOf(c, meta),
       })),
     );
+  } else if (ctx.expect === "pathKey") {
+    suggestPathKeys(ctx);
   } else if (ctx.expect === "operator") {
     if (columnNamed(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
@@ -276,6 +319,19 @@ function updateFilterSuggestions(): void {
     showFilterSuggestions(ctx, plain(optionsFor(ctx.expect)));
   } else if (expectsValue(ctx.expect)) {
     const quote = ctx.expect === "listItem" ? quoteListItem : quoteFilterValue;
+    if (ctx.path.length > 0) {
+      const loaded = loadedDocs(ctx.column);
+      if (!loaded) return;
+      const rows = valuesAt(loaded.docs, ctx.path)
+        .filter((v) => !v.number || numberFilterable(v.text))
+        .map((v) => ({
+          label: v.text,
+          insert: quote(v.text),
+          note: String(v.count),
+        }));
+      showFilterSuggestions(ctx, rows, `values in ${loaded.rows} loaded rows`);
+      return;
+    }
     const col = columnNamed(ctx.column);
     const source = col && commonValueSource(col);
     if (source) {

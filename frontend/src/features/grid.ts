@@ -2,6 +2,7 @@ import { loadData } from "../bootstrap/reload.js";
 import { tableEl } from "../bootstrap/table-focus.js";
 import { $, copyText, el, qs } from "../core/dom.js";
 import {
+  getAppliedFilterAst,
   hiddenColumns,
   joinInView,
   noCountsFor,
@@ -20,7 +21,6 @@ import {
   rendersAsJson,
   warnBadJsonCell,
 } from "../lib/format.js";
-import { type JsonValue, renderJsonTree } from "../lib/json-tree.js";
 import { type RowChanges, rowKey } from "../lib/row-diff.js";
 import { eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
 import { columnMinWidth } from "./column-widths.js";
@@ -28,7 +28,8 @@ import { applyFilter, commonValueSource, commonValuesButton } from "./filter-ui.
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
 import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands, tableGroups } from "./join-view.js";
-import { openRecordView } from "./record-view.js";
+import { caseOnlyHint, matchSpans } from "./json-path.js";
+import { jsonLeafActions, jsonTreeOf, openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
 import { keyDescriptionOf, type TableMeta, tableMeta } from "./table-meta.js";
 import { navigateWithSeededFilter } from "./view-history.js";
@@ -125,7 +126,14 @@ function renderEmptyState(columnCount: number): void {
   const join = joinInView();
   if (join && state.offset === 0 && state.filter === "" && join.def.joins.some((j) => j.type === "inner")) {
     td.appendChild(buildEmptyJoin(switchToLeftJoin));
-  } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  } else {
+    const hint = state.offset === 0 ? caseOnlyHint(getAppliedFilterAst()) : null;
+    if (hint) {
+      const p = el("p", "empty-hint");
+      p.append(el("strong", undefined, "No rows match."), ` ${hint}`);
+      td.appendChild(p);
+    } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  }
   emptyRow.appendChild(td);
   $("tbody").replaceChildren(emptyRow);
 }
@@ -142,7 +150,11 @@ function showCellPop(e: MouseEvent, text: string, col: Column): void {
   let isJson = rendersAsJson(col, text);
   if (isJson) {
     try {
-      $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text) as JsonValue));
+      const close = (run: () => void) => () => {
+        $("cell-pop").hidePopover();
+        run();
+      };
+      $("cell-json").replaceChildren(jsonTreeOf(col, text, jsonLeafActions(col, columnKey(col), close)));
     } catch (err) {
       isJson = false;
       warnBadJsonCell(col, err);
@@ -160,6 +172,21 @@ function showCellPop(e: MouseEvent, text: string, col: Column): void {
 interface CellContext {
   hidden: Set<string>;
   meta: TableMeta | undefined;
+}
+
+// A JSON cell with the members a path filter matched marked, so it shows why the row matched.
+// A cell with edge whitespace keeps formatCellValue's marks for it instead.
+function washedJson(col: Column, raw: string): Node {
+  const spans = raw.trim() === raw ? matchSpans(col, raw) : [];
+  if (spans.length === 0) return formatCellValue(col, raw);
+  const out = document.createDocumentFragment();
+  let at = 0;
+  for (const { start, end } of spans) {
+    out.append(raw.slice(at, start), el("mark", "json-match", raw.slice(start, end)));
+    at = end;
+  }
+  out.append(raw.slice(at));
+  return out;
 }
 
 // A real <button> as the click target so it's keyboard-focusable and
@@ -203,7 +230,7 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext, changed
   const cellText = qs<HTMLElement>(td, ".cell-text");
   const btn = qs<HTMLElement>(td, ".copy");
   const filterBtn = qs<HTMLElement>(td, ".filter-eq");
-  cellText.appendChild(formatCellValue(col, raw));
+  cellText.appendChild(col.class === "json" ? washedJson(col, raw) : formatCellValue(col, raw));
   btn.onclick = (e) => {
     e.stopPropagation();
     copyText(raw, btn);

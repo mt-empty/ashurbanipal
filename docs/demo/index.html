@@ -123,6 +123,121 @@
     return typeNameClass(col.type) ?? FROM_COLUMN_CLASS[col.class] ?? null;
   }
 
+  // src/lib/json-doc.ts
+  var MAX_DEPTH = 1e3;
+  var NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+  var ScanError = class extends Error {
+  };
+  function scanJson(text) {
+    let i = 0;
+    const ws = () => {
+      while (i < text.length && (text[i] === " " || text[i] === "\n" || text[i] === "\r" || text[i] === "	")) i++;
+    };
+    const string = () => {
+      const start = i;
+      let escaped = false;
+      i++;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === "\\") escaped = true;
+        i += text[i] === "\\" ? 2 : 1;
+      }
+      if (i >= text.length) throw new ScanError();
+      i++;
+      const value2 = escaped ? JSON.parse(text.slice(start, i)) : text.slice(start + 1, i - 1);
+      return { value: value2, start };
+    };
+    const literal = (word, kind) => {
+      if (!text.startsWith(word, i)) throw new ScanError();
+      const start = i;
+      i += word.length;
+      return { kind, start, end: i };
+    };
+    const value = (depth) => {
+      if (depth > MAX_DEPTH) throw new ScanError();
+      ws();
+      const start = i;
+      const c = text[i];
+      if (c === "{") {
+        i++;
+        const entries = [];
+        ws();
+        if (text[i] === "}") i++;
+        else
+          for (; ; ) {
+            ws();
+            if (text[i] !== '"') throw new ScanError();
+            const key = string();
+            ws();
+            if (text[i] !== ":") throw new ScanError();
+            i++;
+            entries.push({ key: key.value, keyStart: key.start, node: value(depth + 1) });
+            ws();
+            if (text[i] === ",") i++;
+            else if (text[i] === "}") {
+              i++;
+              break;
+            } else throw new ScanError();
+          }
+        return { kind: "object", entries, start, end: i };
+      }
+      if (c === "[") {
+        i++;
+        const items = [];
+        ws();
+        if (text[i] === "]") i++;
+        else
+          for (; ; ) {
+            items.push(value(depth + 1));
+            ws();
+            if (text[i] === ",") i++;
+            else if (text[i] === "]") {
+              i++;
+              break;
+            } else throw new ScanError();
+          }
+        return { kind: "array", items, start, end: i };
+      }
+      if (c === '"') {
+        const s = string();
+        return { kind: "string", value: s.value, start, end: i };
+      }
+      if (c === "t") return literal("true", "boolean");
+      if (c === "f") return literal("false", "boolean");
+      if (c === "n") return literal("null", "null");
+      NUMBER.lastIndex = i;
+      const m = NUMBER.exec(text);
+      if (!m) throw new ScanError();
+      i += m[0].length;
+      return { kind: "number", start, end: i };
+    };
+    try {
+      const root = value(0);
+      ws();
+      return i === text.length ? { text, root } : null;
+    } catch (e) {
+      if (e instanceof ScanError || e instanceof SyntaxError) return null;
+      throw e;
+    }
+  }
+  function entryOf(node, key) {
+    if (node?.kind !== "object") return void 0;
+    for (let i = node.entries.length - 1; i >= 0; i--) if (node.entries[i].key === key) return node.entries[i];
+    return void 0;
+  }
+  function nodeAt(root, path) {
+    let node = root;
+    for (const step of path) {
+      if (node === void 0) return void 0;
+      if (typeof step === "number") node = node.kind === "array" ? node.items[step] : void 0;
+      else node = entryOf(node, step)?.node;
+    }
+    return node;
+  }
+  function compareText(doc, node) {
+    if (node.kind === "null") return null;
+    return node.kind === "string" ? node.value : doc.text.slice(node.start, node.end);
+  }
+
   // src/demo/siblings.ts
   var SIBLINGS_INSTANCE = { name: "shop (demo)", label: "dev" };
   var SIBLINGS = [
@@ -253,6 +368,12 @@
     }
     return cond.not ? !result : result;
   }
+  var TEXT_COLUMN = { type: "text", class: "text" };
+  function pathCell(cell, path) {
+    const doc = cell === null ? null : scanJson(cell);
+    const node = doc && nodeAt(doc.root, path);
+    return doc && node ? compareText(doc, node) : null;
+  }
   function matchesFilter(table, row, conditions) {
     if (conditions.length === 0) return true;
     const groups = [[conditions[0]]];
@@ -261,7 +382,11 @@
       else groups[groups.length - 1].push(c);
     }
     const at = (column) => table.columns.findIndex((c) => c.name === column);
-    return groups.some((g) => g.every((c) => matches(table.columns[at(c.column)], row[at(c.column)], c)));
+    const test = (c) => {
+      const i = at(c.column);
+      return c.path ? matches(TEXT_COLUMN, pathCell(row[i], c.path), c) : matches(table.columns[i], row[i], c);
+    };
+    return groups.some((g) => g.every(test));
   }
   function tableData(params) {
     const t = tableIn(params);
@@ -281,6 +406,8 @@
       for (const c of conditions) {
         if (!VALID_OPS.has(c.op)) return problem(400, "invalid_filter", `unknown filter op: ${c.op}`);
         if (!has(c.column)) return problem(400, "unknown_column", `column ${JSON.stringify(c.column)}`);
+        const col = table.columns.find((col2) => col2.name === c.column);
+        if (c.path && col?.class !== "json") return problem(400, "invalid_filter", "a path needs a json column");
       }
       rows = rows.filter((r) => matchesFilter(table, r, conditions));
     }
@@ -426,6 +553,9 @@
   --row-new-bg: light-dark(#e3f6e6, #1f3a26);
   /* Transient wash on cells whose value changed since the last refresh. */
   --cell-changed-bg: light-dark(#ddebfb, #1d3047);
+  /* A JSON path's keys in the filter box, and the wash on the member a path filter matched. */
+  --filter-key: light-dark(#9a5b13, #e0a96d);
+  --json-match-bg: light-dark(#f6e7cf, #4a3820);
   /* The scroller's layers, lowest first. #chrome is on top at rest and drops
      to the header's level once the header pins (features/sticky-header.ts),
      where the header wins by coming later: the filter's suggestion list
@@ -739,6 +869,9 @@ tbody tr.row-new { animation: row-new-fade 3s ease-out; }
 /* Same fade on a changed cell. It paints over the row's hover background
    while it lasts; grid.ts drops the class once the fade ends. */
 tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
+mark.json-match { background: var(--json-match-bg); color: inherit; border-radius: 3px; padding: 0 2px; }
+/* The same member marked in the cell popup's and record view's trees. */
+.json-line.json-match, .json-node.json-match { background: var(--json-match-bg); border-radius: 3px; }
 @keyframes cell-changed-fade { from { background: var(--cell-changed-bg); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) {
   tbody tr.row-new { animation: none; background: var(--row-new-bg); }
@@ -771,6 +904,8 @@ tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
 .t-op { color: var(--text-muted); }
 .t-keyword { color: var(--type-uuid); }
 .t-value { color: var(--json-number); }
+.t-arrow { color: var(--text-muted); }
+.t-key { color: var(--filter-key); }
 .t-err { text-decoration: underline wavy var(--danger); text-underline-offset: .2em; }
 /* Forced colors repaint the input's text anyway, so the copy would double it. */
 @media (forced-colors: active) {
@@ -829,6 +964,7 @@ tbody td.cell-changed { animation: cell-changed-fade 3s ease-out; }
                            color: inherit; padding: 0 .15rem; border-radius: 3px; }
 #protocol-warning button:hover { background: var(--hover); }
 .empty td { text-align: center; opacity: .6; padding: 1rem; }
+.empty-hint { white-space: normal; max-width: 40rem; margin: 0 auto; font-family: inherit; }
 
 /* Small uppercase heading inside dialogs and popovers. */
 .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
@@ -969,6 +1105,11 @@ dialog dl .record-acts:hover { opacity: 1; }
    (#cell-pop / dialog dl dd's plain-text case). */
 .json-tree { white-space: normal; }
 .json-line { display: flex; }
+/* A leaf's = and ⧉ show on hover or focus, like a record field's. */
+.json-line:has(> .json-acts):hover { background: var(--hover); border-radius: 4px; }
+.json-acts { display: flex; gap: 2px; margin-left: auto; padding-left: .75rem; opacity: 0; }
+.json-line:hover > .json-acts, .json-acts:focus-within { opacity: .7; }
+.json-acts:hover { opacity: 1; }
 .json-children { margin-left: 1.05rem; border-left: 1px solid var(--border); padding-left: .5rem; }
 .json-fold { all: unset; cursor: pointer; flex: none; width: 1rem; text-align: center;
              color: var(--border-strong); transform-origin: 45% 50%; }
@@ -1136,7 +1277,9 @@ button.refby-entry:disabled { opacity: .5; cursor: not-allowed; }
 #filter-suggest button { display: flex; align-items: baseline; width: 100%; box-sizing: border-box; white-space: nowrap;
           background: none; border: none; font: inherit; font-family: var(--font-mono); color: inherit;
           text-align: left; padding: .25rem .5rem; border-radius: 4px; cursor: pointer; }
-#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#filter-suggest .section-label { margin: 0; padding: .25rem .5rem .1rem; }
+/* The padding keeps an underscore, which sits below the line box, inside the clip. */
+#filter-suggest .sg-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-bottom: .15em; }
 /* Pushed to the right edge, so the types of every row line up. */
 #filter-suggest .sg-note { align-self: baseline; margin-left: auto; padding-left: 1.25rem;
           font-family: var(--font-mono); font-size: .75rem; }
@@ -1358,7 +1501,7 @@ thead tr.bands + tr th { top: var(--band-h); }
           <div id="filter-wrap">
             <div id="filter-hl" aria-hidden="true"><span id="filter-hl-text"></span></div>
             <input id="filter" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="filter-suggest-list" spellcheck="false" enterkeyhint="search" placeholder="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" title="filter: col OP val AND … — OP: = != > < >= <= LIKE ILIKE (or col IS [NOT] NULL)" autocomplete="off">
-            <div id="filter-suggest" hidden><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
+            <div id="filter-suggest" hidden><div id="filter-suggest-heading" class="section-label" hidden></div><div id="filter-suggest-list" role="listbox" aria-label="filter suggestions"></div></div>
           </div>
           <button id="apply">apply</button>
         </form>
@@ -1856,7 +1999,7 @@ function buildApiReference() {
       }
     ],
     filter: {
-      wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, op, value?}, ...]",
+      wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, path?, op, value?}, ...]",
       operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"],
       limits: { max_conditions: 10, max_json_bytes: 8192 },
       notes: [
@@ -1865,17 +2008,19 @@ function buildApiReference() {
         "`value` is a JSON string, except: IN takes an array of 1 to 1000 strings, BETWEEN takes [low, high] (inclusive), and IS NULL / IS NOT NULL take none. There is no NOT IN op \u2014 use `not: true` with IN.",
         "a column whose `class` is number, float, temporal or time compares in its own type for every operator except LIKE/ILIKE, so age > 9 includes 10 and price = 1 matches 1.00. Its value must look like one: a decimal number (no exponent; float also allows one), YYYY-MM-DD for a date, an optional HH:MM[:SS[.ffffff]] after it for a timestamp, HH:MM[:SS[.ffffff]] for a time. A value is read in the database session's time zone; an offset (+02:00, Z) is allowed only on a column whose type has a time zone (Postgres timestamptz/timetz), which renders its own values with one \u2014 anything else is a 400 invalid_filter. Every value the database itself shows for such a column is also accepted (Postgres NaN, infinity, BC dates, 24:00; MySQL TIME beyond 24 hours, the zero date), so a cell's own text always filters back to its row.",
         "every other column (text, uuid, json, enum, boolean, ...) and every LIKE/ILIKE compares as text: the column's text rendering, so a boolean is true/false on Postgres but 1/0 on MySQL and SQLite.",
+        '`path` steps into a column whose `class` is json: 1 to 8 steps, each a key (a string of 1 to 255 UTF-8 bytes with no `"`, `\\` or control character) or an array index (an integer 0 to 2147483647). Its value always compares as text, case-sensitively: a string unquoted, a number or object as its JSON text, a boolean as true/false. A missing key, a JSON null and a step into the wrong kind all read as NULL. A path on any other column is a 400 invalid_filter.',
         "an empty condition array is treated identically to an absent `filter` param.",
         "on GET /tables/join a condition may carry `join` (the table position, default 0); on GET /tables/data any `join` is a 400.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON \u2014 exceeding either is a 400.",
-        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text (plus `column [NOT] IN (a, b)` and `column [NOT] BETWEEN lo AND hi`) and compiles it to this AST client-side \u2014 DSL text sent as the `filter` param is a 400."
+        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text (plus `column [NOT] IN (a, b)`, `column [NOT] BETWEEN lo AND hi`, and `column->key->0` for a path) and compiles it to this AST client-side \u2014 DSL text sent as the `filter` param is a 400."
       ],
       example: [
         { column: "status", op: "=", value: "completed" },
         { logic: "AND", not: true, column: "created_at", op: ">", value: "2016-01-01" },
         { logic: "AND", column: "id", op: "IN", value: ["7", "9"] },
         { logic: "OR", column: "total_cents", op: "BETWEEN", value: ["100", "5000"] },
-        { logic: "OR", column: "deleted_at", op: "IS NULL" }
+        { logic: "OR", column: "deleted_at", op: "IS NULL" },
+        { logic: "AND", column: "metadata", path: ["prefs", "theme"], op: "=", value: "dark" }
       ]
     }
   };
@@ -1889,6 +2034,9 @@ $("api-help-copy").onclick = () => copyText($("api-help-pre").textContent ?? "",
 // src/lib/filter-dsl.ts
 var FILTER_MAX_DSL_BYTES = 1024;
 var FILTER_MAX_CONDITIONS = 10;
+var PATH_MAX_STEPS = 8;
+var PATH_MAX_KEY_BYTES = 255;
+var PATH_MAX_INDEX = 2 ** 31 - 1;
 var utf8 = new TextEncoder();
 function filterTooLong(text) {
   if (text.length > FILTER_MAX_DSL_BYTES) return true;
@@ -1905,6 +2053,17 @@ var FilterDslError = class extends Error {
     this.index = index;
   }
 };
+function badPathKey(key) {
+  if (key === "") return "a key can't be empty";
+  if (/["\\]/.test(key)) return `a key can't contain " or \\`;
+  for (const c of key) if (c < " ") return "a key can't contain a control character";
+  if (utf8.encode(key).length > PATH_MAX_KEY_BYTES) return `a key is at most ${PATH_MAX_KEY_BYTES} bytes`;
+  return null;
+}
+function arrowAt(text, i) {
+  if (text.startsWith("->>", i)) return 3;
+  return text.startsWith("->", i) ? 2 : 0;
+}
 function parseFilterDsl(input2, aliases) {
   const err = (message, index) => {
     const position = new TextEncoder().encode(input2.slice(0, index)).length;
@@ -1979,12 +2138,12 @@ function parseFilterDsl(input2, aliases) {
     if (name === "") throw err("empty table alias", start);
     return name;
   };
-  const parseColumn = () => {
+  const parseColumnName = () => {
     const start = pos;
     const quoted2 = aliases !== void 0 && peek() === '"';
     const first = quoted2 ? parseQuotedQualifier() : parseName();
     if (!quoted2 && peek() !== ".") return { column: first, ...aliases ? { join: 0 } : {} };
-    if (!aliases) throw err("qualified column names are only allowed in a join view", start);
+    if (!aliases) throw err("qualified column names are only allowed in a join view; a JSON key takes ->", start);
     if (peek() !== ".") throw err("expected . after the table alias", pos);
     pos += 1;
     const column = parseName();
@@ -2012,6 +2171,56 @@ function parseFilterDsl(input2, aliases) {
       }
     }
     return value;
+  };
+  const parsePathStep = () => {
+    const start = pos;
+    const c = peek();
+    if (c === "'") {
+      const key = parseQuotedValue();
+      const bad = badPathKey(key);
+      if (bad) throw err(bad, start);
+      return key;
+    }
+    if (c !== null && c >= "0" && c <= "9") {
+      while (/^[0-9]$/.test(peek() ?? "")) pos += 1;
+      const index = Number(input2.slice(start, pos));
+      if (index > PATH_MAX_INDEX) throw err(`an index is at most ${PATH_MAX_INDEX}`, start);
+      return index;
+    }
+    if (c === null || !/^[a-zA-Z_]$/.test(c)) throw err("expected a key or an index after ->", start);
+    return parseName();
+  };
+  const spacesError = (before, at, stepAt) => {
+    const step = /^(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|'(?:[^']|'')*')/.exec(input2.slice(stepAt));
+    return err(`remove the spaces around ->${step ? `: write ${before}->${step[0]}` : ""}`, at);
+  };
+  const parseColumn = () => {
+    const columnStart = pos;
+    const ref = parseColumnName();
+    const path = [];
+    for (; ; ) {
+      const arrowStart = pos;
+      const arrow = arrowAt(input2, pos);
+      if (arrow === 0) {
+        skipWsOptional();
+        const spaced = pos > arrowStart ? arrowAt(input2, pos) : 0;
+        if (spaced > 0) {
+          const at = pos;
+          pos += spaced;
+          skipWsOptional();
+          throw spacesError(input2.slice(columnStart, arrowStart), at, pos);
+        }
+        pos = arrowStart;
+        if (peek() === "[" || input2.startsWith("#>", pos)) throw err("write a JSON path with ->", pos);
+        break;
+      }
+      pos += arrow;
+      skipWsOptional();
+      if (pos > arrowStart + arrow) throw spacesError(input2.slice(columnStart, arrowStart), pos, pos);
+      if (path.length === PATH_MAX_STEPS) throw err(`a path has at most ${PATH_MAX_STEPS} steps`, pos);
+      path.push(parsePathStep());
+    }
+    return path.length > 0 ? { ...ref, path } : ref;
   };
   const parseBareValue = (stop2 = "") => {
     const start = pos;
@@ -2067,7 +2276,7 @@ function parseFilterDsl(input2, aliases) {
     throw err("expected operator (one of = != >= <= > < LIKE ILIKE IN BETWEEN, or IS [NOT] NULL)", start);
   };
   const parseSimpleCondition = () => {
-    const { column, join } = parseColumn();
+    const ref = parseColumn();
     const afterColumn = pos;
     const wsChar = peek();
     if (wsChar !== null && isWs(wsChar)) {
@@ -2077,20 +2286,20 @@ function parseFilterDsl(input2, aliases) {
         const isNot = consumeKeyword("NOT");
         if (isNot) skipWsRequired();
         if (!consumeKeyword("NULL")) throw err("expected NULL", pos);
-        return { column, join, op: isNot ? "IS NOT NULL" : "IS NULL" };
+        return { ...ref, op: isNot ? "IS NOT NULL" : "IS NULL" };
       }
       const notStart = pos;
       const negated = consumeKeyword("NOT");
       if (negated) skipWsRequired();
       const wordOp = () => {
-        if (consumeKeyword("IN")) return { column, join, op: "IN", value: parseList() };
+        if (consumeKeyword("IN")) return { ...ref, op: "IN", value: parseList() };
         if (!consumeKeyword("BETWEEN")) return null;
         skipWsRequired();
         const lo = parseBound();
         skipWsRequired();
         if (!consumeKeyword("AND")) throw err("expected AND between the BETWEEN bounds", pos);
         skipWsRequired();
-        return { column, join, op: "BETWEEN", value: [lo, parseBound()] };
+        return { ...ref, op: "BETWEEN", value: [lo, parseBound()] };
       };
       const simple = wordOp();
       if (simple) return negated ? { ...simple, not: true } : simple;
@@ -2100,7 +2309,7 @@ function parseFilterDsl(input2, aliases) {
     skipWsOptional();
     const op = parseOperator();
     skipWsOptional();
-    return { column, join, op, value: parseValue() };
+    return { ...ref, op, value: parseValue() };
   };
   const conditions = [];
   let pendingLogic = null;
@@ -2120,6 +2329,7 @@ function parseFilterDsl(input2, aliases) {
       ...not ? { not: true } : {},
       column: simple.column,
       ...simple.join !== void 0 ? { join: simple.join } : {},
+      ...simple.path ? { path: simple.path } : {},
       op: simple.op,
       ...simple.value !== void 0 ? { value: simple.value } : {}
     };
@@ -2159,6 +2369,25 @@ function eqClause(column, raw) {
   if (filterTooLong(raw)) return null;
   const clause = filterClause(column, "=", raw);
   return filterTooLong(clause) ? null : clause;
+}
+function pathText(column, path) {
+  if (path.length > PATH_MAX_STEPS) return null;
+  let text = column;
+  for (const step of path) {
+    const written2 = pathStepText(step);
+    if (written2 === null) return null;
+    text += `->${written2}`;
+  }
+  return text;
+}
+function pathStepText(step) {
+  if (typeof step === "number") return String(step);
+  if (badPathKey(step)) return null;
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(step) ? step : quoted(step);
+}
+function pathEqClause(column, path, raw) {
+  const lhs = pathText(column, path);
+  return lhs === null ? null : eqClause(lhs, raw);
 }
 function filterClauses(pairs) {
   return pairs.map((p) => filterClause(p.column, "=", p.value)).join(" AND ");
@@ -3089,6 +3318,9 @@ function knownScopeKey(...rest) {
 function scopeIdentity() {
   return visitKey(state.scope.source, state.scope.schema);
 }
+function viewIdentity() {
+  return JSON.stringify([scopeIdentity(), viewKey(state.view)]);
+}
 function chosenScope() {
   return {
     source: state.manySources ? state.scope.source : null,
@@ -3298,6 +3530,14 @@ function getLastPayload() {
   return lastPayload;
 }
 var lastRowDiffKey = null;
+var lastPayloadView = null;
+function columnsInView() {
+  return lastPayloadView === viewIdentity() ? lastPayload?.columns : void 0;
+}
+var lastFull = null;
+function lastRowsForView() {
+  return lastFull?.view === viewIdentity() ? lastFull.data : null;
+}
 function diffRows(data, highlightNew) {
   const nowScope = rowDiffKey();
   const result = collectRowChanges(lastPayload, data, {
@@ -3305,7 +3545,9 @@ function diffRows(data, highlightNew) {
     sameScope: lastRowDiffKey === nowScope
   });
   lastPayload = data;
+  lastPayloadView = viewIdentity();
   lastRowDiffKey = nowScope;
+  if (data.rows.length > 0) lastFull = { view: viewIdentity(), data };
   return result;
 }
 
@@ -3520,6 +3762,13 @@ function showViewNotice(text) {
   $("view-notice").hidden = false;
   renderNote();
 }
+var offeredFor = null;
+function offerViewNotice(text) {
+  const key = noticeKey(state.view, state.filter);
+  if (key === offeredFor) return;
+  offeredFor = key;
+  if (text !== null && shownFor !== key) showViewNotice(text);
+}
 function showBootFallbackNote() {
   shownSwaps = swapsFrom(takeUrlIntent(), {
     // A name with nothing to choose from (not in the URL either) is no swap.
@@ -3528,6 +3777,7 @@ function showBootFallbackNote() {
     filter: state.filter || null
   });
   if (shownSwaps.length === 0) return;
+  customText = null;
   shownFor = noticeKey(state.view, state.filter);
   $("view-notice").hidden = false;
   renderNote();
@@ -3741,6 +3991,13 @@ function expectsValue(expect) {
 var SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
 var IDENT = /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")\.[A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*/y;
 var WORD_CHAR = /[\p{L}\p{N}_]/u;
+var STEP = /[A-Za-z_][A-Za-z0-9_]*|[0-9]+|'(?:[^']|'')*'?/y;
+function stepOf(text) {
+  if (/^[0-9]+$/.test(text)) return Number(text);
+  if (!text.startsWith("'")) return text;
+  const closed = /^'(?:[^']|'')*'$/.test(text);
+  return text.slice(1, closed ? -1 : void 0).replace(/''/g, "'");
+}
 function keywordAt(text, i, keyword) {
   if (text.slice(i, i + keyword.length).toUpperCase() !== keyword) return false;
   const next = text[i + keyword.length];
@@ -3750,21 +4007,26 @@ function tokenizeFilterDsl(text) {
   const tokens = [];
   let expect = "column";
   let column = null;
+  let path = [];
   let negated = false;
   let i = 0;
   const push = (kind, start, end, next) => {
-    tokens.push({ kind, start, end, expect, column });
+    tokens.push({ kind, start, end, expect, column, path });
     expect = next;
     i = end;
   };
   const isSpace = (c) => /\s/.test(c);
   const isListStop = (c) => c === "," || c === "(" || c === ")";
+  const touching = () => {
+    const last = tokens.at(-1);
+    return last !== void 0 && last.end === i && (last.kind === "column" || last.kind === "key" || last.kind === "arrow");
+  };
   while (i < text.length) {
     const s = i;
     if (isSpace(text[i])) {
       let j2 = i;
       while (j2 < text.length && isSpace(text[j2])) j2++;
-      tokens.push({ kind: "space", start: s, end: j2, expect, column });
+      tokens.push({ kind: "space", start: s, end: j2, expect, column, path });
       i = j2;
       continue;
     }
@@ -3782,7 +4044,23 @@ function tokenizeFilterDsl(text) {
         column = name;
         continue;
       }
-    } else if (expect === "operator" || expect === "notTail") {
+    } else if (expect === "pathKey" && touching()) {
+      STEP.lastIndex = i;
+      const m = STEP.exec(text);
+      if (m) {
+        push("key", s, i + m[0].length, "operator");
+        path = [...path, stepOf(m[0])];
+        continue;
+      }
+    }
+    if (expect === "operator" && touching()) {
+      const arrow = text.startsWith("->>", i) ? 3 : text.startsWith("->", i) ? 2 : 0;
+      if (arrow > 0) {
+        push("arrow", s, i + arrow, "pathKey");
+        continue;
+      }
+    }
+    if (expect === "operator" || expect === "notTail") {
       if (expect === "operator" && keywordAt(text, i, "IS")) {
         push("keyword", s, i + 2, "isTail");
         continue;
@@ -3849,6 +4127,7 @@ function tokenizeFilterDsl(text) {
       if (word) {
         push("keyword", s, i + word.length, "column");
         column = null;
+        path = [];
         negated = false;
         continue;
       }
@@ -3857,18 +4136,19 @@ function tokenizeFilterDsl(text) {
     while (j < text.length && !isSpace(text[j])) j++;
     push("plain", s, j, "error");
   }
-  return { tokens, expect, column };
+  return { tokens, expect, column, path };
 }
 function completionAt(text) {
-  const { tokens, expect, column } = tokenizeFilterDsl(text);
+  const { tokens, expect, column, path } = tokenizeFilterDsl(text);
   const last = tokens.at(-1);
-  const punct = last?.kind === "op" && (text[last.start] === "(" || text[last.start] === ",");
-  if (!last || last.kind === "space" || punct) return { expect, partial: "", head: text, column };
+  const punct = last?.kind === "arrow" || last?.kind === "op" && (text[last.start] === "(" || text[last.start] === ",");
+  if (!last || last.kind === "space" || punct) return { expect, partial: "", head: text, column, path };
   return {
     expect: last.expect,
     partial: text.slice(last.start),
     head: text.slice(0, last.start),
-    column: last.column
+    column: last.column,
+    path: last.path
   };
 }
 var FILTER_OPERATORS = [
@@ -3898,6 +4178,118 @@ function endsInUnfinishedWord(text) {
   if (partial === "") return false;
   const word = partial.toLowerCase();
   return optionsFor(expect).some((o) => o.toLowerCase().startsWith(word));
+}
+
+// src/features/join-view.ts
+var filterQualifier = (name) => /^(AND|OR|NOT)$/i.test(name) ? `"${name}"` : quoteJoinName(name);
+function columnKey(col, def = joinInView()?.def) {
+  if (!def || col.join === void 0 || col.column === void 0) return col.name;
+  return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
+}
+function columnNamed(name) {
+  if (name === null) return void 0;
+  return columnsInView()?.find((c) => columnKey(c) === name || c.join === 0 && c.column === name);
+}
+function conditionNames(c, col) {
+  return c.join === void 0 ? col.join === void 0 && col.name === c.column : col.join === c.join && col.column === c.column;
+}
+function conditionColumn(c, columns = columnsInView()) {
+  return columns?.find((col) => conditionNames(c, col));
+}
+function tableGroups(columns, def) {
+  const schemas = labelSchemas(def, state.scope.schema);
+  return def.tables.map((t, index) => ({
+    label: tableLabel(t, schemas[index]),
+    index,
+    columns: columns.filter((c) => c.join === index)
+  })).filter((g) => g.columns.length > 0);
+}
+function displayName(col) {
+  return col.column ?? col.name;
+}
+var QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
+function splitColumnKey(key, def) {
+  const m = QUALIFIED.exec(key);
+  if (!def || !m) return null;
+  const alias = m[1] ?? m[2].replaceAll('""', '"');
+  const join = def.tables.findIndex((t) => effectiveName(t) === alias);
+  return join < 0 ? null : { join, column: m[3] };
+}
+function buildBands(columns, heads) {
+  const def = joinInView()?.def;
+  if (!def) return null;
+  const schemas = labelSchemas(def, state.scope.schema);
+  const tr = el("tr", "bands");
+  tr.appendChild(el("th", "row-actions"));
+  let band = null;
+  columns.forEach((col, i) => {
+    if (col.join === void 0) return;
+    if (band?.dataset.band !== String(col.join)) {
+      const t = def.tables[col.join];
+      band = el("th", "band");
+      band.dataset.band = String(col.join);
+      band.dataset.run = String(tr.cells.length);
+      const schema = schemas[col.join];
+      const label2 = tableLabel(t, schema);
+      const pill = el("span", "band-pill");
+      pill.title = label2;
+      const text = el("span", "band-pill-text");
+      if (schema !== void 0) text.append(el("span", "band-pill-schema", `${schema}.`));
+      text.append(label2.slice(schema === void 0 ? 0 : schema.length + 1));
+      pill.appendChild(text);
+      band.appendChild(pill);
+      tr.appendChild(band);
+    }
+    heads[i].dataset.run = band.dataset.run;
+  });
+  return tr;
+}
+function refreshBands() {
+  const thead2 = $("thead");
+  for (const band of thead2.querySelectorAll("th.band")) {
+    const visible = thead2.querySelectorAll(`th[data-join][data-run="${band.dataset.run}"]:not(.col-hidden)`).length;
+    band.colSpan = Math.max(visible, 1);
+    band.classList.toggle("col-hidden", visible === 0);
+  }
+}
+function showJoinNotice(text, actions) {
+  $("join-notice-text").textContent = text;
+  $("join-notice-actions").replaceChildren(
+    ...actions.map((a) => {
+      const b = el("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = a.label;
+      b.onclick = a.run;
+      return b;
+    })
+  );
+  $("join-notice").hidden = false;
+}
+function clearJoinNotice() {
+  $("join-notice").hidden = true;
+}
+function updateJoinChrome() {
+  const join = joinInView() !== null;
+  $("join-btn").hidden = join;
+  $("join-btn").disabled = false;
+  $("join-edit-btn").hidden = !join;
+  $("join-link-btn").hidden = !join;
+  $("structure-btn").hidden = join;
+  $("payload").hidden = join;
+}
+function buildEmptyJoin(onLeft) {
+  const box = el("div", "empty-join");
+  const title = el("p");
+  title.textContent = "No rows match this join.";
+  const why = el("p", "muted-note", "An inner join drops rows without a match. A left join keeps them.");
+  const btn = el("button");
+  btn.type = "button";
+  btn.className = "btn";
+  btn.textContent = "Switch to left join";
+  btn.onclick = onLeft;
+  box.append(title, why, btn);
+  return box;
 }
 
 // src/features/overlay-highlight.ts
@@ -3947,7 +4339,8 @@ function render4() {
   let at = error && error.index < trimmed.length && !error.message.startsWith("unterminated") ? error.index + lead : -1;
   const bad = tokens.find((t) => t.start <= at && at < t.end);
   if (bad && bad.end >= lead + trimmed.length && endsInUnfinishedWord(text)) at = -1;
-  textEl.replaceChildren(...tokenSpans(text, tokens, (t) => t.start <= at && at < t.end));
+  const notJson = (t) => (t.kind === "arrow" || t.kind === "key") && (columnNamed(t.column)?.class ?? "json") !== "json";
+  textEl.replaceChildren(...tokenSpans(text, tokens, (t) => t.start <= at && at < t.end || notJson(t)));
   wrap.classList.toggle("plain", input.scrollWidth > input.clientWidth);
 }
 attachOverlayHighlight(input, render4);
@@ -4598,12 +4991,11 @@ function restoreTableFocus(captured) {
 
 // src/features/grid-lock.ts
 var gridKey = null;
-var stateKey = () => JSON.stringify([scopeIdentity(), viewKey(state.view)]);
 function markGridDrawn() {
-  gridKey = stateKey();
+  gridKey = viewIdentity();
 }
 function gridIsStale() {
-  return gridKey !== null && gridKey !== stateKey();
+  return gridKey !== null && gridKey !== viewIdentity();
 }
 function syncGridLock() {
   if (gridKey === null) return;
@@ -5651,9 +6043,13 @@ function createSuggestList(opts) {
     if (matches.length > 0 && !input2.contains(e.target) && !popup.contains(e.target)) close();
   });
   return {
-    show(next, nextHead) {
+    show(next, nextHead, heading) {
       matches = next;
       head = nextHead;
+      if (opts.heading) {
+        opts.heading.textContent = heading ?? "";
+        opts.heading.hidden = !heading;
+      }
       index = -1;
       render6();
       popup.hidden = false;
@@ -6228,106 +6624,274 @@ $("join-cancel").onclick = () => dialog.close();
 $("join-btn").onclick = () => openJoinDialog();
 $("join-edit-btn").onclick = () => openJoinDialog();
 
-// src/features/join-view.ts
-var filterQualifier = (name) => /^(AND|OR|NOT)$/i.test(name) ? `"${name}"` : quoteJoinName(name);
-function columnKey(col, def = joinInView()?.def) {
-  if (!def || col.join === void 0 || col.column === void 0) return col.name;
-  return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
-}
-function tableGroups(columns, def) {
-  const schemas = labelSchemas(def, state.scope.schema);
-  return def.tables.map((t, index) => ({
-    label: tableLabel(t, schemas[index]),
-    index,
-    columns: columns.filter((c) => c.join === index)
-  })).filter((g) => g.columns.length > 0);
-}
-function displayName(col) {
-  return col.column ?? col.name;
-}
-var QUALIFIED = /^(?:([A-Za-z_][A-Za-z0-9_]*)|"((?:[^"]|"")+)")\.(.+)$/s;
-function splitColumnKey(key, def) {
-  const m = QUALIFIED.exec(key);
-  if (!def || !m) return null;
-  const alias = m[1] ?? m[2].replaceAll('""', '"');
-  const join = def.tables.findIndex((t) => effectiveName(t) === alias);
-  return join < 0 ? null : { join, column: m[3] };
-}
-function buildBands(columns, heads) {
-  const def = joinInView()?.def;
-  if (!def) return null;
-  const schemas = labelSchemas(def, state.scope.schema);
-  const tr = el("tr", "bands");
-  tr.appendChild(el("th", "row-actions"));
-  let band = null;
-  columns.forEach((col, i) => {
-    if (col.join === void 0) return;
-    if (band?.dataset.band !== String(col.join)) {
-      const t = def.tables[col.join];
-      band = el("th", "band");
-      band.dataset.band = String(col.join);
-      band.dataset.run = String(tr.cells.length);
-      const schema = schemas[col.join];
-      const label2 = tableLabel(t, schema);
-      const pill = el("span", "band-pill");
-      pill.title = label2;
-      const text = el("span", "band-pill-text");
-      if (schema !== void 0) text.append(el("span", "band-pill-schema", `${schema}.`));
-      text.append(label2.slice(schema === void 0 ? 0 : schema.length + 1));
-      pill.appendChild(text);
-      band.appendChild(pill);
-      tr.appendChild(band);
+// src/lib/json-doc.ts
+var MAX_DEPTH = 1e3;
+var NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+var ScanError = class extends Error {
+};
+function scanJson(text) {
+  let i = 0;
+  const ws = () => {
+    while (i < text.length && (text[i] === " " || text[i] === "\n" || text[i] === "\r" || text[i] === "	")) i++;
+  };
+  const string = () => {
+    const start = i;
+    let escaped = false;
+    i++;
+    while (i < text.length && text[i] !== '"') {
+      if (text[i] === "\\") escaped = true;
+      i += text[i] === "\\" ? 2 : 1;
     }
-    heads[i].dataset.run = band.dataset.run;
-  });
-  return tr;
-}
-function refreshBands() {
-  const thead2 = $("thead");
-  for (const band of thead2.querySelectorAll("th.band")) {
-    const visible = thead2.querySelectorAll(`th[data-join][data-run="${band.dataset.run}"]:not(.col-hidden)`).length;
-    band.colSpan = Math.max(visible, 1);
-    band.classList.toggle("col-hidden", visible === 0);
+    if (i >= text.length) throw new ScanError();
+    i++;
+    const value2 = escaped ? JSON.parse(text.slice(start, i)) : text.slice(start + 1, i - 1);
+    return { value: value2, start };
+  };
+  const literal = (word, kind) => {
+    if (!text.startsWith(word, i)) throw new ScanError();
+    const start = i;
+    i += word.length;
+    return { kind, start, end: i };
+  };
+  const value = (depth) => {
+    if (depth > MAX_DEPTH) throw new ScanError();
+    ws();
+    const start = i;
+    const c = text[i];
+    if (c === "{") {
+      i++;
+      const entries = [];
+      ws();
+      if (text[i] === "}") i++;
+      else
+        for (; ; ) {
+          ws();
+          if (text[i] !== '"') throw new ScanError();
+          const key = string();
+          ws();
+          if (text[i] !== ":") throw new ScanError();
+          i++;
+          entries.push({ key: key.value, keyStart: key.start, node: value(depth + 1) });
+          ws();
+          if (text[i] === ",") i++;
+          else if (text[i] === "}") {
+            i++;
+            break;
+          } else throw new ScanError();
+        }
+      return { kind: "object", entries, start, end: i };
+    }
+    if (c === "[") {
+      i++;
+      const items = [];
+      ws();
+      if (text[i] === "]") i++;
+      else
+        for (; ; ) {
+          items.push(value(depth + 1));
+          ws();
+          if (text[i] === ",") i++;
+          else if (text[i] === "]") {
+            i++;
+            break;
+          } else throw new ScanError();
+        }
+      return { kind: "array", items, start, end: i };
+    }
+    if (c === '"') {
+      const s = string();
+      return { kind: "string", value: s.value, start, end: i };
+    }
+    if (c === "t") return literal("true", "boolean");
+    if (c === "f") return literal("false", "boolean");
+    if (c === "n") return literal("null", "null");
+    NUMBER.lastIndex = i;
+    const m = NUMBER.exec(text);
+    if (!m) throw new ScanError();
+    i += m[0].length;
+    return { kind: "number", start, end: i };
+  };
+  try {
+    const root2 = value(0);
+    ws();
+    return i === text.length ? { text, root: root2 } : null;
+  } catch (e) {
+    if (e instanceof ScanError || e instanceof SyntaxError) return null;
+    throw e;
   }
 }
-function showJoinNotice(text, actions) {
-  $("join-notice-text").textContent = text;
-  $("join-notice-actions").replaceChildren(
-    ...actions.map((a) => {
-      const b = el("button");
-      b.type = "button";
-      b.className = "btn";
-      b.textContent = a.label;
-      b.onclick = a.run;
-      return b;
-    })
-  );
-  $("join-notice").hidden = false;
+function entryOf(node, key) {
+  if (node?.kind !== "object") return void 0;
+  for (let i = node.entries.length - 1; i >= 0; i--) if (node.entries[i].key === key) return node.entries[i];
+  return void 0;
 }
-function clearJoinNotice() {
-  $("join-notice").hidden = true;
+function nodeAt(root2, path) {
+  let node = root2;
+  for (const step of path) {
+    if (node === void 0) return void 0;
+    if (typeof step === "number") node = node.kind === "array" ? node.items[step] : void 0;
+    else node = entryOf(node, step)?.node;
+  }
+  return node;
 }
-function updateJoinChrome() {
-  const join = joinInView() !== null;
-  $("join-btn").hidden = join;
-  $("join-btn").disabled = false;
-  $("join-edit-btn").hidden = !join;
-  $("join-link-btn").hidden = !join;
-  $("structure-btn").hidden = join;
-  $("payload").hidden = join;
+function compareText(doc, node) {
+  if (node.kind === "null") return null;
+  return node.kind === "string" ? node.value : doc.text.slice(node.start, node.end);
 }
-function buildEmptyJoin(onLeft) {
-  const box = el("div", "empty-join");
-  const title = el("p");
-  title.textContent = "No rows match this join.";
-  const why = el("p", "muted-note", "An inner join drops rows without a match. A left join keeps them.");
-  const btn = el("button");
-  btn.type = "button";
-  btn.className = "btn";
-  btn.textContent = "Switch to left join";
-  btn.onclick = onLeft;
-  box.append(title, why, btn);
-  return box;
+function keysAt(docs, path) {
+  const seen = /* @__PURE__ */ new Map();
+  const note = (step, node) => {
+    const kind = node.kind === "string" ? "text" : node.kind;
+    const entry = seen.get(step);
+    if (!entry) seen.set(step, { step, kind, count: 1 });
+    else {
+      entry.count++;
+      if (entry.kind !== kind) entry.kind = "mixed";
+    }
+  };
+  const keys = /* @__PURE__ */ new Set();
+  for (const doc of docs) {
+    const node = nodeAt(doc.root, path);
+    if (node?.kind === "object") {
+      keys.clear();
+      for (let i = node.entries.length - 1; i >= 0; i--) {
+        const { key, node: child } = node.entries[i];
+        if (!keys.has(key)) {
+          keys.add(key);
+          note(key, child);
+        }
+      }
+    } else if (node?.kind === "array") for (const [i, child] of node.items.entries()) note(i, child);
+  }
+  return [...seen.values()].sort((a, b) => b.count - a.count);
+}
+function valuesAt(docs, path) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const doc of docs) {
+    const node = nodeAt(doc.root, path);
+    if (!node || node.kind === "object" || node.kind === "array") continue;
+    const text = compareText(doc, node);
+    if (text === null) continue;
+    const entry = seen.get(text) ?? { text, count: 0, number: false };
+    entry.count++;
+    entry.number ||= node.kind === "number";
+    seen.set(text, entry);
+  }
+  return [...seen.values()].sort((a, b) => b.count - a.count);
+}
+function spanAt(doc, path) {
+  if (path.length === 0) return null;
+  const parent = nodeAt(doc.root, path.slice(0, -1));
+  const step = path[path.length - 1];
+  if (typeof step === "number") {
+    const item = parent?.kind === "array" ? parent.items[step] : void 0;
+    return item ? { start: item.start, end: item.end } : null;
+  }
+  const entry = entryOf(parent, step);
+  return entry ? { start: entry.keyStart, end: entry.node.end } : null;
+}
+
+// src/features/json-path.ts
+function numberFilterable(text) {
+  return String(Number(text)) === text;
+}
+var docCache = /* @__PURE__ */ new WeakMap();
+function docsOf(data, col) {
+  let byColumn = docCache.get(data);
+  if (!byColumn) {
+    byColumn = /* @__PURE__ */ new Map();
+    docCache.set(data, byColumn);
+  }
+  let docs = byColumn.get(col.name);
+  if (!docs) {
+    docs = [];
+    for (const row2 of data.rows) {
+      const raw = row2[col.name];
+      const doc = raw == null ? null : scanJson(raw);
+      if (doc) docs.push(doc);
+    }
+    byColumn.set(col.name, docs);
+  }
+  return docs;
+}
+function filterName(c) {
+  const col = conditionColumn(c);
+  const column = col ? columnKey(col) : c.column;
+  return (c.path && pathText(column, c.path)) ?? column;
+}
+function pathColumnProblem(ast) {
+  for (const c of ast) {
+    const col = c.path && conditionColumn(c);
+    if (col && col.class !== "json")
+      return `${columnKey(col)} is ${truncateType(col.type)}. Only json and jsonb columns take a path (->).`;
+  }
+  return null;
+}
+var NUMBER_LIKE = /^\s*-?[0-9]+(?:\.[0-9]+)?\s*$/;
+function textOrderNotice(ast) {
+  for (const c of ast) {
+    if (!c.path || !["<", ">", "<=", ">=", "BETWEEN"].includes(c.op)) continue;
+    const values = Array.isArray(c.value) ? c.value : [c.value ?? ""];
+    if (values.some((v) => NUMBER_LIKE.test(v))) return `${filterName(c)} is compared as text, so 10 comes before 9.`;
+  }
+  return null;
+}
+function caseOnlyHint(ast) {
+  const data = lastRowsForView();
+  if (data === null || ast.length !== 1) return null;
+  for (const c of ast) {
+    if (!c.path || c.op !== "=" || c.not || typeof c.value !== "string") continue;
+    const col = conditionColumn(c, data.columns);
+    if (!col) continue;
+    const typed = c.value;
+    const values = valuesAt(docsOf(data, col), c.path);
+    if (values.some((v) => v.text === typed)) continue;
+    const near2 = values.find((v) => v.text.toLowerCase() === typed.toLowerCase());
+    if (near2)
+      return `Text inside JSON is matched exactly, so ${typed} is not ${near2.text}. The loaded rows have ${String(c.path.at(-1))} = ${near2.text}. Use ILIKE to ignore case.`;
+  }
+  return null;
+}
+function olderServerMessage(e, ast) {
+  if (!(e instanceof ApiError) || e.code !== "invalid_filter" || !ast.some((c) => c.path)) return null;
+  if (!/\b(?:unknown|unrecognized)\b/i.test(e.message) || !/\bpath\b/.test(e.message)) return null;
+  return "This server doesn't support JSON paths yet. Update ashurbanipal on the host to use them.";
+}
+var CHECKABLE_OPS = /* @__PURE__ */ new Set(["=", "!=", "IN", "IS NOT NULL"]);
+function markableConditions(col) {
+  return getAppliedFilterAst().filter((c) => c.path && !c.not && c.op !== "IS NULL" && conditionNames(c, col));
+}
+function matchedIn(doc, conditions) {
+  const paths = [];
+  const anyOr = getAppliedFilterAst().some((c) => c.logic === "OR");
+  for (const c of conditions) {
+    if (anyOr && !CHECKABLE_OPS.has(c.op)) continue;
+    const path = c.path ?? [];
+    const node = nodeAt(doc.root, path);
+    const text = node ? compareText(doc, node) : null;
+    if (text === null) continue;
+    if (c.op === "=" && text !== c.value) continue;
+    if (c.op === "!=" && text === c.value) continue;
+    if (c.op === "IN" && !(Array.isArray(c.value) && c.value.includes(text))) continue;
+    paths.push(path);
+  }
+  return paths;
+}
+function matchedPath(col, doc) {
+  const conditions = markableConditions(col);
+  if (conditions.length === 0) return void 0;
+  const matched = new Set(matchedIn(doc, conditions).map((p) => JSON.stringify(p)));
+  return matched.size === 0 ? void 0 : (path) => matched.has(JSON.stringify(path));
+}
+function matchSpans(col, raw) {
+  const conditions = markableConditions(col);
+  if (conditions.length === 0) return [];
+  const doc = scanJson(raw);
+  if (!doc) return [];
+  const spans = matchedIn(doc, conditions).flatMap((path) => spanAt(doc, path) ?? []).sort((a, b) => a.start - b.start);
+  const kept = [];
+  for (const span of spans) if (span.start >= (kept.at(-1)?.end ?? 0)) kept.push(span);
+  return kept;
 }
 
 // src/features/referenced-by.ts
@@ -6469,6 +7033,11 @@ function submitFilter(text) {
       reportError(e);
       return;
     }
+    const problem2 = pathColumnProblem(ast);
+    if (problem2) {
+      reportError(new Error(problem2));
+      return;
+    }
   }
   state.filter = text;
   setAppliedFilterAst(ast);
@@ -6548,8 +7117,10 @@ var suggest = createSuggestList({
   popup: $("filter-suggest"),
   list: $("filter-suggest-list"),
   idPrefix: "filter-suggest",
+  heading: $("filter-suggest-heading"),
+  // A key that continues (an object's `->`) goes straight on to the keys under it.
   accept: (suggestion, head) => {
-    filterInput.value = `${head}${suggestion.insert} `;
+    filterInput.value = `${head}${suggestion.insert}${suggestion.continues ? "" : " "}`;
     filterInput.setSelectionRange(filterInput.value.length, filterInput.value.length);
     suggest.close();
     filterInput.focus();
@@ -6578,16 +7149,16 @@ function commonValueSource(col) {
   const column = col.join === void 0 ? col.name : col.column;
   return table === null || column === void 0 ? null : { table, column };
 }
-function commonValuesButton(table, column, filterName) {
+function commonValuesButton(table, column, filterName2) {
   const btn = el("button");
   btn.type = "button";
   btn.className = "common-values-btn";
-  btn.setAttribute("aria-label", `common values for ${filterName}`);
+  btn.setAttribute("aria-label", `common values for ${filterName2}`);
   btn.textContent = "\u25BE";
   if (emptyCommonValues.has(refKey(table, column))) markNoCommonValues(btn);
   btn.onclick = (e) => {
     e.stopPropagation();
-    showCommonValues(e, table, column, filterName);
+    showCommonValues(e, table, column, filterName2);
   };
   return btn;
 }
@@ -6607,24 +7178,43 @@ function commonValuesFor(table, column) {
   }
   return values;
 }
-function showFilterSuggestions(ctx, all) {
-  const partial = ctx.partial.toLowerCase();
+function showFilterSuggestions(ctx, all, heading) {
+  const partial = (ctx.expect === "pathKey" ? String(stepOf(ctx.partial)) : ctx.partial).toLowerCase();
   const matches = all.filter((s) => s.label.toLowerCase().startsWith(partial));
   if (ctx.expect === "column" && partial !== "") {
     matches.push(
       ...all.filter((s) => !s.label.toLowerCase().startsWith(partial) && s.label.toLowerCase().includes(partial))
     );
   }
-  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column";
+  const done = matches.length === 1 && matches[0].label.toLowerCase() === partial && ctx.expect !== "column" && ctx.expect !== "pathKey";
   if (matches.length === 0 || done) {
     suggest.close();
     return;
   }
-  suggest.show(matches, ctx.head);
+  suggest.show(matches, ctx.head, heading);
 }
-function columnNamed(name) {
-  if (name === null) return void 0;
-  return getLastPayload()?.columns.find((c) => columnKey(c) === name || c.join === 0 && c.column === name);
+function loadedDocs(column) {
+  const col = columnNamed(column);
+  const data = getLastPayload();
+  if (col?.class !== "json" || !data) return null;
+  return { docs: docsOf(data, col), rows: data.rows.length };
+}
+function suggestPathKeys(ctx) {
+  const loaded = loadedDocs(ctx.column);
+  if (!loaded) return;
+  const keys = keysAt(loaded.docs, ctx.path);
+  const under = ctx.path.at(-1);
+  const isArray = keys.length > 0 && keys.every((k) => typeof k.step === "number");
+  const heading = under === void 0 ? `keys in ${loaded.rows} loaded rows` : isArray ? `${String(under)} is an array` : `keys under ${String(under)}`;
+  const rows = [];
+  for (const k of keys) {
+    const step = pathStepText(k.step);
+    if (step === null) continue;
+    const deeper = k.kind === "object" || k.kind === "array";
+    const note = typeof k.step === "number" ? `${k.count} rows` : `${k.kind} \xB7 ${k.count}`;
+    rows.push({ label: String(k.step), insert: deeper ? `${step}->` : step, note, continues: deeper });
+  }
+  showFilterSuggestions(ctx, rows, heading);
 }
 function updateFilterSuggestions() {
   const input2 = filterInput;
@@ -6634,7 +7224,7 @@ function updateFilterSuggestions() {
   }
   const ctx = completionAt(input2.value);
   suggest.close();
-  if (ctx.partial.startsWith("'")) return;
+  if (ctx.partial.startsWith("'") && ctx.expect !== "pathKey") return;
   const token = suggest.token();
   const plain = (labels) => labels.map((label2) => ({ label: label2, insert: label2 }));
   if (ctx.expect === "column") {
@@ -6649,6 +7239,8 @@ function updateFilterSuggestions() {
         key: keyDescriptionOf(c, meta)
       }))
     );
+  } else if (ctx.expect === "pathKey") {
+    suggestPathKeys(ctx);
   } else if (ctx.expect === "operator") {
     if (columnNamed(ctx.column)) showFilterSuggestions(ctx, plain(optionsFor("operator")));
   } else if (ctx.expect === "joiner" && ctx.partial !== "") {
@@ -6657,6 +7249,17 @@ function updateFilterSuggestions() {
     showFilterSuggestions(ctx, plain(optionsFor(ctx.expect)));
   } else if (expectsValue(ctx.expect)) {
     const quote = ctx.expect === "listItem" ? quoteListItem : quoteFilterValue;
+    if (ctx.path.length > 0) {
+      const loaded = loadedDocs(ctx.column);
+      if (!loaded) return;
+      const rows = valuesAt(loaded.docs, ctx.path).filter((v) => !v.number || numberFilterable(v.text)).map((v) => ({
+        label: v.text,
+        insert: quote(v.text),
+        note: String(v.count)
+      }));
+      showFilterSuggestions(ctx, rows, `values in ${loaded.rows} loaded rows`);
+      return;
+    }
     const col = columnNamed(ctx.column);
     const source = col && commonValueSource(col);
     if (source) {
@@ -6672,7 +7275,7 @@ filterInput.oninput = updateFilterSuggestions;
 filterInput.onfocus = updateFilterSuggestions;
 var cvAnchor = null;
 var cvRequestToken = 0;
-function renderCommonValues(values, table, filterName) {
+function renderCommonValues(values, table, filterName2) {
   const list = $("cv-pop-list");
   if (values.length === 0) {
     const p = el("p", "cv-empty", "no common values available");
@@ -6690,7 +7293,7 @@ function renderCommonValues(values, table, filterName) {
       btn.append(val, freq);
       btn.onclick = () => {
         $("cv-pop").hidePopover();
-        applyFilter(filterClause(filterName, "=", v.value));
+        applyFilter(filterClause(filterName2, "=", v.value));
       };
       return btn;
     })
@@ -6698,7 +7301,7 @@ function renderCommonValues(values, table, filterName) {
   if (joinInView())
     list.append(el("p", "cv-note", `Shares of all rows in ${tableLabelOf(table)}, not indicative of this join`));
 }
-async function showCommonValues(e, table, column, filterName) {
+async function showCommonValues(e, table, column, filterName2) {
   const btn = e.currentTarget;
   if (cvAnchor) cvAnchor.style.anchorName = "";
   cvAnchor = btn;
@@ -6723,7 +7326,7 @@ async function showCommonValues(e, table, column, filterName) {
     emptyCommonValues.add(key);
     markNoCommonValues(btn);
   }
-  renderCommonValues(values, table, filterName);
+  renderCommonValues(values, table, filterName2);
 }
 
 // src/lib/sibling-matrix.ts
@@ -7055,107 +7658,6 @@ function opensWithStoredSort() {
   return state.sort === null && navType !== "reload" && navType !== "back_forward";
 }
 
-// src/lib/json-tree.ts
-var SCALAR_CLASS = {
-  null: "json-null",
-  bool: "json-bool",
-  number: "json-number",
-  string: "json-string",
-  uuid: "json-string json-uuid"
-};
-var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function foldJson(value) {
-  if (Array.isArray(value)) {
-    if (value.length === 0) return { kind: "empty", open: "[", close: "]" };
-    return { kind: "container", open: "[", close: "]", entries: value.map((v) => ({ node: foldJson(v) })) };
-  }
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value);
-    if (entries.length === 0) return { kind: "empty", open: "{", close: "}" };
-    return {
-      kind: "container",
-      open: "{",
-      close: "}",
-      entries: entries.map(([key, v]) => ({ key, node: foldJson(v) }))
-    };
-  }
-  if (value === null) return { kind: "scalar", scalar: "null", text: "null" };
-  if (typeof value === "boolean") return { kind: "scalar", scalar: "bool", text: String(value) };
-  if (typeof value === "number") return { kind: "scalar", scalar: "number", text: String(value) };
-  return { kind: "scalar", scalar: UUID_RE2.test(value) ? "uuid" : "string", text: JSON.stringify(value) };
-}
-function renderJsonTree(value) {
-  return renderNode(foldJson(value), null, false);
-}
-function renderNode(node, prefix, comma) {
-  if (node.kind === "scalar") {
-    const line = document.createElement("div");
-    line.className = "json-line";
-    if (prefix) line.append(...prefix);
-    line.append(scalarSpan(node));
-    if (comma) line.append(",");
-    return line;
-  }
-  if (node.kind === "empty") {
-    const line = document.createElement("div");
-    line.className = "json-line";
-    if (prefix) line.append(...prefix);
-    const span = document.createElement("span");
-    span.className = "json-punct";
-    span.textContent = node.open + node.close + (comma ? "," : "");
-    line.append(span);
-    return line;
-  }
-  const treeNode = document.createElement("div");
-  treeNode.className = "json-node";
-  const fold = document.createElement("button");
-  fold.type = "button";
-  fold.className = "json-fold";
-  fold.setAttribute("aria-expanded", "true");
-  fold.setAttribute("aria-label", "collapse");
-  fold.onclick = () => {
-    const collapsed = treeNode.classList.toggle("collapsed");
-    fold.setAttribute("aria-expanded", String(!collapsed));
-    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
-  };
-  const openLine = document.createElement("div");
-  openLine.className = "json-line";
-  const openBrace = document.createElement("span");
-  openBrace.className = "json-punct";
-  openBrace.textContent = node.open;
-  const ellipsis = document.createElement("span");
-  ellipsis.className = "json-ellipsis";
-  ellipsis.textContent = `\u2026${node.close}${comma ? "," : ""}`;
-  if (prefix) openLine.append(...prefix);
-  openLine.append(fold, openBrace, ellipsis);
-  const children = document.createElement("div");
-  children.className = "json-children";
-  node.entries.forEach((entry, i) => {
-    const childPrefix = entry.key === void 0 ? null : keyPrefix(entry.key);
-    children.append(renderNode(entry.node, childPrefix, i < node.entries.length - 1));
-  });
-  const closeLine = document.createElement("div");
-  closeLine.className = "json-line";
-  const closeBrace = document.createElement("span");
-  closeBrace.className = "json-punct";
-  closeBrace.textContent = node.close + (comma ? "," : "");
-  closeLine.append(closeBrace);
-  treeNode.append(openLine, children, closeLine);
-  return treeNode;
-}
-function keyPrefix(key) {
-  const span = document.createElement("span");
-  span.className = "json-key";
-  span.textContent = JSON.stringify(key);
-  return [span, ": "];
-}
-function scalarSpan(node) {
-  const span = document.createElement("span");
-  span.className = SCALAR_CLASS[node.scalar];
-  span.textContent = node.text;
-  return span;
-}
-
 // src/lib/json-text.ts
 function recordJson(fields) {
   if (fields.length === 0) return "{}";
@@ -7205,6 +7707,114 @@ ${"  ".repeat(Math.max(level, 0))}`;
   return out;
 }
 
+// src/lib/json-tree.ts
+var SCALAR_CLASS = {
+  null: "json-null",
+  bool: "json-bool",
+  number: "json-number",
+  string: "json-string",
+  uuid: "json-string json-uuid"
+};
+var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function stringNode(value) {
+  return { kind: "scalar", scalar: UUID_RE2.test(value) ? "uuid" : "string", text: JSON.stringify(value), value };
+}
+function foldDoc(doc, node = doc.root) {
+  if (node.kind === "array") {
+    const entries = node.items.map((item) => ({ node: foldDoc(doc, item) }));
+    return entries.length === 0 ? { kind: "empty", open: "[", close: "]" } : { kind: "container", open: "[", close: "]", entries };
+  }
+  if (node.kind === "object") {
+    const last = new Map(node.entries.map((e) => [e.key, e.node]));
+    const entries = [...last].map(([key, value]) => ({ key, node: foldDoc(doc, value) }));
+    return entries.length === 0 ? { kind: "empty", open: "{", close: "}" } : { kind: "container", open: "{", close: "}", entries };
+  }
+  if (node.kind === "string") return stringNode(node.value);
+  if (node.kind === "null") return { kind: "scalar", scalar: "null", text: "null", value: null };
+  const text = doc.text.slice(node.start, node.end);
+  return { kind: "scalar", scalar: node.kind === "number" ? "number" : "bool", text, value: text };
+}
+function renderJsonTree(node, opts = {}) {
+  return renderNode(node, null, false, [], opts);
+}
+function renderNode(node, prefix, comma, path, opts) {
+  const marked = path.length > 0 && opts.isMatched?.(path) === true;
+  if (node.kind === "scalar") {
+    const line = document.createElement("div");
+    line.className = marked ? "json-line json-match" : "json-line";
+    if (prefix) line.append(...prefix);
+    line.append(scalarSpan(node));
+    if (comma) line.append(",");
+    const acts = opts.leafActions?.(path, node.value, node.scalar) ?? [];
+    if (acts.length > 0) {
+      const span = document.createElement("span");
+      span.className = "json-acts";
+      span.append(...acts);
+      line.append(span);
+    }
+    return line;
+  }
+  if (node.kind === "empty") {
+    const line = document.createElement("div");
+    line.className = marked ? "json-line json-match" : "json-line";
+    if (prefix) line.append(...prefix);
+    const span = document.createElement("span");
+    span.className = "json-punct";
+    span.textContent = node.open + node.close + (comma ? "," : "");
+    line.append(span);
+    return line;
+  }
+  const treeNode = document.createElement("div");
+  treeNode.className = marked ? "json-node json-match" : "json-node";
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "json-fold";
+  fold.setAttribute("aria-expanded", "true");
+  fold.setAttribute("aria-label", "collapse");
+  fold.onclick = () => {
+    const collapsed = treeNode.classList.toggle("collapsed");
+    fold.setAttribute("aria-expanded", String(!collapsed));
+    fold.setAttribute("aria-label", collapsed ? "expand" : "collapse");
+  };
+  const openLine = document.createElement("div");
+  openLine.className = "json-line";
+  const openBrace = document.createElement("span");
+  openBrace.className = "json-punct";
+  openBrace.textContent = node.open;
+  const ellipsis = document.createElement("span");
+  ellipsis.className = "json-ellipsis";
+  ellipsis.textContent = `\u2026${node.close}${comma ? "," : ""}`;
+  if (prefix) openLine.append(...prefix);
+  openLine.append(fold, openBrace, ellipsis);
+  const children = document.createElement("div");
+  children.className = "json-children";
+  node.entries.forEach((entry, i) => {
+    const childPrefix = entry.key === void 0 ? null : keyPrefix(entry.key);
+    const step = entry.key ?? i;
+    children.append(renderNode(entry.node, childPrefix, i < node.entries.length - 1, [...path, step], opts));
+  });
+  const closeLine = document.createElement("div");
+  closeLine.className = "json-line";
+  const closeBrace = document.createElement("span");
+  closeBrace.className = "json-punct";
+  closeBrace.textContent = node.close + (comma ? "," : "");
+  closeLine.append(closeBrace);
+  treeNode.append(openLine, children, closeLine);
+  return treeNode;
+}
+function keyPrefix(key) {
+  const span = document.createElement("span");
+  span.className = "json-key";
+  span.textContent = JSON.stringify(key);
+  return [span, ": "];
+}
+function scalarSpan(node) {
+  const span = document.createElement("span");
+  span.className = SCALAR_CLASS[node.scalar];
+  span.textContent = node.text;
+  return span;
+}
+
 // src/features/record-view.ts
 var dialog2 = () => $("record-dialog");
 function recordGroups(columns, def) {
@@ -7214,11 +7824,36 @@ function fieldNote(col, compositeFk) {
   const where = col.references ? `references ${refTarget(col.references)}` : compositeFk && compositeLabel(compositeFk);
   return [col.comment, where].filter(Boolean).join(" \xB7 ");
 }
-function fieldValue(col, raw, row2, { meta, act }) {
+function jsonTreeOf(col, raw, leafActions) {
+  const doc = scanJson(raw);
+  if (!doc) throw new SyntaxError("not JSON the tree can draw");
+  return renderJsonTree(foldDoc(doc), { leafActions, isMatched: matchedPath(col, doc) });
+}
+function jsonLeafActions(col, filterName2, wrap2) {
+  if (col.class !== "json") return void 0;
+  return (path, value, scalar) => {
+    if (path.length === 0) return [];
+    const acts = [];
+    const reads = scalar !== "number" || value === null || numberFilterable(value);
+    const clause = reads ? pathEqClause(filterName2, path, value) : null;
+    if (clause !== null) {
+      const eq = eqButton(
+        value === null,
+        wrap2(() => applyFilter(clause))
+      );
+      eq.title = clause;
+      eq.setAttribute("aria-label", `filter by ${clause}`);
+      acts.push(eq);
+    }
+    if (value !== null) acts.push(copyButton(value));
+    return acts;
+  };
+}
+function fieldValue(col, raw, row2, { def, meta, act }) {
   const dd = el("dd");
   if (rendersAsJson(col, raw)) {
     try {
-      dd.appendChild(renderJsonTree(JSON.parse(raw)));
+      dd.appendChild(jsonTreeOf(col, raw, jsonLeafActions(col, columnKey(col, def), act)));
       dd.classList.add("json-tree");
     } catch (e) {
       warnBadJsonCell(col, e);
@@ -7249,7 +7884,8 @@ function nullValue() {
 }
 function fieldActions(col, raw, { def, act }) {
   const acts = el("span", "record-acts");
-  const eq = eqClause(columnKey(col, def), raw);
+  const fromTree = raw != null && col.class === "json" && /^\s*[[{]\s*[^\s\]}]/.test(raw);
+  const eq = fromTree ? null : eqClause(columnKey(col, def), raw);
   if (eq !== null)
     acts.appendChild(
       eqButton(
@@ -7356,15 +7992,15 @@ function openRecordView(columns, rows, index, def) {
 }
 
 // src/features/grid.ts
-var columnsInView = [];
+var columnsInView2 = [];
 var viewInGrid = null;
 var counts = { hidden: /* @__PURE__ */ new Set(), shown: 0, total: 0 };
 function countColumns() {
   const hidden = new Set(hiddenColumns());
-  counts = { hidden, shown: columnsInView.filter((c) => !hidden.has(c.name)).length, total: columnsInView.length };
+  counts = { hidden, shown: columnsInView2.filter((c) => !hidden.has(c.name)).length, total: columnsInView2.length };
 }
 function renderHeader(columns) {
-  columnsInView = columns;
+  columnsInView2 = columns;
   viewInGrid = state.view;
   markGridDrawn();
   countColumns();
@@ -7424,7 +8060,14 @@ function renderEmptyState(columnCount) {
   const join = joinInView();
   if (join && state.offset === 0 && state.filter === "" && join.def.joins.some((j) => j.type === "inner")) {
     td.appendChild(buildEmptyJoin(switchToLeftJoin));
-  } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  } else {
+    const hint = state.offset === 0 ? caseOnlyHint(getAppliedFilterAst()) : null;
+    if (hint) {
+      const p = el("p", "empty-hint");
+      p.append(el("strong", void 0, "No rows match."), ` ${hint}`);
+      td.appendChild(p);
+    } else td.textContent = state.offset > 0 ? "No more rows." : "No rows match this view.";
+  }
   emptyRow.appendChild(td);
   $("tbody").replaceChildren(emptyRow);
 }
@@ -7435,7 +8078,11 @@ function showCellPop(e, text, col) {
   let isJson = rendersAsJson(col, text);
   if (isJson) {
     try {
-      $("cell-json").replaceChildren(renderJsonTree(JSON.parse(text)));
+      const close = (run) => () => {
+        $("cell-pop").hidePopover();
+        run();
+      };
+      $("cell-json").replaceChildren(jsonTreeOf(col, text, jsonLeafActions(col, columnKey(col), close)));
     } catch (err) {
       isJson = false;
       warnBadJsonCell(col, err);
@@ -7448,6 +8095,18 @@ function showCellPop(e, text, col) {
   cellPopAnchor = e.currentTarget;
   cellPopAnchor.style.anchorName = "--cell-anchor";
   $("cell-pop").showPopover();
+}
+function washedJson(col, raw) {
+  const spans = raw.trim() === raw ? matchSpans(col, raw) : [];
+  if (spans.length === 0) return formatCellValue(col, raw);
+  const out = document.createDocumentFragment();
+  let at = 0;
+  for (const { start, end } of spans) {
+    out.append(raw.slice(at, start), el("mark", "json-match", raw.slice(start, end)));
+    at = end;
+  }
+  out.append(raw.slice(at));
+  return out;
 }
 function buildCell(col, row2, { hidden, meta }, changed = false) {
   const raw = row2[col.name];
@@ -7479,7 +8138,7 @@ function buildCell(col, row2, { hidden, meta }, changed = false) {
   const cellText = qs(td, ".cell-text");
   const btn = qs(td, ".copy");
   const filterBtn = qs(td, ".filter-eq");
-  cellText.appendChild(formatCellValue(col, raw));
+  cellText.appendChild(col.class === "json" ? washedJson(col, raw) : formatCellValue(col, raw));
   btn.onclick = (e) => {
     e.stopPropagation();
     copyText(raw, btn);
@@ -7534,7 +8193,7 @@ function setColumnHidden(name, hide) {
   setHidden(hide ? [...current2, name] : current2.filter((c) => c !== name));
 }
 function sortedColumn() {
-  return state.sort === null ? void 0 : columnsInView.find((c) => columnKey(c) === state.sort);
+  return state.sort === null ? void 0 : columnsInView2.find((c) => columnKey(c) === state.sort);
 }
 var rowsMeta = "";
 function setRowsMeta(text, title) {
@@ -7636,9 +8295,9 @@ function buildMenuGroup(group, keys) {
 }
 var menuShape = "";
 function renderColumnMenu() {
-  const groups = columnGroups(columnsInView);
+  const groups = columnGroups(columnsInView2);
   const meta = tableMeta(tableInView());
-  const keys = new Map(columnsInView.map((c) => [c.name, keyDescriptionOf(c, meta)]));
+  const keys = new Map(columnsInView2.map((c) => [c.name, keyDescriptionOf(c, meta)]));
   const shape = JSON.stringify([
     groups.map((g) => [g.band, g.label, g.columns.map((c) => [c.name, columnKey(c), c.type])]),
     [...keys]
@@ -7804,6 +8463,8 @@ function viewTitle(view) {
   }
 }
 function failedLoadError(e, view, next) {
+  const older = olderServerMessage(e, (next ?? currentRequest())?.ast ?? []);
+  if (older) return new Error(older);
   const plain = plainError(e, view);
   const switching = next !== void 0 && viewKey(next.view) !== viewKey(state.view) || gridIsStale();
   if (!switching || plain !== e) return plain;
@@ -7931,6 +8592,7 @@ async function runLoad({
     $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
   if (notice !== void 0) reportError(notice);
+  offerViewNotice(textOrderNotice(req.ast));
 }
 
 // src/features/theme.ts

@@ -536,6 +536,216 @@
       ]
     },
     {
+      "name": "V38",
+      "input": "metadata->status = failed",
+      "expect": [
+        {
+          "column": "metadata",
+          "path": [
+            "status"
+          ],
+          "op": "=",
+          "value": "failed"
+        }
+      ]
+    },
+    {
+      "name": "V39",
+      "input": "metadata->>status = failed",
+      "expect": [
+        {
+          "column": "metadata",
+          "path": [
+            "status"
+          ],
+          "op": "=",
+          "value": "failed"
+        }
+      ]
+    },
+    {
+      "name": "V40",
+      "input": "o.metadata->status = failed",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "metadata",
+          "join": 0,
+          "path": [
+            "status"
+          ],
+          "op": "=",
+          "value": "failed"
+        }
+      ]
+    },
+    {
+      "name": "V41",
+      "input": "doc->arr->0->'user id' = 42",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "arr",
+            0,
+            "user id"
+          ],
+          "op": "=",
+          "value": "42"
+        }
+      ]
+    },
+    {
+      "name": "V42",
+      "input": "doc->'0' = x",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "0"
+          ],
+          "op": "=",
+          "value": "x"
+        }
+      ]
+    },
+    {
+      "name": "V43",
+      "input": "doc->'it''s' = x",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "it's"
+          ],
+          "op": "=",
+          "value": "x"
+        }
+      ]
+    },
+    {
+      "name": "V44",
+      "input": "metadata->n>5",
+      "expect": [
+        {
+          "column": "metadata",
+          "path": [
+            "n"
+          ],
+          "op": ">",
+          "value": "5"
+        }
+      ]
+    },
+    {
+      "name": "V45",
+      "input": "metadata->>n>5",
+      "expect": [
+        {
+          "column": "metadata",
+          "path": [
+            "n"
+          ],
+          "op": ">",
+          "value": "5"
+        }
+      ]
+    },
+    {
+      "name": "V46",
+      "input": "metadata->'a b'>=5",
+      "expect": [
+        {
+          "column": "metadata",
+          "path": [
+            "a b"
+          ],
+          "op": ">=",
+          "value": "5"
+        }
+      ]
+    },
+    {
+      "name": "V47",
+      "input": "doc->a->b->c->d->e->f->g->h = 1",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "g",
+            "h"
+          ],
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "V48",
+      "input": "doc->n IN (9, 10) AND NOT doc->n BETWEEN 1 AND 2 OR doc->status IS NULL",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "n"
+          ],
+          "op": "IN",
+          "value": [
+            "9",
+            "10"
+          ]
+        },
+        {
+          "logic": "AND",
+          "not": true,
+          "column": "doc",
+          "path": [
+            "n"
+          ],
+          "op": "BETWEEN",
+          "value": [
+            "1",
+            "2"
+          ]
+        },
+        {
+          "logic": "OR",
+          "column": "doc",
+          "path": [
+            "status"
+          ],
+          "op": "IS NULL"
+        }
+      ]
+    },
+    {
+      "name": "V49",
+      "input": "doc->'$'->'.'->'['->'*'->'ü' = x",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "$",
+            ".",
+            "[",
+            "*",
+            "ü"
+          ],
+          "op": "=",
+          "value": "x"
+        }
+      ]
+    },
+    {
       "name": "R1",
       "input": "",
       "expect_error": {
@@ -771,6 +981,104 @@
       }
     },
     {
+      "name": "R38",
+      "input": "doc->a->b->c->d->e->f->g->h->i = 1",
+      "expect_error": {
+        "position": 29
+      }
+    },
+    {
+      "name": "R39",
+      "input": "metadata -> role = admin",
+      "expect_error": {
+        "position": 9
+      }
+    },
+    {
+      "name": "R40",
+      "input": "metadata-> role = admin",
+      "expect_error": {
+        "position": 11
+      }
+    },
+    {
+      "name": "R41",
+      "input": "data.status = x",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R42",
+      "input": "data[\"k\"] = x",
+      "expect_error": {
+        "position": 4
+      }
+    },
+    {
+      "name": "R43",
+      "input": "data#>'{a}' = x",
+      "expect_error": {
+        "position": 4
+      }
+    },
+    {
+      "name": "R44",
+      "input": "doc->'' = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R45",
+      "input": "doc->'say \"hi\"' = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R46",
+      "input": "doc->'a\\b' = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R47",
+      "input": "doc->'a\u0001' = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R48",
+      "input": "doc->'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk' = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R49",
+      "input": "doc->2147483648 = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R50",
+      "input": "doc->= x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
+      "name": "R51",
+      "input": "doc->-1 = x",
+      "expect_error": {
+        "position": 5
+      }
+    },
+    {
       "name": "A1",
       "input": "status = '''; DROP TABLE users; --'",
       "expect": [
@@ -944,6 +1252,34 @@
           "value": [
             "1); DROP TABLE users; --"
           ]
+        }
+      ]
+    },
+    {
+      "name": "A13",
+      "input": "doc->''' OR 1=1 --' = x",
+      "expect": [
+        {
+          "column": "doc",
+          "path": [
+            "' OR 1=1 --"
+          ],
+          "op": "=",
+          "value": "x"
+        }
+      ]
+    },
+    {
+      "name": "A14",
+      "input": "email->domain = x",
+      "expect": [
+        {
+          "column": "email",
+          "path": [
+            "domain"
+          ],
+          "op": "=",
+          "value": "x"
         }
       ]
     }

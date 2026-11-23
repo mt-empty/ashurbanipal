@@ -385,6 +385,11 @@ export function scopeIdentity(): string {
   return visitKey(state.scope.source, state.scope.schema);
 }
 
+// Tells one view from another, scope included; a filter, sort or page doesn't change it.
+export function viewIdentity(): string {
+  return JSON.stringify([scopeIdentity(), viewKey(state.view)]);
+}
+
 // The names the page URL carries: only where there was a choice, so a link
 // stays short and opens on a sibling whose one source has another name.
 export function chosenScope(): { source: string | null; schema: string | null } {
@@ -706,6 +711,18 @@ export function getLastPayload(): ViewData | null {
 
 let lastRowDiffKey: string | null = null;
 
+// The view lastPayload was drawn for, so a failed switch can't lend its columns to the new view.
+let lastPayloadView: string | null = null;
+export function columnsInView(): Column[] | undefined {
+  return lastPayloadView === viewIdentity() ? lastPayload?.columns : undefined;
+}
+
+// The last page of the view in state that had rows, for hints about an empty result.
+let lastFull: { view: string; data: ViewData } | null = null;
+export function lastRowsForView(): ViewData | null {
+  return lastFull?.view === viewIdentity() ? lastFull.data : null;
+}
+
 // Advances the lastPayload/lastRowDiffKey bookkeeping, since it only ever happens
 // alongside this diff.
 export function diffRows(data: ViewData, highlightNew: boolean): RowChanges {
@@ -715,6 +732,8 @@ export function diffRows(data: ViewData, highlightNew: boolean): RowChanges {
     sameScope: lastRowDiffKey === nowScope,
   });
   lastPayload = data;
+  lastPayloadView = viewIdentity();
   lastRowDiffKey = nowScope;
+  if (data.rows.length > 0) lastFull = { view: viewIdentity(), data };
   return result;
 }

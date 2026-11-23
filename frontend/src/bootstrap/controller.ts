@@ -35,11 +35,12 @@ import { gridIsStale, syncGridLock } from "../features/grid-lock.js";
 import { seedColumns, tableColumns } from "../features/join-catalog.js";
 import { openJoinDialog, refreshSavedChips } from "../features/join-dialog.js";
 import { clearJoinNotice, showJoinNotice, splitColumnKey, updateJoinChrome } from "../features/join-view.js";
+import { olderServerMessage, textOrderNotice } from "../features/json-path.js";
 import { setLoadingBar } from "../features/load-bar.js";
 import { setActiveTable, setTableChipLoading } from "../features/table-chips.js";
 import { loadTableMeta, type TableMeta, tableMeta } from "../features/table-meta.js";
 import { syncUrl } from "../features/view-history.js";
-import { syncViewNotice } from "../features/view-notice.js";
+import { offerViewNotice, syncViewNotice } from "../features/view-notice.js";
 import { joinLabel, tablesToExpand, toWire } from "../lib/join-def.js";
 import { JOIN_MAX_BYTES } from "../lib/join-dsl.js";
 import { changedRowsText } from "../lib/row-diff.js";
@@ -199,6 +200,8 @@ function viewTitle(view: View | null): string | null {
 // A switch failed while the grid still shows another view, so the message
 // names the one it could not open; the access message already does.
 function failedLoadError(e: unknown, view: View, next: ViewRequest | undefined): unknown {
+  const older = olderServerMessage(e, (next ?? currentRequest())?.ast ?? []);
+  if (older) return new Error(older);
   const plain = plainError(e, view);
   const switching = (next !== undefined && viewKey(next.view) !== viewKey(state.view)) || gridIsStale();
   if (!switching || plain !== e) return plain;
@@ -371,4 +374,5 @@ async function runLoad({
     $("main").scrollTo({ top: 0, left: 0, behavior: reduce ? "instant" : "smooth" });
   }
   if (notice !== undefined) reportError(notice);
+  offerViewNotice(textOrderNotice(req.ast));
 }

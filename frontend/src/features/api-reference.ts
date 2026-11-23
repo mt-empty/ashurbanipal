@@ -211,7 +211,7 @@ function buildApiReference() {
       },
     ],
     filter: {
-      wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, op, value?}, ...]",
+      wire_format: "URL-encoded JSON array of condition objects: [{logic?, not?, column, path?, op, value?}, ...]",
       operators: ["=", "!=", ">", ">=", "<", "<=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"],
       limits: { max_conditions: 10, max_json_bytes: 8192 },
       notes: [
@@ -220,10 +220,11 @@ function buildApiReference() {
         "`value` is a JSON string, except: IN takes an array of 1 to 1000 strings, BETWEEN takes [low, high] (inclusive), and IS NULL / IS NOT NULL take none. There is no NOT IN op — use `not: true` with IN.",
         "a column whose `class` is number, float, temporal or time compares in its own type for every operator except LIKE/ILIKE, so age > 9 includes 10 and price = 1 matches 1.00. Its value must look like one: a decimal number (no exponent; float also allows one), YYYY-MM-DD for a date, an optional HH:MM[:SS[.ffffff]] after it for a timestamp, HH:MM[:SS[.ffffff]] for a time. A value is read in the database session's time zone; an offset (+02:00, Z) is allowed only on a column whose type has a time zone (Postgres timestamptz/timetz), which renders its own values with one — anything else is a 400 invalid_filter. Every value the database itself shows for such a column is also accepted (Postgres NaN, infinity, BC dates, 24:00; MySQL TIME beyond 24 hours, the zero date), so a cell's own text always filters back to its row.",
         "every other column (text, uuid, json, enum, boolean, ...) and every LIKE/ILIKE compares as text: the column's text rendering, so a boolean is true/false on Postgres but 1/0 on MySQL and SQLite.",
+        '`path` steps into a column whose `class` is json: 1 to 8 steps, each a key (a string of 1 to 255 UTF-8 bytes with no `"`, `\\` or control character) or an array index (an integer 0 to 2147483647). Its value always compares as text, case-sensitively: a string unquoted, a number or object as its JSON text, a boolean as true/false. A missing key, a JSON null and a step into the wrong kind all read as NULL. A path on any other column is a 400 invalid_filter.',
         "an empty condition array is treated identically to an absent `filter` param.",
         "on GET /tables/join a condition may carry `join` (the table position, default 0); on GET /tables/data any `join` is a 400.",
         "at most 10 conditions and 8192 bytes of URL-decoded JSON — exceeding either is a 400.",
-        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text (plus `column [NOT] IN (a, b)` and `column [NOT] BETWEEN lo AND hi`) and compiles it to this AST client-side — DSL text sent as the `filter` param is a 400.",
+        "this UI's filter box is a convenience that accepts `[NOT] column OP value [AND|OR ...]` text (plus `column [NOT] IN (a, b)`, `column [NOT] BETWEEN lo AND hi`, and `column->key->0` for a path) and compiles it to this AST client-side — DSL text sent as the `filter` param is a 400.",
       ],
       example: [
         { column: "status", op: "=", value: "completed" },
@@ -231,6 +232,7 @@ function buildApiReference() {
         { logic: "AND", column: "id", op: "IN", value: ["7", "9"] },
         { logic: "OR", column: "total_cents", op: "BETWEEN", value: ["100", "5000"] },
         { logic: "OR", column: "deleted_at", op: "IS NULL" },
+        { logic: "AND", column: "metadata", path: ["prefs", "theme"], op: "=", value: "dark" },
       ],
     },
   };

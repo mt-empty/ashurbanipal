@@ -1,6 +1,6 @@
 # JSONB / JSON path filter
 
-> **Status:** OPEN · **Area:** spec, ports, conformance, frontend
+> **Status:** DONE · **Area:** spec, ports, conformance, frontend · **Ref:** PR #301 (backend), then the frontend PR
 
 Read-only, but it widens the filter's SQL surface. Treat the security
 rules and the cross-engine tests as the main body of work, not the SQL.
@@ -182,9 +182,11 @@ Each form below was run on the versions in §3.2 with bound parameters.
   (`features/grid.ts`, `#cell-pop`).
 - Grid: while a path filter is active, the matched key and value are
   marked with a soft wash inside each JSON cell.
-- Notice: after `<`, `>`, `<=`, `>=` or `BETWEEN` on a path, a neutral
-  notice says the value is compared as text (`payload->n > 9` finds 90–99
-  on the seed `events` table, not 10–399). Never shown for `=`.
+- Notice: after `<`, `>`, `<=`, `>=` or `BETWEEN` on a path with a value
+  that looks like a number, a neutral notice says the value is compared as
+  text (`payload->n > 9` finds 90–99 on the seed `events` table, not
+  10–399). Never shown for `=`, nor for dates and words, which order
+  correctly as text.
 - Empty result: when a loaded value differs from the typed one only by
   case, the empty state names it and points to `ILIKE`.
 

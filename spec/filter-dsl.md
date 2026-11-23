@@ -26,7 +26,7 @@ dependency).
 ```
 condition (AND|OR condition)*
 condition := [NOT] simple_condition
-simple_condition := column OP value
+simple_condition := column OP value      (column may carry a JSON path: col->key->0)
            | column [NOT] IN ( value, value, ... )
            | column [NOT] BETWEEN value AND value
            | column IS NULL
@@ -59,7 +59,9 @@ simple_condition
 list        = "(" , ows , item , { ows , "," , ows , item } , ows , ")" ;
 item        = quoted | list_bare ;
 list_bare   = { any-char-except-ws-quote-comma-parens }- ;
-column      = [ qualifier , "." ] , name ;         (* qualifier only in a join view, §3 *)
+column      = [ qualifier , "." ] , name , { path_step } ;  (* qualifier only in a join view, §3 *)
+path_step   = ( "->>" | "->" ) , ( name | digits | quoted ) ;  (* at most 8; no whitespace *)
+digits      = digit , { digit } ;                  (* an array index, 0 to 2147483647 *)
 qualifier   = name | '"' , { any-char-except-quote | '""' } , '"' ;   (* quoted: at least one char *)
 name        = ( letter | "_" ) , { letter | digit | "_" } ;
 operator    = "=" | "!=" | ">=" | "<=" | ">" | "<" | "LIKE" | "ILIKE" ;
@@ -79,6 +81,20 @@ Notes:
   (§3). No whitespace is allowed around the `.`, and only one qualifier is
   allowed (`a.b.c` is a parse error). Outside a join view a `.` in a column
   is a parse error, exactly as before.
+- **JSON paths** (`metadata->prefs->theme`, `o.metadata->status`) step into
+  a JSON column, after the qualifier if there is one. A step is a bare
+  name, digits (an array index), or a quoted key with `''` for a quote:
+  `'0'` is the key `"0"`, not the first item. `->>` means the same as `->`,
+  so Postgres pasted from psql parses. No whitespace is allowed anywhere in
+  the column and its path, the same rule as for the `.`. At most 8 steps;
+  a key is 1 to 255 UTF-8 bytes with no `"`, `\` or control character
+  (U+0000 to U+001F), and an index is at most 2147483647: the limits of
+  `spec/protocol.md` §5.4.2, which refuses such keys rather than escaping
+  them. A dot never starts a path (`data.status` is a qualified column),
+  and neither `data["k"]` nor `data#>'{k}'` is a path.
+- **Longest-match on arrows**: `->>` is tried before `->`, and an arrow
+  counts only right after a column or a step, so `metadata->n>5` is the
+  path `[n]`, `>` and `5`, and `metadata->>n>5` is the same.
 - **Whitespace** around symbolic operators is optional (`status=completed`
   is valid); word operators (`LIKE`, `ILIKE`, `IN`, `BETWEEN`, `IS NULL`,
   `AND`, `OR`, `NOT`) require surrounding whitespace. Whitespace between
@@ -125,7 +141,9 @@ Notes:
   never produces SQL text, and never validates a column against the
   schema. `logic` is absent on the first condition and carries the
   joining `AND`/`OR` on every subsequent one; `not` reflects the prefix
-  `NOT`, `NOT IN` or `NOT BETWEEN`; `value` is absent exactly for `IS NULL`/`IS NOT NULL`,
+  `NOT`, `NOT IN` or `NOT BETWEEN`; `path`, present only when the column
+  has one, is an array of strings (keys) and integers (indexes);
+  `value` is absent exactly for `IS NULL`/`IS NOT NULL`,
   and is an array of strings for `IN` (the list items) and `BETWEEN`
   (`[lo, hi]`).
 - **Join view.** The join overlay (`spec/join-dsl.md`) runs the same parser
@@ -224,6 +242,18 @@ fixtures, not this table.)
 | V35 | `total BETWEEN 20 AND 10` | reversed bounds parse (the server returns zero rows) |
 | V36 | `u.id IN (1) OR o.total BETWEEN 1 AND 2` with aliases `[o, u]` | `join` 1 then 0 |
 | V37 | `total NOT BETWEEN 1 AND 2` | same AST as `NOT total BETWEEN 1 AND 2` |
+| V38 | `metadata->status = failed` | `(metadata, path ["status"], =, "failed")` |
+| V39 | `metadata->>status = failed` | same as V38: `->>` is `->` |
+| V40 | `o.metadata->status = failed` with aliases `[o, u]` | qualifier, then the path: `(join 0, metadata, path ["status"], …)` |
+| V41 | `doc->arr->0->'user id' = 42` | digits are an index: path `["arr", 0, "user id"]` |
+| V42 | `doc->'0' = x` | a quoted `0` is the key `"0"`: path `["0"]` |
+| V43 | `doc->'it''s' = x` | `''` in a quoted key: path `["it's"]` |
+| V44 | `metadata->n>5` | the arrow is not `>`: path `["n"]`, `>`, `"5"` |
+| V45 | `metadata->>n>5` | same as V44 |
+| V46 | `metadata->'a b'>=5` | quoted key, then `>=` |
+| V47 | `doc->a->b->c->d->e->f->g->h = 1` | 8 steps, the most allowed |
+| V48 | `doc->n IN (9, 10) AND NOT doc->n BETWEEN 1 AND 2 OR doc->status IS NULL` | a path with IN, NOT BETWEEN and IS NULL |
+| V49 | `doc->'$'->'.'->'['->'*'->'ü' = x` | characters a JSON path language would read are plain keys once quoted |
 
 ### Rejected (parse errors)
 
@@ -266,6 +296,20 @@ fixtures, not this table.)
 | R35 | `id IN ((1))` | `(` cannot start a bare list item |
 | R36 | `idIN (1)` | `IN` needs whitespace before it |
 | R37 | `total BETWEEN NULL AND 5` | a bare `NULL` bound, as in a list; use `IS NULL` |
+| R38 | `doc->a->b->c->d->e->f->g->h->i = 1` | 9 steps; the error is at the ninth |
+| R39 | `metadata -> role = admin` | whitespace before `->` |
+| R40 | `metadata-> role = admin` | whitespace after `->` |
+| R41 | `data.status = x` with no aliases | a dot is a qualifier, never a path |
+| R42 | `data["k"] = x` | not a path syntax |
+| R43 | `data#>'{a}' = x` | not a path syntax |
+| R44 | `doc->'' = x` | empty key |
+| R45 | `doc->'say "hi"' = x` | a key holding `"` |
+| R46 | `doc->'a\b' = x` | a key holding `\` |
+| R47 | `doc->'a` + U+0001 + `' = x` | a key holding a control character |
+| R48 | `doc->'` + 256 × `k` + `' = x` | a key over 255 bytes |
+| R49 | `doc->2147483648 = x` | an index past 2147483647 |
+| R50 | `doc->= x` | an arrow with no step |
+| R51 | `doc->-1 = x` | an index can't be negative |
 
 ### Adversarial (must parse *or* reject safely — never reach SQL text)
 
@@ -283,6 +327,8 @@ fixtures, not this table.)
 | A10 | `NOT pg_sleep = 1` | parses (lexically legal) but fails the schema allow-list check on column `pg_sleep`, same as A8 — `NOT` doesn't bypass allow-listing |
 | A11 | `u.pg_sleep = 1` with aliases `[o, u]` | parses with `join 1`; the column fails the allow-list of table 1, same as A8 |
 | A12 | `id IN ('1); DROP TABLE users; --')` | parses; one list item, a bind param — harmless |
+| A13 | `doc->''' OR 1=1 --' = x` | parses; the key `' OR 1=1 --` is a bind param — harmless |
+| A14 | `email->domain = x` | parses (the parser knows no types); the server refuses a path on a column that isn't json with a 400, and the page stops it before sending when it knows the column |
 
 Test A8 is the reminder that the grammar is only half the defense: the
 server-side column allow-list check (`spec/protocol.md` §5.4.2/§6) must
@@ -296,10 +342,13 @@ Several features write clauses against this grammar that the parser then
 reads back: click-to-filter on a grid cell or record-view field, FK cell
 navigation, the referenced-by drill-in, and the common-values dropdown.
 They build text through `quoteFilterValue()`, `filterClause()`,
-`eqClause()` and `filterClauses()` in `frontend/src/lib/filter-dsl.ts`,
+`eqClause()`, `filterClauses()`, `pathText()` and `pathEqClause()` in
+`frontend/src/lib/filter-dsl.ts`,
 which implement §2's quoting notes — bare when safe, single-quoted with
 `''`-escaping otherwise, exact-match `AND`/`OR`/`NOT` forced to quote.
-They emit only `column = value` and, for a null cell, `column IS NULL`.
+They emit only `column = value` and, for a null cell, `column IS NULL`;
+the JSON tree's leaves emit the same with a path (`column->key->0 = value`),
+and `pathText()` returns nothing for a key §2 can't write.
 
 This is clause *composition*, not the parser `frontend-style-guide.md` §7
 keeps client-side: it never parses or judges arbitrary user-typed text, only
