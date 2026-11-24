@@ -14,7 +14,7 @@ categories = ["database"]
 sqlx = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "1"
+toml = { version = "1", default-features = false, features = ["std", "serde", "parse"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 flate2 = "1"
