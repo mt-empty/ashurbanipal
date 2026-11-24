@@ -5,6 +5,21 @@ Notable changes to the `ashurbanipal` core crate (framework-agnostic config, `Db
 version is tracked separately in `spec/CHANGELOG.md`. Changes before 0.3.0 are
 not tracked here — see the git history.
 
+## [0.15.0] - 2026-11-24
+
+### Features
+
+- *(protocol)* JSON path filter conditions (#301)
+- *(frontend)* JSON path filters in the filter box (#302)
+
+### Bug Fixes
+
+- *(deps)* Bump url and trim default features to clear RustSec advisories (#313)
+
+### Documentation
+
+- Groom the backlog and fix the spec's time-zone wording (#299)
+
 ## [0.14.0] - 2026-11-14
 
 ### Features
