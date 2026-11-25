@@ -94,7 +94,7 @@ export function mapSelectDenied(err: unknown, table: string, sort: string | unde
   return err;
 }
 
-const BAD_VALUE_SQLSTATES = new Set(["22P02", "22003", "22007", "22008", "22021", "22P05"]);
+const BAD_VALUE_SQLSTATES = new Set(["22P02", "22003", "22007", "22008", "22021", "22025", "22P05"]);
 
 /** Whether an engine's SQLSTATE names a bad value, which in a filtered query is the filter's (spec/protocol.md §5.4.2). */
 function isBadValueSqlState(code: string): boolean {

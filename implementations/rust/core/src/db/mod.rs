@@ -474,7 +474,7 @@ pub(crate) fn quote_ident(ident: &Ident) -> String {
 pub(crate) fn is_bad_value_sqlstate(code: &str) -> bool {
     matches!(
         code,
-        "22P02" | "22003" | "22007" | "22008" | "22021" | "22P05"
+        "22P02" | "22003" | "22007" | "22008" | "22021" | "22025" | "22P05"
     )
 }
 

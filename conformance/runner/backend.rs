@@ -115,6 +115,15 @@ pub enum NotJoinableColumns {
     NotSeeded,
 }
 
+/// What a `LIKE`/`ILIKE` pattern ending in `\` does (`spec/protocol.md`
+/// §5.4.2).
+pub enum TrailingLikeEscape {
+    /// Postgres: SQLSTATE `22025`, reported as 400 `invalid_filter`.
+    InvalidFilter,
+    /// MySQL/MariaDB and SQLite: the `\` is a literal character.
+    Literal,
+}
+
 /// Whether a value compared typed must fit its column's form
 /// (`spec/protocol.md` §5.4.2).
 #[derive(PartialEq, Eq)]
@@ -242,6 +251,13 @@ impl Backend {
         match self {
             Backend::Postgres | Backend::Mysql => TypedValueCheck::Enforced,
             Backend::Sqlite => TypedValueCheck::Skipped,
+        }
+    }
+
+    pub fn trailing_like_escape(self) -> TrailingLikeEscape {
+        match self {
+            Backend::Postgres => TrailingLikeEscape::InvalidFilter,
+            Backend::Mysql | Backend::Sqlite => TrailingLikeEscape::Literal,
         }
     }
 

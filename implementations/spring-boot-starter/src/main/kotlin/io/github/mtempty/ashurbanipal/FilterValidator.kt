@@ -196,7 +196,7 @@ private fun pgTimestamp(v: String, time: Regex): Boolean = PG_INFINITY_RE.matche
     pgDateBc(v) { t, bc -> timestampOf(t, { calendarDate(it, wideYears = true, bc = bc) }) { time.matches(it) } }
 
 /** SQLSTATEs that name a bad value, which in a filtered query is the filter's (`spec/protocol.md` §5.4.2). */
-internal val BAD_VALUE_SQLSTATES = setOf("22P02", "22003", "22007", "22008", "22021", "22P05")
+internal val BAD_VALUE_SQLSTATES = setOf("22P02", "22003", "22007", "22008", "22021", "22025", "22P05")
 
 data class WhereClause(val sql: String, val values: List<String>)
 

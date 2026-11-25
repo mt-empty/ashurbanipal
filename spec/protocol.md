@@ -473,8 +473,9 @@ Evaluation rules:
     operation (`DateStyle` ISO), whatever the server's default, so a
     cell's text has one of these forms.
 - An engine error that reports a bad value in a filtered query (SQLSTATE
-  `22P02`, `22003`, `22007`, `22008`, `22021` or `22P05`, such as a
-  MySQL cast out of range) MUST be reported as 400 `invalid_filter`, not
+  `22P02`, `22003`, `22007`, `22008`, `22021`, `22025` or `22P05`, such as
+  a MySQL cast out of range, or a Postgres `LIKE` pattern ending in `\`)
+  MUST be reported as 400 `invalid_filter`, not
   a 5xx. Any other error is not the filter's: a division by zero in a
   view stays a 5xx.
 - `IN` matches when the column equals any listed value, compared as
