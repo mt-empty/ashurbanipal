@@ -205,6 +205,37 @@ test("a tick tints new rows, shows the +N chip and the updated time", async ({ p
   await expect(page.locator("#status")).toHaveText("");
 });
 
+test("the change chips never push the actions onto a second row", async ({ page }) => {
+  const mock = await setup(page);
+  await choose(page, "5 s");
+  await page.keyboard.press("Escape");
+  // Narrow #meta to just fit the title, the actions and the gaps, with less slack than one chip.
+  await page.evaluate(() => {
+    const meta = document.getElementById("meta") as HTMLElement;
+    const gap = Number.parseFloat(getComputedStyle(meta).columnGap);
+    const fit = (id: string) => (document.getElementById(id) as HTMLElement).getBoundingClientRect().width;
+    meta.style.width = `${fit("meta-title") + fit("actions") + 2 * gap + 12}px`;
+  });
+  const top = (sel: string) => page.locator(sel).evaluate((el) => el.getBoundingClientRect().top);
+  const titleTop = await top("#meta-title");
+  const actionsTop = await top("#actions");
+  const tableTop = await top("#data-table");
+  expect(Math.abs(actionsTop - titleTop)).toBeLessThan(4);
+
+  mock.body = payload([
+    [1, "a"],
+    [2, "b2"],
+    [3, "c"],
+    [4, "d"],
+  ]);
+  await tick(page, mock);
+  await expect(page.locator("#row-new-chip")).toHaveText("+2 new");
+  await expect(page.locator("#row-changed-chip")).toHaveText("1 changed");
+
+  expect(await top("#actions")).toBe(actionsTop);
+  expect(await top("#data-table")).toBe(tableTop);
+});
+
 test("arrow keys move the interval choice without closing the menu; Enter closes it", async ({ page }) => {
   await setup(page);
   await page.locator("#refresh-menu-btn").click();

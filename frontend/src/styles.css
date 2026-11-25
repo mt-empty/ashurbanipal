@@ -255,10 +255,12 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .375rem 
 #refresh-pop input { accent-color: CanvasText; }
 #refresh-pop-foot { margin: .3rem 0 0; padding: .4rem .5rem .15rem; border-top: 1px solid var(--rule);
           font-size: .75rem; line-height: 1.4; color: var(--text-muted); }
-#row-new-chip, #row-changed-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
+/* A zero basis and min-width count the chips as no width when #meta decides
+   where to wrap, so showing or hiding them never moves #actions. */
+#row-chips { flex: 1 1 0; min-width: 0; display: flex; gap: .25rem; overflow: hidden; }
+#row-new-chip, #row-changed-chip { flex: none; white-space: nowrap; padding: .05rem .5rem; border-radius: 999px;
           background: var(--row-new-bg); color: CanvasText; font-size: .75rem; }
 #row-changed-chip { background: var(--cell-changed-bg); }
-#row-new-chip:not([hidden]) + #row-changed-chip { margin-left: .25rem; }
 
 /* ==== Data table ==== */
 /* Scoped to #data-table so the Other services grid doesn't inherit these;
@@ -432,6 +434,7 @@ mark.json-match { background: var(--json-match-bg); color: inherit; border-radiu
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); line-height: 1.25; }
 #meta-title { color: var(--text-muted); }
+#row-updated { font-variant-numeric: tabular-nums; }
 #sort-note { color: CanvasText; }
 #sort-note-col { font-family: var(--font-mono); }
 #sort-note-show { background: none; border: none; padding: 0 .15rem; font: inherit; color: inherit;
