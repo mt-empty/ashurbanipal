@@ -3,6 +3,7 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -201,6 +202,14 @@ func TestWriteErrorNamesTimeoutsAndBadJoins(t *testing.T) {
 		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), `"code":"`+tc.code+`"`) {
 			t.Errorf("%v: got %d %s, want %d %s", tc.err, rec.Code, rec.Body.String(), tc.status, tc.code)
 		}
+	}
+}
+
+func TestDatabaseErrorTitleCarriesNoEngineText(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeError(rec, errors.New("select secret from t"))
+	if body := rec.Body.String(); strings.Contains(body, "secret") || !strings.Contains(body, `"title":"database error"`) {
+		t.Errorf("got %s, want title \"database error\" with no engine text", body)
 	}
 }
 

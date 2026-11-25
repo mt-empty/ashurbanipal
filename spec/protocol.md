@@ -92,6 +92,8 @@ interpreted as described in RFC 2119.
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
+    A `database_error` `title` MUST NOT carry the engine's error text or
+    any SQL; implementations SHOULD log that detail server-side instead.
 - Every API response (§5.2–§5.11), success or error, MUST carry the
   protocol version header (§7).
 - Every API response (§5.2–§5.11), success or error, MUST carry

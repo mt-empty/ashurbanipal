@@ -5,6 +5,7 @@ A disabled Config registers no routes (`spec/protocol.md` §4).
 
 from __future__ import annotations
 
+import logging
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
@@ -42,6 +43,8 @@ PROTOCOL_VERSION = "1"
 
 _SIBLING_HEALTH_TIMEOUT_SECS = 3
 _MAX_I64 = 2**63 - 1
+
+_log = logging.getLogger(__name__)
 
 
 def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str = "/__ashurbanipal") -> Blueprint:
@@ -304,7 +307,8 @@ def problem_for(err: DbError) -> tuple[int, str, str]:
         return 400, "unsortable_column", f"cannot sort by {err}: its type has no ordering"
     if isinstance(err, QueryTimeout):
         return 500, "query_timeout", "query timed out"
-    return 500, "database_error", f"database error: {err}"
+    _log.error("ashurbanipal database error", exc_info=err)
+    return 500, "database_error", "database error"
 
 
 def _table_to_dict(t: TableInfo) -> dict[str, Any]:

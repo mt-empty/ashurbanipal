@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/big"
 	"net/http"
@@ -236,7 +237,8 @@ func writeError(w http.ResponseWriter, err error) {
 		httpProblemError(w, http.StatusInternalServerError, "query_timeout", "query timed out")
 		return
 	}
-	httpProblemError(w, http.StatusInternalServerError, "database_error", fmt.Sprintf("database error: %s", err))
+	slog.Error("ashurbanipal: database error", "err", err)
+	httpProblemError(w, http.StatusInternalServerError, "database_error", "database error")
 }
 
 // querySchema returns the "schema" query param as a *string, nil when

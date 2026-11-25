@@ -247,6 +247,6 @@ export function errorResult(err: unknown): ApiResult {
   if (err instanceof BadParamError) return problem(400, "invalid_parameter", err.message);
   if (err instanceof UnsortableError) return problem(400, "unsortable_column", err.message);
   if (isQueryTimeout(err)) return problem(500, "query_timeout", "query timed out");
-  const message = err instanceof Error ? err.message : String(err);
-  return problem(500, "database_error", `database error: ${message}`);
+  console.error("ashurbanipal: database error", err);
+  return problem(500, "database_error", "database error");
 }
