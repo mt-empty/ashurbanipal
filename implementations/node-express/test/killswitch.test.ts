@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { expect, it } from "vitest";
+import type { Config } from "../src/config.js";
 import type { DbSource } from "../src/db/types.js";
 import { createRouter, type NamedSource } from "../src/routes.js";
 
@@ -58,6 +59,26 @@ it("enabled: false is disabled", async () => {
       expect(res.status, `GET ${path}`).toBe(404);
     }
   });
+});
+
+it("an undefined or null config is disabled", async () => {
+  for (const config of [undefined, null]) {
+    const router = createRouter(config as unknown as Config, noSources);
+    await withServer(router, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/__ashurbanipal`);
+      expect(res.status, `config: ${config}`).toBe(404);
+    });
+  }
+});
+
+it("a non-boolean enabled is disabled", async () => {
+  for (const enabled of ["false", "true", 1]) {
+    const router = createRouter({ enabled: enabled as unknown as boolean }, noSources);
+    await withServer(router, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/__ashurbanipal`);
+      expect(res.status, `enabled: ${JSON.stringify(enabled)}`).toBe(404);
+    });
+  }
 });
 
 it("enabled: true enables routes", async () => {

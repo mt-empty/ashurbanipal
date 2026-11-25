@@ -50,7 +50,8 @@ export interface Config {
 }
 
 export function isEnabled(config: Config): boolean {
-  return config.enabled ?? false;
+  // A JavaScript host can pass any value; only a real `true` enables, so `"false"` stays disabled.
+  return config?.enabled === true;
 }
 
 export function basePath(config: Config): string {

@@ -396,8 +396,12 @@ port's source, once per port, before it's added to the registry.
    autoconfiguration is the obvious risk, but this generalizes) tends to
    bias toward "found on the classpath, no explicit config → sensible
    defaults, turned on." That's backwards here: absent or malformed
-   kill-switch config MUST result in disabled, never enabled. Verify with
-   a port test asserting the *no-config* case specifically.
+   kill-switch config MUST result in disabled, never enabled. Never coerce
+   the switch with the language's truthiness rules, under which the string
+   `"false"` counts as true; a framework's own documented boolean parsing
+   (Spring's `on`/`yes`/`1`) is fine. Verify with a port test asserting the
+   *no-config* case specifically, and one asserting a non-boolean value is
+   disabled.
 3. **Vendoring integrity is a per-port CI check, not a one-time release
    fact.** Covered above under "Vendoring the frontend," step 4 — the
    port's own CI must re-hash the file it actually ships on every build,
