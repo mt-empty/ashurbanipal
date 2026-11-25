@@ -94,7 +94,8 @@ def connect_kwargs_from_url(url: str) -> dict[str, Any]:
 
 def _quote_ident(ident: str) -> str:
     """Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5)."""
-    return "`" + ident.replace("`", "``") + "`"
+    # PyMySQL formats a query that has parameters with `%`, quoted names included.
+    return "`" + ident.replace("`", "``").replace("%", "%%") + "`"
 
 
 def _timed_select(variant: str, timeout_secs: int, body: str) -> str:

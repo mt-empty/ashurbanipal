@@ -502,3 +502,42 @@ def test_sorting_an_unorderable_column_is_a_client_error(source, join_schemas) -
     for column in ("bag", "dom", "id"):
         source.query_table(sorting, "a", QueryOpts(sort=column, **page))
     assert source.query_table(sorting, "a", QueryOpts(**page)).columns[3].column_class == "json"
+
+
+def test_percent_signs_in_names_reach_sql_as_literal_text(source) -> None:
+    # psycopg reads `%` in a parameterized query, so a name holding one must still be browsable.
+    schema = "ashb_test_flask_percent"
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(f"drop schema if exists {schema} cascade")
+        cur.execute(f"create schema {schema}")
+        cur.execute(f'create table {schema}."%" (id int primary key, "%s" text, "%(x)s" text, "%%" text)')
+        cur.execute(f"""insert into {schema}."%" values (1, 'a', 'b', 'c'), (2, 'd', 'e', 'f')""")
+        try:
+            app = Flask(__name__)
+            app.register_blueprint(router(Config(enabled=True), [("primary", source)]))
+            client = app.test_client()
+            api = "/__ashurbanipal/api"
+
+            resp = client.get(f"{api}/tables/data", query_string={"schema": schema, "table": "%", "sort": "%s"})
+            assert resp.status_code == 200, resp.data
+            assert json.loads(resp.data)["rows"][0] == {"id": "1", "%s": "a", "%(x)s": "b", "%%": "c"}
+
+            condition = [{"column": "%%", "op": "=", "value": "f"}]
+            resp = client.get(
+                f"{api}/tables/data",
+                query_string={"schema": schema, "table": "%", "filter": json.dumps(condition)},
+            )
+            assert resp.status_code == 200, resp.data
+            assert [r["id"] for r in json.loads(resp.data)["rows"]] == ["2"]
+
+            join = {
+                "table": "%",
+                "joins": [
+                    {"type": "inner", "table": "%", "on": [{"left": {"join": 0, "column": "%s"}, "right": "%s"}]}
+                ],
+            }
+            resp = client.get(f"{api}/tables/join", query_string={"schema": schema, "join": json.dumps(join)})
+            assert resp.status_code == 200, resp.data
+            assert len(json.loads(resp.data)["rows"]) == 2
+        finally:
+            cur.execute(f"drop schema if exists {schema} cascade")

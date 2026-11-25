@@ -353,3 +353,37 @@ def test_join_column_classes() -> None:
         ("year", OTHER),
     ):
         assert column_class(t, t) == expected, t
+
+
+def test_percent_signs_in_names_reach_sql_as_literal_text(seeded) -> None:
+    # PyMySQL formats a parameterized query with `%`, so a name holding one must still be browsable.
+    conn = pymysql.connect(**seeded.kwargs)
+    with conn.cursor() as cur:
+        cur.execute(
+            "create table `%` (id integer primary key, `%s` varchar(10), `%(x)s` varchar(10), `%%` varchar(10))"
+        )
+        cur.execute("insert into `%` values (1, 'a', 'b', 'c'), (2, 'd', 'e', 'f')")
+    conn.commit()
+    conn.close()
+
+    data = seeded.query_table(None, "%", QueryOpts(limit=10, offset=0, timeout_secs=5, sort="%s"))
+    assert data.rows[0] == {"id": "1", "%s": "a", "%(x)s": "b", "%%": "c"}
+
+    filtered = seeded.query_table(
+        None,
+        "%",
+        QueryOpts(limit=10, offset=0, timeout_secs=5, filter=[Comparison(column="%%", op="=", value="f")]),
+    )
+    assert [r["id"] for r in filtered.rows] == ["2"]
+
+    join = parse_join(
+        json.dumps(
+            {
+                "table": "%",
+                "joins": [
+                    {"type": "inner", "table": "%", "on": [{"left": {"join": 0, "column": "%s"}, "right": "%s"}]}
+                ],
+            }
+        )
+    )
+    assert len(seeded.source.query_join(None, join, JoinOpts(limit=10, offset=0, timeout_secs=5)).rows) == 2

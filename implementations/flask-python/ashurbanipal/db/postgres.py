@@ -89,8 +89,13 @@ def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, lis
     return f"({expr}{''.join(parts)})", [str(s) for s in path]
 
 
+def _quote_ident(ident: str) -> str:
+    # psycopg reads `%` anywhere in a query that has parameters, quoted names included.
+    return quote_ident(ident).replace("%", "%%")
+
+
 _JOIN_DIALECT = Dialect(
-    quote=quote_ident,
+    quote=_quote_ident,
     cast_text=lambda expr: f"{expr}::text",
     cast_param=lambda ph, target: f"{ph}::{target}",
     placeholder="%s",
@@ -323,10 +328,10 @@ class PgSource(DbSource):
 
                 where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
-                select_list = ", ".join(f"{quote_ident(c.name)}::text" for c in columns)
-                order_clause = table_order_clause(meta, sort, opts.descending, quote_ident)
+                select_list = ", ".join(f"{_quote_ident(c.name)}::text" for c in columns)
+                order_clause = table_order_clause(meta, sort, opts.descending, _quote_ident)
                 query = (
-                    f"select {select_list} from {quote_ident(resolved_schema)}.{quote_ident(table)}"
+                    f"select {select_list} from {_quote_ident(resolved_schema)}.{_quote_ident(table)}"
                     f"{where_clause}{order_clause} limit %s offset %s"
                 )
                 try:
