@@ -43,6 +43,7 @@ def test_a_lone_string_is_one_entry() -> None:
     config = Config.from_toml('allowed_hosts = "billing.internal"')
     assert config.allowed_hosts == ["billing.internal"]
     assert Config(allowed_hosts="billing.internal").allowed_hosts == ["billing.internal"]  # type: ignore[arg-type]
+    assert HostAllowList.build("billing.internal").allows("billing.internal")  # type: ignore[arg-type]
 
 
 def test_a_non_list_value_warns_and_matches_nothing() -> None:

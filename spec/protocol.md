@@ -103,7 +103,16 @@ interpreted as described in RFC 2119.
 - The UI is served at `{mount}`; the ten API routes live at
   `{mount}/api/...`.
 - `{mount}` is implementation-defined. `/__ashurbanipal` is the
-  conventional default, not a requirement.
+  conventional default, not a requirement. It MUST NOT be the root path:
+  a root mount would take `/` and `/api/...` from the host. An
+  implementation MUST refuse a root mount when it builds the router.
+- The viewer's own requests are a `GET` or `HEAD` to `{mount}` or one of
+  the ten API routes. Mounting the viewer MUST NOT change how the host
+  answers any other request: a host route elsewhere under `{mount}`, one
+  that only shares its prefix (`{mount}-admin`), or one on a viewer path
+  with another method keeps its own response, and so does the host's own
+  404. A request with another method to a viewer path that no host route
+  answers MAY get a 404 or a 405.
 - The frontend derives its API base from its own URL
   (`location.pathname + "/api"`), so an implementation MAY serve the
   unmodified frontend artifact at any mount, including behind a
@@ -139,9 +148,11 @@ stops the attack.
   pseudo-header. An implementation MUST NOT read `X-Forwarded-Host`,
   `Forwarded` or a framework's proxy-aware host instead: any client can set
   them. A request with no host, or a host of any other form, is rejected.
-- A rejected request MUST get a 404 on every route under `{mount}`, the UI
+- A rejected request MUST get a 404 on every viewer route, the UI
   included, before anything else runs: the same as an unmounted path
-  (§4).
+  (§4). That covers the viewer's own requests (§3) and any other method
+  to a viewer path that no host route answers. Every other request MUST
+  get the same response as with the check off, whatever its host.
 - Behind a proxy that rewrites `Host`, the list holds the name the app
   receives. A sibling's `base_url` (§5.6) is opened under that sibling's
   name, so the sibling's own list must include it.

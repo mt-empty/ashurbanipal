@@ -90,7 +90,7 @@ createRouter(config, [
 createRouter(
   {
     enabled: true,
-    basePath: "/__ashurbanipal", // optional; change the URL path
+    basePath: "/__ashurbanipal", // optional; change the URL path (not "/", which throws)
     limits: { defaultPageSize: 50, maxPageSize: 100, queryTimeoutSecs: 5 }, // optional; the defaults
   },
   sources,

@@ -57,18 +57,20 @@ class HostAllowListTest {
         return patterns
     }
 
+    private fun viewerPaths(vararg page: String, mount: String = page[0]) = page.toList() + VIEWER_API_PATHS.map { mount + it }
+
     @Test
-    fun `the filter covers only the mount`() {
-        assertThat(urlPatterns()).containsExactlyInAnyOrder("/__ashurbanipal", "/__ashurbanipal/*")
-        assertThat(urlPatterns("ashurbanipal.base-path=/viewer/")).containsExactlyInAnyOrder("/viewer", "/viewer/*")
+    fun `the filter covers only the viewer's exact paths`() {
+        assertThat(urlPatterns()).containsExactlyInAnyOrderElementsOf(viewerPaths("/__ashurbanipal"))
+        assertThat(urlPatterns("ashurbanipal.base-path=/viewer/")).containsExactlyInAnyOrderElementsOf(viewerPaths("/viewer"))
     }
 
     @Test
     fun `the filter follows the DispatcherServlet's own path`() {
         assertThat(urlPatterns("spring.mvc.servlet.path=/app"))
-            .containsExactlyInAnyOrder("/app/__ashurbanipal", "/app/__ashurbanipal/*")
+            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app/__ashurbanipal"))
         assertThat(urlPatterns("spring.mvc.servlet.path=/app/", "ashurbanipal.base-path=viewer"))
-            .containsExactlyInAnyOrder("/app/viewer", "/app/viewer/*")
+            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app/viewer"))
     }
 
     @Test
@@ -84,8 +86,8 @@ class HostAllowListTest {
 
     @Test
     fun `a root mount never covers the host's other routes`() {
-        assertThat(urlPatterns("ashurbanipal.base-path=/")).containsExactlyInAnyOrder("", "/api/*")
+        assertThat(urlPatterns("ashurbanipal.base-path=/")).containsExactlyInAnyOrderElementsOf(viewerPaths("", mount = ""))
         assertThat(urlPatterns("ashurbanipal.base-path=/", "spring.mvc.servlet.path=/app"))
-            .containsExactlyInAnyOrder("/app", "/app/*")
+            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app", "/app/"))
     }
 }

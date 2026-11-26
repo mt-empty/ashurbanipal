@@ -3,7 +3,11 @@ package io.github.mtempty.ashurbanipal
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import org.springframework.http.server.RequestPath
 import org.springframework.web.filter.OncePerRequestFilter
+import org.springframework.web.method.HandlerMethod
+import org.springframework.web.servlet.HandlerMapping
+import org.springframework.web.util.ServletRequestPathUtils
 
 private val IPV6 = Regex("""\[[0-9A-Fa-f:.]+]""")
 private val REG_NAME = Regex("""[A-Za-z0-9._-]+""")
@@ -75,7 +79,16 @@ private fun parseHostPort(text: String): HostPort? {
  * there and never sees the host's other routes. A rejected request gets the
  * container's 404, the same as an unmounted path.
  */
-class HostAllowListFilter(private val hosts: HostAllowList) : OncePerRequestFilter() {
+/**
+ * Registered on the viewer's exact paths only. Another method on one of them
+ * still reaches a host handler mapped there (`spec/protocol.md` §3).
+ */
+class HostAllowListFilter internal constructor(
+    private val hosts: HostAllowList,
+    private val hostRoutes: HostRouteLookup,
+) : OncePerRequestFilter() {
+    constructor(hosts: HostAllowList) : this(hosts, HostRouteLookup { null })
+
     init {
         hosts.warnings.forEach { logger.warn("ashurbanipal: $it") }
     }
@@ -83,10 +96,33 @@ class HostAllowListFilter(private val hosts: HostAllowList) : OncePerRequestFilt
     // getHeader, not getServerName: that follows forwarded headers under
     // server.forward-headers-strategy.
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, chain: FilterChain) {
-        if (hosts.allows(request.getHeader("Host"))) {
+        val viewerRequest = request.method == "GET" || request.method == "HEAD"
+        if (hosts.allows(request.getHeader("Host")) || (!viewerRequest && hostRoutes.handles(request))) {
             chain.doFilter(request, response)
         } else {
             response.sendError(HttpServletResponse.SC_NOT_FOUND)
+        }
+    }
+}
+
+/** Whether a handler other than the viewer's answers a request, as the DispatcherServlet would pick it. */
+internal class HostRouteLookup(private val mappings: () -> List<HandlerMapping>?) {
+    fun handles(request: HttpServletRequest): Boolean {
+        val previous = request.getAttribute(ServletRequestPathUtils.PATH_ATTRIBUTE) as RequestPath?
+        ServletRequestPathUtils.parseAndCache(request)
+        try {
+            for (mapping in mappings().orEmpty()) {
+                // A path match with no method match throws, and the DispatcherServlet stops there too.
+                val handler = try {
+                    mapping.getHandler(request)?.handler
+                } catch (_: Exception) {
+                    return false
+                } ?: continue
+                return !(handler is HandlerMethod && handler.beanType == AshurbanipalController::class.java)
+            }
+            return false
+        } finally {
+            ServletRequestPathUtils.setParsedRequestPath(previous, request)
         }
     }
 }

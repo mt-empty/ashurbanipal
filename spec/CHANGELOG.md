@@ -159,5 +159,11 @@ runner and the bundled UI changed together.
 
 §3.1 adds an optional `Host` allow-list against DNS rebinding. A request
 whose `Host` (or HTTP/2 `:authority`) is not on the list gets a 404 on
-every route. The check is off unless the host configures it, and a listed
-host gets the same responses as before, so v1 stands.
+every viewer route. The check is off unless the host configures it, and a
+listed host gets the same responses as before, so v1 stands.
+
+§3 now says which requests are the viewer's own (a `GET` or `HEAD` to
+`{mount}` or an API route), that mounting the viewer MUST NOT change how
+the host answers any other request, and that `{mount}` MUST NOT be the root
+path. No port served a working root mount in every case, and no response
+to a viewer request changes, so v1 stands.

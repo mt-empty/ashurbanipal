@@ -50,6 +50,8 @@ Every test below runs against a target started with `CONFORMANCE_ALLOWED_HOSTS=1
 | `P3.1-UNLISTED-404` | An unlisted `Host` gets 404 on every route, the UI included | `host_allow_list::an_unlisted_host_gets_404_on_every_route` |
 | `P3.1-NO-FORWARDED` | `X-Forwarded-Host` and `Forwarded` never pass the check | `host_allow_list::forwarded_headers_do_not_pass_the_check` |
 | `P3.1-MATCH` | Names compare case-insensitively; an entry with no port matches any port | `host_allow_list::a_listed_name_passes_in_any_case_and_on_any_port` |
+| `P3.1-HOST-ROUTES` | A host route (the demo's `GET /health`) answers an unlisted `Host` as it answers a listed one | `host_allow_list::a_host_route_answers_an_unlisted_host` |
+| `P3-HOST-ROUTES` | Host routes beside, under and at a viewer path with another method keep their own response; the host's 404 stays its own; a root mount is refused | out of scope here: each port's own test against `spec/fixtures/host-routes-untouched.json` |
 | `P3.1-ENTRY-RULES` | Entry ports, IPv6 brackets, a missing or malformed `Host`, bad entries, the startup warnings | out of scope here: each port's own matcher tests (Rust: `core/src/host_allow_list.rs`) |
 
 ## §4 Kill switch

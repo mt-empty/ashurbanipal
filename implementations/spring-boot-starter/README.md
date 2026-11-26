@@ -91,14 +91,14 @@ ashurbanipal:
 ```yaml
 ashurbanipal:
   enabled: true
-  base-path: /__ashurbanipal   # optional; change the URL path
+  base-path: /__ashurbanipal   # optional; change the URL path (not /)
   limits:                      # optional; these are the defaults
     default-page-size: 50
     max-page-size: 100
     query-timeout-secs: 5
 ```
 
-The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. In YAML, write the names in kebab-case (`base-url`, `health-path`). Set `ashurbanipal.allowed-hosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, the starter logs a warning at startup. The check is a servlet filter registered only for the mount's paths.
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. In YAML, write the names in kebab-case (`base-url`, `health-path`). Set `ashurbanipal.allowed-hosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, the starter logs a warning at startup. The check is a servlet filter registered only for the viewer's own paths, so your routes beside or under the mount are never checked. A `base-path` of `/` is deprecated: it takes `/` and `/api/...` from your app, logs a warning, and will be refused in a later release.
 
 ## Troubleshooting
 

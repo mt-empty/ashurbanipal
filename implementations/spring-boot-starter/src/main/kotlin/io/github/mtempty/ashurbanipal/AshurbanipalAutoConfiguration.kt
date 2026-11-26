@@ -1,5 +1,7 @@
 package io.github.mtempty.ashurbanipal
 
+import org.apache.commons.logging.LogFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -9,6 +11,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Conditional
 import org.springframework.core.env.Environment
 import org.springframework.core.Ordered
+import org.springframework.web.servlet.handler.HandlerMappingIntrospector
 import java.net.http.HttpClient
 import java.time.Duration
 import javax.sql.DataSource
@@ -68,22 +71,24 @@ class AshurbanipalAutoConfiguration {
     fun ashurbanipalMultipartExceptionResolver(properties: AshurbanipalProperties): MultipartExceptionResolver =
         MultipartExceptionResolver(properties.basePath)
 
-    /**
-     * Runs ahead of Spring's own filters, so a rejected request reaches nothing
-     * else. Filter patterns are relative to the context path but not to the
-     * DispatcherServlet's own `spring.mvc.servlet.path`, which the controller
-     * sits under, so that path is added here.
-     */
+    /** Runs ahead of Spring's own filters, so a rejected request reaches nothing else. */
     @Bean
     fun ashurbanipalHostAllowListFilter(
         properties: AshurbanipalProperties,
         environment: Environment,
+        introspector: ObjectProvider<HandlerMappingIntrospector>,
     ): FilterRegistrationBean<HostAllowListFilter> {
-        val servletPath = environment.getProperty("spring.mvc.servlet.path", "/").trimEnd('/')
-        val mount = servletPath + "/" + properties.basePath.trimStart('/')
+        val mount = ViewerMount.of(environment, properties.basePath)
+        if (mount.root) {
+            LogFactory.getLog(AshurbanipalAutoConfiguration::class.java).warn(
+                "ashurbanipal: a root base-path takes / and /api/... from the host app and will be refused " +
+                    "in a later release; mount the viewer under a path of its own (spec/protocol.md §3)",
+            )
+        }
         val hosts = HostAllowList(properties.allowedHosts)
-        return FilterRegistrationBean(HostAllowListFilter(hosts)).apply {
-            addUrlPatterns(*mountUrlPatterns(mount))
+        val hostRoutes = HostRouteLookup { introspector.ifAvailable?.handlerMappings }
+        return FilterRegistrationBean(HostAllowListFilter(hosts, hostRoutes)).apply {
+            addUrlPatterns(*mount.paths.toTypedArray())
             order = Ordered.HIGHEST_PRECEDENCE
             // Built either way so the filter logs the missing-list warning.
             isEnabled = hosts.active
@@ -97,10 +102,4 @@ class AshurbanipalAutoConfiguration {
         filterValidator: FilterValidator,
         httpClient: HttpClient,
     ): AshurbanipalController = AshurbanipalController(properties, dbSources, filterValidator, httpClient)
-}
-
-/** A root mount covers only the viewer's own paths, never the host's other routes; `""` is the servlet pattern for exactly the context root. */
-internal fun mountUrlPatterns(mount: String): Array<String> {
-    val trimmed = mount.trimEnd('/')
-    return if (trimmed.isEmpty()) arrayOf("", "/api/*") else arrayOf(trimmed, "$trimmed/*")
 }

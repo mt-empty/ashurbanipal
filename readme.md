@@ -261,7 +261,7 @@ app.register_blueprint(router(config, [("primary", SqliteSource(path="./demo.db"
 ```
 </details>
 
-Once mounted, the viewer is served under `/__ashurbanipal` (the default mount path; it's implementation-defined, see [`spec/protocol.md`](spec/protocol.md) §3).
+Once mounted, the viewer is served under `/__ashurbanipal` (the default mount path; it's implementation-defined but never `/`, see [`spec/protocol.md`](spec/protocol.md) §3). It answers only its own page and API routes, so your routes beside or under the mount keep working.
 
 ## Configuration
 

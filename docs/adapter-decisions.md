@@ -391,6 +391,22 @@ operation's transaction, then each table is spliced as `schema.table`.
 | MySQL/MariaDB | `` `db`.`table` ``: a schema is a database, so a join reads across databases on one server | The table allow-list for each named database comes from `information_schema.tables`, with the same un-gated listing as §5.2/§5.3; a table the role cannot read is the same 1142 → `not_readable` mapping. |
 | SQLite   | `main` only | Any other `schema` is `invalid_join`, like an unknown name. `ATTACH` stays out of scope. |
 
+## §3 — the viewer's paths, and host routes beside them
+
+Protocol property: only a `GET` or `HEAD` to `{mount}` or an API route is the
+viewer's. Every other request keeps the host's own response, with the `Host`
+check on or off; `spec/fixtures/host-routes-untouched.json` drives each port's
+test.
+
+| Port | Mechanism | Notes |
+|------|-----------|-------|
+| axum | `route_layer` on the viewer's own routes | A host route merged on a viewer path with another method keeps its handler. A wrong method with no host route gets 405, or 404 from an unlisted `Host`. |
+| actix-web | Scope guard: `GET`/`HEAD` whose path ends in `/__ashurbanipal` plus a viewer path, and a listed `Host` | A scope that matches answers every path under it, so the guard sends everything else on to the host. The guard sees only the full path, so a host route whose own path repeats `/__ashurbanipal/api/...` under the mount would also match; no real route looks like that. A wrong method with no host route gets the host's 404, not 405. |
+| Go | `Paths(cfg)` lists the exact paths to register | The older `{mount}/` subtree registration still works, but the viewer's mux then answers unrouted paths under the mount with Go's plain 404 instead of a host's own catch-all. |
+| Node | `router.get` on each exact path; the `Host` check calls `next("router")` | A wrong method with no host route gets Express's 404, not 405. |
+| Flask | App-wide hook: the viewer's own blueprint matched the request, or no rule matched and the path is one of the viewer's | A root mount (`mount="/"` or `url_prefix="/"`) logs a deprecation warning and will be refused in a later release. |
+| Spring | Filter on the exact paths; for another method from an unlisted `Host`, the handler mappings decide whether a host handler answers | `ashurbanipal.base-path=/` logs a deprecation warning and will be refused in a later release. |
+
 ## §5.4.2 — request size limits (Spring Boot)
 
 Tomcat rejects a request line over 8 KB (`server.max-http-request-header-size`)

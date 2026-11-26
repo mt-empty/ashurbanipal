@@ -463,6 +463,88 @@ mod tests {
         );
     }
 
+    #[derive(serde::Deserialize)]
+    struct HostRoutesFixture {
+        host_routes: Vec<FixtureRequest>,
+        unrouted: Vec<FixtureRequest>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FixtureRequest {
+        method: String,
+        path: String,
+    }
+
+    /// `spec/protocol.md` §3: the host's routes and fallback beside the
+    /// viewer, merged at the root or nested under `/svc`.
+    fn host_app(prefix: &str, allowed_hosts: &str, routes: &[FixtureRequest]) -> Router {
+        let config =
+            Config::from_toml(&format!("enabled = true\nallowed_hosts = {allowed_hosts}")).unwrap();
+        let mut host = router(
+            config,
+            vec![("primary".to_string(), StubSource::<0>("users"))],
+        );
+        for route in routes {
+            let method = axum::http::Method::from_bytes(route.method.as_bytes()).unwrap();
+            let filter = axum::routing::MethodFilter::try_from(method).unwrap();
+            let path = route.path.replace("{mount}", "/__ashurbanipal");
+            host = host.route(&path, axum::routing::on(filter, || async { "host-route" }));
+        }
+        let host = host.fallback(|| async { (StatusCode::NOT_FOUND, "host-404") });
+        if prefix.is_empty() {
+            host
+        } else {
+            Router::new().nest(prefix, host)
+        }
+    }
+
+    #[tokio::test]
+    async fn host_routes_are_untouched() {
+        use tower::ServiceExt;
+        let fixture: HostRoutesFixture = serde_json::from_str(include_str!(
+            "../../../../spec/fixtures/host-routes-untouched.json"
+        ))
+        .unwrap();
+        for prefix in ["", "/svc"] {
+            for (requests, want) in [
+                (&fixture.host_routes, (200, "host-route")),
+                (&fixture.unrouted, (404, "host-404")),
+            ] {
+                for (allowed, host) in [
+                    ("[\"localhost\"]", "localhost"),
+                    ("[\"localhost\"]", "rebind.invalid"),
+                    ("[]", "rebind.invalid"),
+                ] {
+                    for req in requests {
+                        let uri =
+                            format!("{prefix}{}", req.path.replace("{mount}", "/__ashurbanipal"));
+                        let resp = host_app(prefix, allowed, &fixture.host_routes)
+                            .oneshot(
+                                axum::http::Request::builder()
+                                    .method(req.method.as_str())
+                                    .uri(&uri)
+                                    .header("host", host)
+                                    .body(axum::body::Body::empty())
+                                    .unwrap(),
+                            )
+                            .await
+                            .unwrap();
+                        let status = resp.status().as_u16();
+                        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                            .await
+                            .unwrap();
+                        assert_eq!(
+                            (status, std::str::from_utf8(&body).unwrap()),
+                            want,
+                            "{} {uri}, list {allowed}, Host {host}",
+                            req.method
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_wrong_method_from_an_unlisted_host_gets_404() {
         let status = send(

@@ -105,3 +105,42 @@ async fn a_listed_name_passes_in_any_case_and_on_any_port() {
         }
     }
 }
+
+/// `spec/protocol.md` §3: the check never touches a host route. Probes the
+/// demo's own `GET /health` at the origin; a target without one skips.
+#[tokio::test]
+async fn a_host_route_answers_an_unlisted_host() {
+    let srv = TestServer::spawn().await;
+    if !host_check_is_on(&srv).await {
+        return;
+    }
+    let mut health = reqwest::Url::parse(&srv.url("")).unwrap();
+    health.set_path("/health");
+    health.set_query(None);
+    let listed = srv.client().get(health.clone()).send().await.unwrap();
+    if listed.status() != StatusCode::OK {
+        eprintln!(
+            "host_allow_list: skipping the host-route probe — GET {health} got {}",
+            listed.status()
+        );
+        return;
+    }
+    let listed_body = listed.text().await.unwrap();
+    let unlisted = srv
+        .client()
+        .get(health.clone())
+        .header("host", UNLISTED)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        unlisted.status(),
+        StatusCode::OK,
+        "GET {health} with Host: {UNLISTED} is a host route the check must not touch"
+    );
+    assert_eq!(
+        unlisted.text().await.unwrap(),
+        listed_body,
+        "GET {health} body"
+    );
+}

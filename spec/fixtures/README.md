@@ -2,7 +2,7 @@
 
 Machine-readable fixture sets, generated from the normative docs they
 mirror (`spec/filter-dsl.md` §5, `spec/join-dsl.md` §5 and
-`spec/protocol.md` §3.1, §5.4.2 and §5.11). The docs
+`spec/protocol.md` §3, §3.1, §5.4.2 and §5.11). The docs
 remain the human-readable source of truth; a change to a doc and its
 fixture file ships in the same PR.
 
@@ -188,3 +188,18 @@ Each entry in `cases`:
 - `host` — the request's `Host` (or HTTP/2 `:authority`); `null` means
   none was sent.
 - `allowed` — whether the request passes.
+
+## `host-routes-untouched.json` — the viewer never changes a host route
+
+Consumed by every port's routing tests. Mirrors `spec/protocol.md` §3 and
+§3.1: only a `GET` or `HEAD` to `{mount}` or an API route is the viewer's,
+with the `Host` check on or off.
+
+- `viewer_paths` — the viewer's own paths, relative to `{mount}` (`""` is
+  the UI).
+- `host_routes` — routes the test registers on the host app next to the
+  viewer, each answering with its own marker body. `{mount}` stands for
+  wherever the test mounted the viewer. Each must get the host's own
+  response from a listed host, an unlisted host, and with the check off.
+- `unrouted` — requests no one routes. Each must get the host's own 404,
+  identical from a listed host, an unlisted host, and with the check off.

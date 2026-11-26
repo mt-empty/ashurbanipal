@@ -28,6 +28,37 @@ type NamedSource struct {
 	Source DbSource
 }
 
+// viewerAPIPaths are the ten API routes, relative to the mount
+// (spec/protocol.md §3).
+var viewerAPIPaths = []string{
+	"/api/sources",
+	"/api/schemas",
+	"/api/tables",
+	"/api/table-counts",
+	"/api/tables/data",
+	"/api/tables/common-values",
+	"/api/tables/referenced-by",
+	"/api/tables/structure",
+	"/api/tables/join",
+	"/api/siblings",
+}
+
+// Paths lists the viewer's exact paths for cfg, nil when disabled. Register
+// Router's handler on each of them rather than on a "{mount}/" subtree, so
+// every other path under the mount keeps reaching the host's own routes and
+// 404 (spec/protocol.md §3).
+func Paths(cfg Config) []string {
+	if !cfg.IsEnabled() {
+		return nil
+	}
+	base := cfg.basePath()
+	paths := []string{base}
+	for _, p := range viewerAPIPaths {
+		paths = append(paths, base+p)
+	}
+	return paths
+}
+
 // Router mounts the Ashurbanipal viewer's routes (the UI plus the API
 // routes) at cfg's base path into a plain http.Handler — no framework
 // choice baked in, so it mounts into any net/http-compatible mux (stdlib

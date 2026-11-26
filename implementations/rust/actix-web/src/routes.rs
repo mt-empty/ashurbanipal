@@ -8,6 +8,7 @@ use actix_web::http::header::HOST;
 use actix_web::http::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING, VARY, X_CONTENT_TYPE_OPTIONS,
 };
+use actix_web::http::Method;
 use actix_web::middleware::{from_fn, Next};
 use actix_web::web::{self, Data};
 use actix_web::{Error, HttpRequest, HttpResponse, Scope};
@@ -67,25 +68,49 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
     })
 }
 
-/// If disabled, no routes are registered — every path under the scope
-/// (including HTML) falls through to the host `App`'s 404, same as unmounted.
+const MOUNT: &str = "/__ashurbanipal";
+
+/// The ten API routes, relative to the mount (`spec/protocol.md` §3).
+const VIEWER_API_PATHS: [&str; 10] = [
+    "/api/sources",
+    "/api/schemas",
+    "/api/tables",
+    "/api/table-counts",
+    "/api/tables/data",
+    "/api/tables/common-values",
+    "/api/tables/referenced-by",
+    "/api/tables/structure",
+    "/api/tables/join",
+    "/api/siblings",
+];
+
+/// A `GET` or `HEAD` to the page or an API route (`spec/protocol.md` §3).
+/// The scope's guard runs once its prefix has matched, and only sees the
+/// full path, so a nested mount still ends in `MOUNT` plus a viewer path.
+fn is_viewer_request(head: &RequestHead) -> bool {
+    let path = head.uri.path();
+    (head.method == Method::GET || head.method == Method::HEAD)
+        && std::iter::once("").chain(VIEWER_API_PATHS).any(|p| {
+            path.strip_suffix(p)
+                .is_some_and(|rest| rest.ends_with(MOUNT))
+        })
+}
+
+/// Every request the guard turns away (anything but the viewer's own, and
+/// an unlisted `Host`) falls through to the host `App`, same as unmounted:
+/// a scope that matched would otherwise answer every path under it. If
+/// disabled, the guard turns everything away.
 pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
     if !state.config.is_enabled() {
-        return web::scope("/__ashurbanipal");
+        return web::scope(MOUNT).guard(guard::fn_guard(|_| false));
     }
     LazyLock::force(&DBVIEWER_HTML_GZIP);
-    let mut scope = web::scope("/__ashurbanipal");
-    if state.hosts.is_active() {
-        // A request the guard turns away falls through to the host App's
-        // 404, same as unmounted.
-        let hosts = state.hosts.clone();
-        scope = scope.guard(guard::fn_guard(move |ctx| {
-            hosts.allows(request_host(ctx.head()))
-        }));
-    }
-    // Version header only applies to /api (separate inner scope). Routes
-    // use `web::resource` (not `Scope::route`) so a method mismatch 405s.
-    scope
+    let hosts = state.hosts.clone();
+    // Version header only applies to /api (separate inner scope).
+    web::scope(MOUNT)
+        .guard(guard::fn_guard(move |ctx| {
+            is_viewer_request(ctx.head()) && hosts.allows(request_host(ctx.head()))
+        }))
         .app_data(state)
         .service(web::resource("").route(web::get().to(serve_html)))
         .service(
@@ -510,6 +535,123 @@ mod kill_switch_tests {
             let status = test::call_service(&app, req).await.status();
             assert_eq!(status, want, "{method} {uri}, Host {host}");
         }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct HostRoutesFixture {
+        viewer_paths: Vec<String>,
+        host_routes: Vec<FixtureRequest>,
+        unrouted: Vec<FixtureRequest>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct FixtureRequest {
+        method: String,
+        path: String,
+    }
+
+    fn host_routes_fixture() -> HostRoutesFixture {
+        serde_json::from_str(include_str!(
+            "../../../../spec/fixtures/host-routes-untouched.json"
+        ))
+        .unwrap()
+    }
+
+    /// `spec/protocol.md` §3: a host scope at `prefix` holding the viewer and,
+    /// after it, every fixture route, so the viewer's scope sees them first.
+    async fn host_routes_answers(
+        prefix: &'static str,
+        allowed_hosts: &str,
+        host: &str,
+        requests: &[FixtureRequest],
+    ) -> Vec<(u16, String)> {
+        let fixture = host_routes_fixture();
+        let config =
+            Config::from_toml(&format!("enabled = true\nallowed_hosts = {allowed_hosts}")).unwrap();
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+        let mut scope = web::scope(prefix).service(service(state));
+        for route in &fixture.host_routes {
+            let method = Method::from_bytes(route.method.as_bytes()).unwrap();
+            let path = route.path.replace("{mount}", MOUNT);
+            scope = scope.route(&path, web::method(method).to(|| async { "host-route" }));
+        }
+        let app =
+            test::init_service(App::new().service(scope).default_service(web::to(|| async {
+                HttpResponse::NotFound().body("host-404")
+            })))
+            .await;
+        let mut answers = Vec::new();
+        for req in requests {
+            let uri = format!("{prefix}{}", req.path.replace("{mount}", MOUNT));
+            let resp = test::call_service(
+                &app,
+                test::TestRequest::default()
+                    .method(Method::from_bytes(req.method.as_bytes()).unwrap())
+                    .uri(&uri)
+                    .insert_header(("host", host))
+                    .to_request(),
+            )
+            .await;
+            let status = resp.status().as_u16();
+            let body = String::from_utf8(test::read_body(resp).await.to_vec()).unwrap();
+            answers.push((status, body));
+        }
+        answers
+    }
+
+    #[actix_web::test]
+    async fn host_routes_are_untouched() {
+        let fixture = host_routes_fixture();
+        for prefix in ["", "/svc"] {
+            for (requests, want) in [
+                (&fixture.host_routes, (200, "host-route")),
+                (&fixture.unrouted, (404, "host-404")),
+            ] {
+                for (allowed, host) in [
+                    ("[\"localhost\"]", "localhost"),
+                    ("[\"localhost\"]", "rebind.invalid"),
+                    ("[]", "rebind.invalid"),
+                ] {
+                    let answers = host_routes_answers(prefix, allowed, host, requests).await;
+                    for (req, (status, body)) in requests.iter().zip(answers) {
+                        assert_eq!(
+                            (status, body.as_str()),
+                            want,
+                            "{} {prefix}{}, list {allowed}, Host {host}",
+                            req.method,
+                            req.path
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[actix_web::test]
+    async fn a_disabled_viewer_hides_no_host_route() {
+        let state = app_state::<NeverQueried>(Config::default(), Vec::new());
+        let app = test::init_service(App::new().service(service(state)).route(
+            "/__ashurbanipal/other",
+            web::get().to(|| async { "host-route" }),
+        ))
+        .await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/__ashurbanipal/other")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn viewer_paths_match_the_fixture() {
+        let paths: Vec<String> = std::iter::once("")
+            .chain(VIEWER_API_PATHS)
+            .map(String::from)
+            .collect();
+        assert_eq!(paths, host_routes_fixture().viewer_paths);
     }
 
     // Port 9 refuses at once, so every check is a fast `healthy: false`.
