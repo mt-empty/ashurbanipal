@@ -201,6 +201,7 @@ version = "0.15.0"
 dependencies = [
  "flate2",
  "futures-util",
+ "log",
  "reqwest",
  "serde",
  "serde_json",

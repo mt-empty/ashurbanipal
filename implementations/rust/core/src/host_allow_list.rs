@@ -166,6 +166,32 @@ mod tests {
     }
 
     #[test]
+    fn warnings_reach_a_log_logger_without_a_tracing_subscriber() {
+        struct Capture(std::sync::Mutex<Vec<String>>);
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record) {
+                self.0.lock().unwrap().push(record.args().to_string());
+            }
+            fn flush(&self) {}
+        }
+        static CAPTURE: Capture = Capture(std::sync::Mutex::new(Vec::new()));
+        // The only test in this binary that installs a logger.
+        log::set_logger(&CAPTURE).unwrap();
+        log::set_max_level(log::LevelFilter::Warn);
+        HostAllowList::from_config(&Config::default());
+        let messages = CAPTURE.0.lock().unwrap();
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("allowed_hosts is not set")),
+            "{messages:?}"
+        );
+    }
+
+    #[test]
     fn each_bad_entry_warns() {
         let entries = [
             "http://localhost",

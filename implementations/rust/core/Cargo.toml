@@ -18,12 +18,15 @@ toml = { version = "1", default-features = false, features = ["std", "serde", "p
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 flate2 = "1"
-tracing = "0.1"
+# `log`: with no tracing subscriber installed, warnings still reach a host's
+# `log` logger (env_logger and the like).
+tracing = { version = "0.1", features = ["log"] }
 
 [dev-dependencies]
 # Current-thread only: every `#[tokio::test]` here is single-threaded and the
 # `mysql` tests' Drop-guard builds its own `new_current_thread` runtime.
 tokio = { version = "1", features = ["rt", "macros"] }
+log = "0.4"
 
 [features]
 default = ["postgres"]
