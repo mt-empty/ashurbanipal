@@ -50,7 +50,25 @@ Ashurbanipal ships no authentication or authorization. Access is a perimeter con
 Two things back that up:
 
 - **Fail-safe default**: the `enabled` flag defaults to off. Ashurbanipal has no concept of "environment"; where to turn it on is the host's call.
-- **Read-only by construction**: `SELECT` only, no DDL or DML.
+- **Read-only by construction**: `SELECT` only, no DDL or DML. On Postgres and MySQL/MariaDB every query that reads a table or the catalog also runs in a read-only transaction, so the database refuses a write even if one slips through.
+
+For a second wall, give Ashurbanipal its own pool that logs in with a `SELECT`-only account, and pass that pool as its source instead of the app's (Spring: `dataSourceBean`). This is recommended, not required.
+
+```sql
+-- Postgres
+create role viewer login password '…';
+grant usage on schema public to viewer;
+grant select on all tables in schema public to viewer;
+-- Default privileges cover only tables the named role creates: name the role
+-- your migrations run as.
+alter default privileges for role app_owner in schema public grant select on tables to viewer;
+
+-- MySQL / MariaDB
+CREATE USER 'viewer'@'%' IDENTIFIED BY '…';
+GRANT SELECT ON app.* TO 'viewer'@'%';
+```
+
+SQLite has no accounts: where the driver allows, open the viewer's connection read-only with a `file:` URI ending in `?mode=ro`. SQLite reads that option only when the driver turns URI filenames on. On MariaDB a `SELECT`-only account sees no constraints in Structure ([`docs/adapter-decisions.md`](docs/adapter-decisions.md), §5.10).
 
 ## Supported databases
 

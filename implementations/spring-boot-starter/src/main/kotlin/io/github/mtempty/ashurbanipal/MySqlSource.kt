@@ -124,9 +124,23 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     }
     private val variantRef = AtomicReference<Variant?>(null)
 
-    private fun <T> inReadOnlyTransaction(action: () -> T): T =
-        transactionTemplate.execute { action() }
-            ?: throw IllegalStateException("read-only transaction did not produce a result")
+    /**
+     * Runs [action] in a read-only transaction (`spec/protocol.md` §6). A
+     * driver's setReadOnly may send nothing to the server (MariaDB Connector/J
+     * before 3.5.10), so this sends `set transaction read only` itself.
+     * Not enforceReadOnly: it uses executeUpdate, which Connector/J refuses on
+     * a read-only connection.
+     */
+    internal fun <T> inReadOnlyTransaction(action: () -> T): T =
+        transactionTemplate.execute {
+            val conn = DataSourceUtils.getConnection(dataSource)
+            try {
+                conn.createStatement().use { it.execute("set transaction read only") }
+            } finally {
+                DataSourceUtils.releaseConnection(conn, dataSource)
+            }
+            action()
+        } ?: throw IllegalStateException("read-only transaction did not produce a result")
 
     /** Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6). */
     internal fun variant(): Variant {

@@ -156,7 +156,10 @@ class PgSource(DbSource):
         self._dsn = make_conninfo("", **params)
 
     def _connect(self) -> psycopg.Connection:
-        return psycopg.connect(self._dsn)
+        conn = psycopg.connect(self._dsn)
+        # Each operation's implicit BEGIN is then BEGIN READ ONLY (`spec/protocol.md` §6).
+        conn.read_only = True
+        return conn
 
     def _list_schemas(self, cur: psycopg.Cursor) -> list[str]:
         cur.execute(

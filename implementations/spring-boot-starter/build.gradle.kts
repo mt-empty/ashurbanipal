@@ -90,6 +90,7 @@ dependencies {
     // dependency of this starter (mirrors the Rust crate's mysql/sqlite
     // Cargo features being opt-in, not always-linked).
     testImplementation("com.mysql:mysql-connector-j:26.10.0")
+    testImplementation("org.mariadb.jdbc:mariadb-java-client:4.0.0")
     testImplementation("org.xerial:sqlite-jdbc:3.54.1.0")
     // Gradle's own test worker bundles an older junit-platform-launcher than
     // Spring Boot's BOM-managed junit-jupiter needs; without this explicit

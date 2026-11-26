@@ -156,9 +156,10 @@ impl MySqlSource {
         Ok(detected)
     }
 
-    /// Pins schema resolution to one connection (`spec/protocol.md` §5).
+    /// Pins schema resolution to one connection (`spec/protocol.md` §5), in
+    /// a read-only transaction (§6).
     async fn pinned_tx(&self) -> Result<Transaction<'static, MySql>, DbError> {
-        Ok(self.pool.begin().await?)
+        Ok(self.pool.begin_with("start transaction read only").await?)
     }
 
     async fn list_schemas_in_tx(
@@ -1062,6 +1063,7 @@ mod tests {
     struct SeededDb {
         pool: MySqlPool,
         name: String,
+        url: String,
     }
 
     impl Drop for SeededDb {
@@ -1073,6 +1075,7 @@ mod tests {
             // database into the shared instance, where a later
             // `/api/schemas` (or the conformance suite) would surface it.
             let name = std::mem::take(&mut self.name);
+            let url = std::mem::take(&mut self.url);
             let _ = std::thread::spawn(move || {
                 let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -1084,7 +1087,7 @@ mod tests {
                     let admin = match sqlx::mysql::MySqlPoolOptions::new()
                         .max_connections(1)
                         .acquire_timeout(std::time::Duration::from_secs(5))
-                        .connect(&test_url())
+                        .connect(&url)
                         .await
                     {
                         Ok(admin) => admin,
@@ -1109,7 +1112,11 @@ mod tests {
     }
 
     async fn seeded_db() -> SeededDb {
-        let admin = MySqlPool::connect(&test_url()).await.unwrap();
+        seeded_db_at(test_url()).await
+    }
+
+    async fn seeded_db_at(url: String) -> SeededDb {
+        let admin = MySqlPool::connect(&url).await.unwrap();
         // A counter alone collides across separate `cargo test` invocations
         // against the same long-lived instance (it resets to 0 every
         // process run); the nanos component keeps names unique even if a
@@ -1128,7 +1135,7 @@ mod tests {
             .unwrap();
         admin.close().await;
 
-        let opts = sqlx::mysql::MySqlConnectOptions::from_str(&test_url())
+        let opts = sqlx::mysql::MySqlConnectOptions::from_str(&url)
             .unwrap()
             .database(&name);
         let pool = MySqlPool::connect_with(opts).await.unwrap();
@@ -1193,7 +1200,36 @@ mod tests {
         .await
         .unwrap();
 
-        SeededDb { pool, name }
+        SeededDb { pool, name, url }
+    }
+
+    #[tokio::test]
+    async fn operation_transaction_is_read_only() {
+        for var in ["MYSQL_TEST_URL", "MARIADB_TEST_URL"] {
+            let url = std::env::var(var).unwrap_or_else(|_| panic!("{var} must be set"));
+            assert_operation_transaction_is_read_only(url).await;
+        }
+    }
+
+    async fn assert_operation_transaction_is_read_only(url: String) {
+        let db = seeded_db_at(url).await;
+        let source = MySqlSource::new(db.pool.clone());
+        let mut tx = source.pinned_tx().await.unwrap();
+        let result = sqlx::query("insert into users (email, age) values ('x@example.com', 1)")
+            .execute(&mut *tx)
+            .await;
+        // Roll back before asserting: a panic with the insert's lock still
+        // held would block SeededDb's `drop database` forever.
+        tx.rollback().await.unwrap();
+        let err = result.expect_err("an insert inside the operation transaction must fail");
+        // ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION, on MySQL and MariaDB alike.
+        let code = err.as_database_error().and_then(|e| e.code());
+        assert_eq!(code.as_deref(), Some("25006"), "{err}");
+        let users: i64 = sqlx::query_scalar("select count(*) from users")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(users, 3);
     }
 
     #[tokio::test]

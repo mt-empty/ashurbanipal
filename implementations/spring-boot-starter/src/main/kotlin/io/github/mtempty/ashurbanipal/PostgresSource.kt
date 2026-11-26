@@ -68,7 +68,11 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     private val jdbcTemplate = JdbcTemplate(dataSource).apply {
         queryTimeout = queryTimeoutSecs
     }
-    private val transactionTemplate = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply {
+    // enforceReadOnly sends SET TRANSACTION READ ONLY itself rather than
+    // trusting the driver's setReadOnly (`spec/protocol.md` §6).
+    private val transactionTemplate = TransactionTemplate(
+        DataSourceTransactionManager(dataSource).apply { isEnforceReadOnly = true },
+    ).apply {
         isReadOnly = true
     }
 
@@ -109,9 +113,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
     }
 
-    override fun listTables(schema: String?): List<TableInfo> {
+    override fun listTables(schema: String?): List<TableInfo> = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
-        return jdbcTemplate.query(
+        jdbcTemplate.query(
             "select c.relname::text, obj_description(c.oid, 'pg_class') " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
@@ -123,9 +127,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         )
     }
 
-    override fun tableCounts(schema: String?): List<CountEntry> {
+    override fun tableCounts(schema: String?): List<CountEntry> = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
-        return jdbcTemplate.query(
+        jdbcTemplate.query(
             "select c.relname::text, c.reltuples::bigint " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +

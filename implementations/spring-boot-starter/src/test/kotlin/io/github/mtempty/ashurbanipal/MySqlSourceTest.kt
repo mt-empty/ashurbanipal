@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.dao.DataAccessException
+import org.springframework.jdbc.core.JdbcTemplate
 import java.net.URI
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.system.measureTimeMillis
 
@@ -136,6 +139,41 @@ class MySqlSourceTest {
             assertNull(source.listSchemas().default, "[$envVar] no default database must list a null default")
         } finally {
             ds.close()
+        }
+    }
+
+    /**
+     * A SELECT on a MySQL base table cannot write, so this tries an INSERT in
+     * the operation transaction (`spec/protocol.md` §6). It connects through
+     * MariaDB Connector/J with readOnlyPropagatesToServer=false: then
+     * setReadOnly sends nothing and refuses nothing, so only the source's own
+     * statement can block the write.
+     */
+    @Test
+    fun `operation transaction is read-only`() = forEachReachableInstance { envVar ->
+        SeededDb(envVar).use { db ->
+            val (u, p) = credentialsFor(envVar)
+            val uri = URI(System.getenv(envVar))
+            HikariDataSource(
+                HikariConfig().apply {
+                    jdbcUrl = "jdbc:mariadb://${uri.host}:${uri.port}/${db.name}?readOnlyPropagatesToServer=false" +
+                        // Lets MySQL's default caching_sha2_password login work over the local plain connection.
+                        "&sslMode=disable&allowPublicKeyRetrieval=true"
+                    username = u
+                    password = p
+                    maximumPoolSize = 1
+                    poolName = "mysql-source-test-read-only-${db.name}"
+                },
+            ).use { ds ->
+                val ex = assertThrows(DataAccessException::class.java) {
+                    MySqlSource(ds, 5).inReadOnlyTransaction {
+                        JdbcTemplate(ds).update("insert into users (email, age) values ('d@x.com', 50)")
+                    }
+                }
+                assertEquals(1792, (ex.mostSpecificCause as SQLException).errorCode, "[$envVar] $ex")
+            }
+            val count = JdbcTemplate(db.dataSource).queryForObject("select count(*) from users", Int::class.java)
+            assertEquals(3, count, envVar)
         }
     }
 

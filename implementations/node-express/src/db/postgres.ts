@@ -131,7 +131,7 @@ export class PostgresSource implements DbSource {
     assertSafeTimeoutMs(timeoutMs);
     const client = await this.pool.connect();
     try {
-      await client.query("BEGIN");
+      await client.query("BEGIN READ ONLY");
       await client.query(`SET LOCAL statement_timeout = ${timeoutMs}`);
       // Typed filters read values in ISO form, and a cell's text must be one.
       await client.query("SET LOCAL datestyle = 'ISO'");

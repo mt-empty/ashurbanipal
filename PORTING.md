@@ -379,7 +379,7 @@ following are true — green CI is necessary, not sufficient:
 A green CI run only proves two things: response shape matches
 `spec/openapi.yaml`, and behavior matches the golden fixtures on the
 inputs those fixtures happen to cover. Neither layer can observe the
-seven properties below — they need a named reviewer to actually read the
+eight properties below — they need a named reviewer to actually read the
 port's source, once per port, before it's added to the registry.
 
 1. **Cast in SQL, never in application code.** Every value-serialization
@@ -434,22 +434,32 @@ port's source, once per port, before it's added to the registry.
    `implementations/rust/core/src/db/postgres.rs`, not just a description
    of what it does — the fixture-driven conformance kit catches
    *behavioral* drift here but doesn't make this review step optional.
+8. **Every operation runs in a read-only transaction** on Postgres and
+   MySQL/MariaDB (`spec/protocol.md` §6). HTTP can't observe it: a `SELECT`
+   on a listed table writes only through an RLS policy or similar. Verify
+   with a port test that a write inside the operation's transaction fails
+   (`docs/adapter-decisions.md`, §6 read-only transactions, has the
+   mechanisms and error codes).
 
 ### Sign-off log
 
 One row per port, filled in when a reviewer has actually confirmed items
-1–7 above (not merely inferred them from the port's own tests passing).
+1–8 above (not merely inferred them from the port's own tests passing).
 Items 3 and 4 are largely mechanical (checked by re-reading the sections
 above against the port's actual CI config and served HTML); items 1, 2,
-5, 6, and 7 require reading the port's source directly.
+5, 6, 7 and 8 require reading the port's source directly.
 
-| Port | 1. cast-in-SQL | 2. fail-closed default | 3. vendoring re-hash | 4. CSP documented | 5. kill-switch test read | 6. no injection | 7. catalog diffed vs `postgres.rs` | Reviewer |
-|------|----------------|-------------------------|-----------------------|--------------------|----------------------------|-------------------|-------------------------------|----------|
-| `implementations/rust` | n/a — reference | ✅ (see note) | n/a — nothing to vendor | n/a — origin of the requirement | ✅ | ✅ | n/a — reference | Claude (AI-assisted), 2026-07-25 |
-| `implementations/spring-boot-starter` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |
-| `implementations/go-nethttp` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-07-25 |
-| `implementations/node-express` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | MT (human review, merged PR #12); Claude (AI-assisted re-verification), 2026-08-04 |
-| `implementations/flask-python` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | Claude (AI-assisted), 2026-08-09 |
+| Port | 1. cast-in-SQL | 2. fail-closed default | 3. vendoring re-hash | 4. CSP documented | 5. kill-switch test read | 6. no injection | 7. catalog diffed vs `postgres.rs` | 8. read-only transaction | Reviewer |
+|------|----------------|-------------------------|-----------------------|--------------------|----------------------------|-------------------|-------------------------------|--------------------------|----------|
+| `implementations/rust` | n/a — reference | ✅ (see note) | n/a — nothing to vendor | n/a — origin of the requirement | ✅ | ✅ | n/a — reference | ✅ (2026-11-25) | Claude (AI-assisted), 2026-07-25 |
+| `implementations/spring-boot-starter` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (2026-11-25) | Claude (AI-assisted), 2026-07-25 |
+| `implementations/go-nethttp` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (2026-11-25) | Claude (AI-assisted), 2026-07-25 |
+| `implementations/node-express` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (2026-11-25) | MT (human review, merged PR #12); Claude (AI-assisted re-verification), 2026-08-04 |
+| `implementations/flask-python` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (2026-11-25) | Claude (AI-assisted), 2026-08-09 |
+
+Item 8 was added on 2026-11-25 and checked in every port that day
+(Claude, AI-assisted): each port's own test fails with its read-only
+setting removed.
 
 Note on the Rust row, item 2: at the time of this sign-off, the reference
 had no test for the specific "config key absent from the TOML text

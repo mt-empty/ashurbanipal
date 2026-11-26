@@ -189,7 +189,7 @@ export class MySqlSource implements DbSource {
     const variant = await this.variant();
     const conn = await this.pool.getConnection();
     try {
-      await conn.beginTransaction();
+      await conn.query("START TRANSACTION READ ONLY");
       const result = await fn(conn, variant);
       await conn.commit();
       return result;
