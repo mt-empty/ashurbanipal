@@ -19,7 +19,7 @@
 //! staying inert bind params.
 
 use crate::assert::{assert_exact, assert_problem_code, assert_row_estimate, assert_status};
-use crate::backend::{Backend, TypedValueCheck};
+use crate::backend::{Backend, TrailingLikeEscape, TypedValueCheck};
 use crate::common::TestServer;
 
 const BUILDER_FIXTURES: &str = include_str!("../../spec/fixtures/filter-builder-tests.json");
@@ -550,6 +550,23 @@ async fn a_value_that_does_not_fit_a_typed_column_is_invalid_filter() {
             assert_problem_code(resp, 400, "invalid_filter", &ast.to_string()).await;
         } else {
             assert_status(&resp, 200, &ast.to_string());
+        }
+    }
+}
+
+/// A pattern ending in the escape character is a bad filter value where the
+/// engine rejects it, and a literal `\` where it does not; never a 5xx.
+#[tokio::test]
+async fn a_like_pattern_ending_in_an_escape_is_not_a_server_error() {
+    let srv = TestServer::spawn().await;
+    for op in ["LIKE", "ILIKE"] {
+        let ast = serde_json::json!([{"column": "email", "op": op, "value": "a\\"}]);
+        let resp = fetch(&srv, "users", &ast.to_string()).await;
+        match Backend::current().trailing_like_escape() {
+            TrailingLikeEscape::InvalidFilter => {
+                assert_problem_code(resp, 400, "invalid_filter", &ast.to_string()).await
+            }
+            TrailingLikeEscape::Literal => assert_status(&resp, 200, &ast.to_string()),
         }
     }
 }

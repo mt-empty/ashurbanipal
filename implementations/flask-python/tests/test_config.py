@@ -17,6 +17,14 @@ def test_disabled_when_config_absent() -> None:
     assert not config.is_enabled()
 
 
+def test_non_boolean_enabled_is_disabled() -> None:
+    # A switch that isn't a boolean is malformed, and malformed must mean disabled.
+    for raw in ('"false"', '"true"', "1", '"yes"'):
+        assert not Config.from_toml(f"enabled = {raw}").is_enabled(), raw
+    for value in ("false", "true", 1):
+        assert not Config(enabled=value).is_enabled(), value  # type: ignore[arg-type]
+
+
 def test_enabled_when_explicitly_set() -> None:
     config = Config.from_toml("enabled = true")
     assert config.is_enabled()

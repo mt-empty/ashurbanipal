@@ -54,6 +54,8 @@ def _under_mount(path: str, prefix: str) -> bool:
 
 _MAX_I64 = 2**63 - 1
 
+_log = logging.getLogger(__name__)
+
 
 def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str = "/__ashurbanipal") -> Blueprint:
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
@@ -339,7 +341,8 @@ def problem_for(err: DbError) -> tuple[int, str, str]:
         return 400, "unsortable_column", f"cannot sort by {err}: its type has no ordering"
     if isinstance(err, QueryTimeout):
         return 500, "query_timeout", "query timed out"
-    return 500, "database_error", f"database error: {err}"
+    _log.error("ashurbanipal database error", exc_info=err)
+    return 500, "database_error", "database error"
 
 
 def _table_to_dict(t: TableInfo) -> dict[str, Any]:

@@ -280,12 +280,9 @@ impl DbError {
         })
     }
 
-    /// `(HTTP status, spec/protocol.md §2 code, human-readable title)` —
-    /// framework-agnostic so both `ashurbanipal-axum` and
-    /// `ashurbanipal-actix-web` share one match instead of each also
-    /// re-deriving `title` from `DbError` on its own (the title is just
-    /// `Display`'s own rendering, kept in this one tuple so a caller never
-    /// needs a second call to get it).
+    /// `(HTTP status, spec/protocol.md §2 code, human-readable title)`,
+    /// shared by both adapters. The title is `Display`'s rendering, except
+    /// a database error's, which carries no engine text (`spec/protocol.md` §2).
     pub fn problem(&self) -> (u16, &'static str, String) {
         let (status, code) = match self {
             Self::NotAllowed(d) => (400, d.kind.code()),
@@ -296,7 +293,19 @@ impl DbError {
             Self::QueryTimeout => (500, "query_timeout"),
             Self::Sqlx(_) => (500, "database_error"),
         };
-        (status, code, self.to_string())
+        let title = match self {
+            Self::Sqlx(_) => "database error".to_string(),
+            _ => self.to_string(),
+        };
+        (status, code, title)
+    }
+
+    /// Logs a database error's detail, which its `problem()` title leaves out.
+    /// Adapters call it once per response.
+    pub fn log_if_server_error(&self) {
+        if let Self::Sqlx(e) = self {
+            tracing::error!(error = %e, "ashurbanipal database error");
+        }
     }
 }
 
@@ -474,7 +483,7 @@ pub(crate) fn quote_ident(ident: &Ident) -> String {
 pub(crate) fn is_bad_value_sqlstate(code: &str) -> bool {
     matches!(
         code,
-        "22P02" | "22003" | "22007" | "22008" | "22021" | "22P05"
+        "22P02" | "22003" | "22007" | "22008" | "22021" | "22025" | "22P05"
     )
 }
 
@@ -525,6 +534,16 @@ pub(crate) fn group_referenced_by(
 #[cfg(test)]
 mod tests {
     use super::{quote_ident, resolve_source, DbError, Ident};
+
+    #[test]
+    fn database_error_title_carries_no_engine_text() {
+        let err = DbError::Sqlx(sqlx::Error::Protocol("select secret from t".into()));
+        assert_eq!(
+            err.problem(),
+            (500, "database_error", "database error".to_string())
+        );
+        assert!(err.to_string().contains("select secret from t"));
+    }
 
     #[test]
     fn quote_ident_doubles_embedded_quotes() {

@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assertSafeTimeoutMs, quoteIdent } from "../src/errors.js";
+import { errorResult } from "../src/handlers.js";
+
+describe("errorResult", () => {
+  it("gives a database error a title with no engine text, and logs the detail", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const err = new Error("select secret from t");
+    const result = errorResult(err);
+    expect(result.status).toBe(500);
+    expect(JSON.parse(result.body)).toMatchObject({ code: "database_error", title: "database error" });
+    expect(result.body).not.toContain("secret");
+    expect(log).toHaveBeenCalledWith("ashurbanipal: database error", err);
+    log.mockRestore();
+  });
+});
 
 // Identifiers require allow-list validation before escaping (spec/protocol.md §6).
 describe("quoteIdent", () => {

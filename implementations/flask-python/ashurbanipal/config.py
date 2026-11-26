@@ -47,7 +47,8 @@ class Config:
             self.allowed_hosts = [self.allowed_hosts]
 
     def is_enabled(self) -> bool:
-        return self.enabled
+        # Only a real boolean counts: `bool("false")` is True, and a malformed switch must mean disabled.
+        return self.enabled is True
 
     def siblings_view(self) -> SiblingsView:
         """What `/api/siblings` reports; built once, at router construction."""
@@ -80,7 +81,7 @@ class Config:
         siblings_data = data.get("siblings", [])
         instance_data = data.get("instance")
         return cls(
-            enabled=bool(data.get("enabled", False)),
+            enabled=data.get("enabled") is True,
             limits=Limits(**limits_data),
             instance=Instance(**instance_data) if instance_data is not None else None,
             siblings=[Sibling(**s) for s in siblings_data],

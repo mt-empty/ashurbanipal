@@ -2,6 +2,7 @@ package io.github.mtempty.ashurbanipal
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
+import org.apache.commons.logging.LogFactory
 import org.springframework.core.io.ClassPathResource
 import org.springframework.dao.DataAccessException
 import org.springframework.http.HttpHeaders
@@ -303,7 +304,13 @@ class AshurbanipalController(
     @ExceptionHandler(DataAccessException::class)
     fun handleDatabaseError(e: DataAccessException): ResponseEntity<ProblemDetails> =
         if (isQueryTimeout(e)) queryTimeoutResponse()
-        else problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", "database error: ${e.message}")
+        else databaseErrorResponse(e)
+
+    /** Spring's exception messages can carry the SQL text, so only the log sees them (`spec/protocol.md` §2). */
+    private fun databaseErrorResponse(e: Exception): ResponseEntity<ProblemDetails> {
+        log.error("ashurbanipal database error", e)
+        return problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", "database error")
+    }
 
     private fun queryTimeoutResponse(): ResponseEntity<ProblemDetails> =
         problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "query_timeout", "query timed out")
@@ -320,8 +327,14 @@ class AshurbanipalController(
     @ExceptionHandler(Exception::class)
     fun handleUnexpectedError(e: Exception): ResponseEntity<ProblemDetails> =
         if (isQueryTimeout(e)) queryTimeoutResponse()
-        else problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", e.message ?: "internal error")
+        else if (e is DataAccessException) databaseErrorResponse(e)
+        else {
+            log.error("ashurbanipal unexpected error", e)
+            problemResponse(HttpStatus.INTERNAL_SERVER_ERROR, "database_error", "internal error")
+        }
 }
+
+private val log = LogFactory.getLog(AshurbanipalController::class.java)
 
 /** RFC 9457 Problem Details body (`spec/protocol.md` §2). */
 data class ProblemDetails(

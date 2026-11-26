@@ -137,7 +137,10 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, title) = match self {
             ApiError::BadRequest(msg) => (400, "invalid_parameter", msg),
-            ApiError::Db(err) => err.problem(),
+            ApiError::Db(err) => {
+                err.log_if_server_error();
+                err.problem()
+            }
         };
         // Never `Json<ProblemDetails>` — that sets `application/json`, and
         // `spec/protocol.md` §2 requires `application/problem+json`.

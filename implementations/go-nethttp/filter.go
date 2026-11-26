@@ -249,7 +249,7 @@ func parseFilter(raw string, allowJoin bool) ([]Condition, error) {
 // which in a filtered query is the filter's (spec/protocol.md §5.4.2).
 func isBadValueSQLState(code string) bool {
 	switch code {
-	case "22P02", "22003", "22007", "22008", "22021", "22P05":
+	case "22P02", "22003", "22007", "22008", "22021", "22025", "22P05":
 		return true
 	}
 	return false

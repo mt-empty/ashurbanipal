@@ -181,6 +181,9 @@ impl actix_web::ResponseError for ApiError {
     }
 
     fn error_response(&self) -> HttpResponse {
+        if let ApiError::Db(err) = self {
+            err.log_if_server_error();
+        }
         let (status, code, title) = self.problem();
         // Built from `status` directly rather than calling `self.status_code()`
         // again — that would re-run `self.problem()` a second time for the

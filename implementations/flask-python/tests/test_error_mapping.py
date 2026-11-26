@@ -7,7 +7,9 @@ default HTML error page leaked through instead.
 """
 
 import json
+import logging
 
+import pytest
 from flask import Flask
 
 from ashurbanipal.config import Config
@@ -62,15 +64,21 @@ def _client(exc: Exception):
     return app.test_client()
 
 
-def test_database_error_is_a_problem_json_500_not_flasks_default_html_page() -> None:
+def test_database_error_is_a_problem_json_500_not_flasks_default_html_page(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     client = _client(DatabaseError("connection reset"))
-    resp = client.get("/__ashurbanipal/api/schemas")
+    with caplog.at_level(logging.ERROR, logger="ashurbanipal.routes"):
+        resp = client.get("/__ashurbanipal/api/schemas")
     assert resp.status_code == 500
     assert resp.content_type == "application/problem+json"
     body = json.loads(resp.data)
     assert body["code"] == "database_error"
     assert body["status"] == 500
-    assert body["title"] == "database error: connection reset"
+    # The engine text goes to the server log, never the response (spec/protocol.md §2).
+    assert body["title"] == "database error"
+    assert b"connection reset" not in resp.data
+    assert any("connection reset" in str(r.exc_info[1]) for r in caplog.records if r.exc_info)
 
 
 def test_not_allowed_is_a_400() -> None:

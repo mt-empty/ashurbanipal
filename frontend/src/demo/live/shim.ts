@@ -92,7 +92,7 @@ function stop(source: string, entry: DemoWorker, timedOut: number): void {
 
 function crash(source: string, entry: DemoWorker, message: string): void {
   console.error(`ashurbanipal demo: the ${source} database stopped:`, message);
-  for (const [, p] of retire(source, entry)) p.settle(problem(500, "database_error", `database error: ${message}`));
+  for (const [, p] of retire(source, entry)) p.settle(problem(500, "database_error", "database error"));
 }
 
 async function forward(source: string, path: string, params: URLSearchParams): Promise<ApiResponse> {
@@ -102,7 +102,7 @@ async function forward(source: string, path: string, params: URLSearchParams): P
   } catch (err) {
     retire(source, entry);
     console.error("ashurbanipal demo: the database did not start", err);
-    return problem(500, "database_error", `database error: ${err instanceof Error ? err.message : String(err)}`);
+    return problem(500, "database_error", "database error");
   }
   // The worker may have been retired while this request waited for it.
   if (workers.get(source) !== entry) return forward(source, path, params);

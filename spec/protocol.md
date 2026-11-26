@@ -92,6 +92,8 @@ interpreted as described in RFC 2119.
     — a table that cleared §5.2's allow-list but the connected role cannot
     actually `SELECT` (see `docs/adapter-decisions.md` §5.2/§5.3).
   - **500** — server error: `database_error`, or `query_timeout` (§6).
+    A `database_error` `title` MUST NOT carry the engine's error text or
+    any SQL; implementations SHOULD log that detail server-side instead.
 - Every API response (§5.2–§5.11), success or error, MUST carry the
   protocol version header (§7).
 - Every API response (§5.2–§5.11), success or error, MUST carry
@@ -507,8 +509,9 @@ Evaluation rules:
     operation (`DateStyle` ISO), whatever the server's default, so a
     cell's text has one of these forms.
 - An engine error that reports a bad value in a filtered query (SQLSTATE
-  `22P02`, `22003`, `22007`, `22008`, `22021` or `22P05`, such as a
-  MySQL cast out of range) MUST be reported as 400 `invalid_filter`, not
+  `22P02`, `22003`, `22007`, `22008`, `22021`, `22025` or `22P05`, such as
+  a MySQL cast out of range, or a Postgres `LIKE` pattern ending in `\`)
+  MUST be reported as 400 `invalid_filter`, not
   a 5xx. Any other error is not the filter's: a division by zero in a
   view stays a 5xx.
 - `IN` matches when the column equals any listed value, compared as
