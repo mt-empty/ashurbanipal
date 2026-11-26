@@ -39,8 +39,9 @@ func main() {
 
 	mux := http.NewServeMux()
 	// mux.Handle(...) your own routes
-	mux.Handle("/__ashurbanipal", viewer)
-	mux.Handle("/__ashurbanipal/", viewer)
+	for _, path := range ashurbanipal.Paths(cfg) {
+		mux.Handle(path, viewer)
+	}
 
 	log.Fatal(http.ListenAndServe(":3000", mux))
 }
@@ -72,11 +73,12 @@ func requireAdmin(next http.Handler) http.Handler {
 }
 
 guarded := requireAdmin(viewer)
-mux.Handle("/__ashurbanipal", guarded)
-mux.Handle("/__ashurbanipal/", guarded)
+for _, path := range ashurbanipal.Paths(cfg) {
+	mux.Handle(path, guarded)
+}
 ```
 
-Register both paths: the UI is served at the bare path, and the API under it. If you changed `BasePath`, use that path instead.
+`Paths` lists the viewer's exact paths: the UI and its ten API routes, under `BasePath` if you changed it. Registering only those leaves every other path under the mount, and your own 404, to your routes. A `BasePath` of `/` panics, because it would take `/` and `/api/...` from your app.
 
 ## MySQL, MariaDB, or SQLite
 

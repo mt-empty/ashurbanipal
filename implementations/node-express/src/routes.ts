@@ -36,7 +36,13 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   }
 
   const opts = { limits: withDefaults(config.limits), siblings: siblingsBody(siblingsView(config)) };
-  const mount = basePath(config);
+  let mount = basePath(config);
+  while (mount.endsWith("/")) mount = mount.slice(0, -1);
+  if (mount === "") {
+    throw new Error(
+      "basePath must not be the root: it would take / and /api/... from the host app (spec/protocol.md §3)",
+    );
+  }
 
   const hosts = hostAllowList(config.allowedHosts);
   for (const warning of hosts.warnings) console.warn(`ashurbanipal: ${warning}`);
@@ -60,18 +66,15 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   return router;
 }
 
-// Return 405 for non-GET methods on an existing protocol path. A handler's
-// rejection goes to Express's error handling, never an unhandled rejection.
+// GET and HEAD only: another method passes on to the host app, which may
+// route it itself (spec/protocol.md §3). A handler's rejection goes to
+// Express's error handling, never an unhandled rejection.
 function registerGet(
   router: ExpressRouter,
   path: string,
   handler: (req: Request, res: Response) => void | Promise<void>,
 ): void {
-  router.all(path, (req, res, next) => {
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      res.status(405).set("Allow", "GET, HEAD").type("text/plain; charset=utf-8").send("Method Not Allowed");
-      return;
-    }
+  router.get(path, (req, res, next) => {
     Promise.resolve(handler(req, res)).catch(next);
   });
 }

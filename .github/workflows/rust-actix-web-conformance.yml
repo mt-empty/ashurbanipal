@@ -97,3 +97,6 @@ jobs:
       start-command: "cargo run -p ashurbanipal-actix-web --manifest-path implementations/rust/actix-web/Cargo.toml --example demo"
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
+      # A wrong method on a viewer path passes on to the host app, which may
+      # answer 404, not 405 (docs/adapter-decisions.md §3).
+      exclude-checks: unsupported_method

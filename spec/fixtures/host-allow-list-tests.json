@@ -1,0 +1,242 @@
+{
+  "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/protocol.md §3.1.",
+  "cases": [
+    {
+      "name": "no list: any host passes",
+      "allowed_hosts": [],
+      "host": "anything.example",
+      "allowed": true
+    },
+    {
+      "name": "no list: a missing host passes",
+      "allowed_hosts": [],
+      "host": null,
+      "allowed": true
+    },
+    {
+      "name": "name matches itself",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "billing.internal",
+      "allowed": true
+    },
+    {
+      "name": "name without a port matches any port",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "billing.internal:4000",
+      "allowed": true
+    },
+    {
+      "name": "another name is rejected",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "evil.example",
+      "allowed": false
+    },
+    {
+      "name": "a longer name ending in the listed one is rejected",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "billing.internal.evil.example",
+      "allowed": false
+    },
+    {
+      "name": "name with a port matches that port",
+      "allowed_hosts": [
+        "billing.internal:4000"
+      ],
+      "host": "billing.internal:4000",
+      "allowed": true
+    },
+    {
+      "name": "name with a port rejects no port",
+      "allowed_hosts": [
+        "billing.internal:4000"
+      ],
+      "host": "billing.internal",
+      "allowed": false
+    },
+    {
+      "name": "name with a port rejects another port",
+      "allowed_hosts": [
+        "billing.internal:4000"
+      ],
+      "host": "billing.internal:4001",
+      "allowed": false
+    },
+    {
+      "name": "names compare case-insensitively",
+      "allowed_hosts": [
+        "Billing.Internal"
+      ],
+      "host": "BILLING.internal:4000",
+      "allowed": true
+    },
+    {
+      "name": "a trailing dot on the host is dropped",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "billing.internal.",
+      "allowed": true
+    },
+    {
+      "name": "a trailing dot before a port is dropped",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "billing.internal.:4000",
+      "allowed": true
+    },
+    {
+      "name": "a trailing dot on the entry is dropped",
+      "allowed_hosts": [
+        "other.internal."
+      ],
+      "host": "other.internal",
+      "allowed": true
+    },
+    {
+      "name": "a lone dot is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": ".",
+      "allowed": false
+    },
+    {
+      "name": "only one trailing dot is dropped",
+      "allowed_hosts": [
+        "billing.internal"
+      ],
+      "host": "billing.internal..",
+      "allowed": false
+    },
+    {
+      "name": "IPv6 with a port matches that port",
+      "allowed_hosts": [
+        "[::1]:4000"
+      ],
+      "host": "[::1]:4000",
+      "allowed": true
+    },
+    {
+      "name": "IPv6 with a port rejects another port",
+      "allowed_hosts": [
+        "[::1]:4000"
+      ],
+      "host": "[::1]:4001",
+      "allowed": false
+    },
+    {
+      "name": "IPv6 compares case-insensitively and matches any port",
+      "allowed_hosts": [
+        "[fe80::1]"
+      ],
+      "host": "[FE80::1]:80",
+      "allowed": true
+    },
+    {
+      "name": "IPv6 without brackets is malformed",
+      "allowed_hosts": [
+        "[::1]"
+      ],
+      "host": "::1",
+      "allowed": false
+    },
+    {
+      "name": "a missing host is rejected",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": null,
+      "allowed": false
+    },
+    {
+      "name": "an empty host is rejected",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "",
+      "allowed": false
+    },
+    {
+      "name": "an empty port is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "localhost:",
+      "allowed": false
+    },
+    {
+      "name": "a port above 65535 is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "localhost:99999",
+      "allowed": false
+    },
+    {
+      "name": "a non-numeric port is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "localhost:80x",
+      "allowed": false
+    },
+    {
+      "name": "userinfo is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "user@localhost",
+      "allowed": false
+    },
+    {
+      "name": "a path is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "localhost/path",
+      "allowed": false
+    },
+    {
+      "name": "a space is malformed",
+      "allowed_hosts": [
+        "localhost"
+      ],
+      "host": "local host",
+      "allowed": false
+    },
+    {
+      "name": "an entry with a scheme matches nothing",
+      "allowed_hosts": [
+        "http://localhost"
+      ],
+      "host": "localhost",
+      "allowed": false
+    },
+    {
+      "name": "a bad entry leaves the good ones working",
+      "allowed_hosts": [
+        "http://localhost",
+        "ok.example"
+      ],
+      "host": "ok.example",
+      "allowed": true
+    },
+    {
+      "name": "a list of only bad entries rejects everything",
+      "allowed_hosts": [
+        "http://localhost"
+      ],
+      "host": null,
+      "allowed": false
+    }
+  ]
+}

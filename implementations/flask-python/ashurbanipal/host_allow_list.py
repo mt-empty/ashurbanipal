@@ -31,6 +31,9 @@ class HostAllowList:
 
     @classmethod
     def build(cls, hosts: Sequence[str]) -> HostAllowList:
+        if isinstance(hosts, str):
+            # A lone name set after construction, not split into letters.
+            hosts = [hosts]
         if not hosts:
             return cls(
                 entries=None,

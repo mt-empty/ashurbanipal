@@ -7,44 +7,19 @@ import (
 	"testing"
 )
 
-func TestHostAllowListMatching(t *testing.T) {
-	cases := []struct {
-		entries []string
-		host    string
-		want    bool
-	}{
-		{nil, "anything.example", true},
-		{nil, "", true},
-		{[]string{"billing.internal"}, "billing.internal", true},
-		{[]string{"billing.internal"}, "billing.internal:4000", true},
-		{[]string{"billing.internal"}, "evil.example", false},
-		{[]string{"billing.internal"}, "billing.internal.evil.example", false},
-		{[]string{"billing.internal:4000"}, "billing.internal:4000", true},
-		{[]string{"billing.internal:4000"}, "billing.internal", false},
-		{[]string{"billing.internal:4000"}, "billing.internal:4001", false},
-		{[]string{"Billing.Internal"}, "BILLING.internal:4000", true},
-		{[]string{"billing.internal"}, "billing.internal.", true},
-		{[]string{"billing.internal"}, "billing.internal.:4000", true},
-		{[]string{"other.internal."}, "other.internal", true},
-		{[]string{"localhost"}, ".", false},
-		{[]string{"billing.internal"}, "billing.internal..", false},
-		{[]string{"[::1]:4000"}, "[::1]:4000", true},
-		{[]string{"[::1]:4000"}, "[::1]:4001", false},
-		{[]string{"[fe80::1]"}, "[FE80::1]:80", true},
-		{[]string{"[::1]"}, "::1", false},
-		{[]string{"localhost"}, "", false},
-		{[]string{"localhost"}, "localhost:", false},
-		{[]string{"localhost"}, "localhost:99999", false},
-		{[]string{"localhost"}, "localhost:80x", false},
-		{[]string{"localhost"}, "user@localhost", false},
-		{[]string{"localhost"}, "localhost/path", false},
-		{[]string{"localhost"}, "local host", false},
-		{[]string{"http://localhost"}, "localhost", false},
-		{[]string{"http://localhost", "ok.example"}, "ok.example", true},
+func TestHostAllowListFixtureCases(t *testing.T) {
+	var fixtures struct {
+		Cases []struct {
+			Name         string   `json:"name"`
+			AllowedHosts []string `json:"allowed_hosts"`
+			Host         string   `json:"host"` // null decodes to "", a missing header
+			Allowed      bool     `json:"allowed"`
+		} `json:"cases"`
 	}
-	for _, c := range cases {
-		if got := newHostAllowList(c.entries).allows(c.host); got != c.want {
-			t.Errorf("entries %q, Host %q: allows = %v, want %v", c.entries, c.host, got, c.want)
+	readFixture(t, "host-allow-list-tests.json", &fixtures)
+	for _, c := range fixtures.Cases {
+		if got := newHostAllowList(c.AllowedHosts).allows(c.Host); got != c.Allowed {
+			t.Errorf("%s: allows = %v, want %v", c.Name, got, c.Allowed)
 		}
 	}
 }

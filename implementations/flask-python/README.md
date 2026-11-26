@@ -61,7 +61,7 @@ def require_admin():
 app.register_blueprint(bp)
 ```
 
-A hook on the blueprint follows it to any `mount` path you choose.
+A hook on the blueprint follows it to any `mount` path you choose, and checks only the viewer's own routes, never yours.
 
 ## MySQL, MariaDB, or SQLite
 
@@ -111,7 +111,7 @@ config = Config(
     limits=Limits(default_page_size=50, max_page_size=100, query_timeout_secs=5),  # optional; the defaults
 )
 
-app.register_blueprint(router(config, sources, mount="/__ashurbanipal"))  # mount is optional; change the URL path
+app.register_blueprint(router(config, sources, mount="/__ashurbanipal"))  # optional mount; never /
 ```
 
 The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. Import `Instance` and `Sibling` from `ashurbanipal`. Set `allowed_hosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, `router()` logs a warning on the `ashurbanipal.routes` logger.

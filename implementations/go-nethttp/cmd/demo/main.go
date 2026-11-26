@@ -106,7 +106,9 @@ func main() {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, uiPath, http.StatusTemporaryRedirect)
 	})
-	mux.Handle("/", viewer)
+	for _, path := range ashurbanipal.Paths(cfg) {
+		mux.Handle(path, viewer)
+	}
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 	log.Printf("demo host on http://localhost:%d — browser at http://localhost:%d%s", port, port, uiPath)

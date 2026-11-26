@@ -11,40 +11,10 @@ import org.springframework.mock.web.MockHttpServletResponse
 /** The optional `Host` allow-list (`spec/protocol.md` §3.1). */
 class HostAllowListTest {
     @Test
-    fun `matching follows the entry rules`() {
-        val cases = listOf(
-            Triple(listOf(), "anything.example", true),
-            Triple(listOf(), null, true),
-            Triple(listOf("billing.internal"), "billing.internal", true),
-            Triple(listOf("billing.internal"), "billing.internal:4000", true),
-            Triple(listOf("billing.internal"), "evil.example", false),
-            Triple(listOf("billing.internal"), "billing.internal.evil.example", false),
-            Triple(listOf("billing.internal:4000"), "billing.internal:4000", true),
-            Triple(listOf("billing.internal:4000"), "billing.internal", false),
-            Triple(listOf("billing.internal:4000"), "billing.internal:4001", false),
-            Triple(listOf("Billing.Internal"), "BILLING.internal:4000", true),
-            Triple(listOf("billing.internal"), "billing.internal.", true),
-            Triple(listOf("billing.internal"), "billing.internal.:4000", true),
-            Triple(listOf("other.internal."), "other.internal", true),
-            Triple(listOf("localhost"), ".", false),
-            Triple(listOf("billing.internal"), "billing.internal..", false),
-            Triple(listOf("[::1]:4000"), "[::1]:4000", true),
-            Triple(listOf("[::1]:4000"), "[::1]:4001", false),
-            Triple(listOf("[fe80::1]"), "[FE80::1]:80", true),
-            Triple(listOf("[::1]"), "::1", false),
-            Triple(listOf("localhost"), null, false),
-            Triple(listOf("localhost"), "", false),
-            Triple(listOf("localhost"), "localhost:", false),
-            Triple(listOf("localhost"), "localhost:99999", false),
-            Triple(listOf("localhost"), "localhost:80x", false),
-            Triple(listOf("localhost"), "user@localhost", false),
-            Triple(listOf("localhost"), "localhost/path", false),
-            Triple(listOf("localhost"), "local host", false),
-            Triple(listOf("http://localhost"), "localhost", false),
-            Triple(listOf("http://localhost", "ok.example"), "ok.example", true),
-        )
-        for ((entries, host, want) in cases) {
-            assertThat(HostAllowList(entries).allows(host)).describedAs("entries %s, Host %s", entries, host).isEqualTo(want)
+    fun `shared fixture cases`() {
+        for (case in CatalogFixture.read("host-allow-list-tests.json")["cases"]) {
+            val host = case["host"].takeUnless { it.isNull }?.asText()
+            assertThat(HostAllowList(case["allowed_hosts"].strings()).allows(host)).describedAs(case.text("name")).isEqualTo(case["allowed"].asBoolean())
         }
     }
 
@@ -87,18 +57,20 @@ class HostAllowListTest {
         return patterns
     }
 
+    private fun viewerPaths(vararg page: String, mount: String = page[0]) = page.toList() + VIEWER_API_PATHS.map { mount + it }
+
     @Test
-    fun `the filter covers only the mount`() {
-        assertThat(urlPatterns()).containsExactlyInAnyOrder("/__ashurbanipal", "/__ashurbanipal/*")
-        assertThat(urlPatterns("ashurbanipal.base-path=/viewer/")).containsExactlyInAnyOrder("/viewer", "/viewer/*")
+    fun `the filter covers only the viewer's exact paths`() {
+        assertThat(urlPatterns()).containsExactlyInAnyOrderElementsOf(viewerPaths("/__ashurbanipal"))
+        assertThat(urlPatterns("ashurbanipal.base-path=/viewer/")).containsExactlyInAnyOrderElementsOf(viewerPaths("/viewer"))
     }
 
     @Test
     fun `the filter follows the DispatcherServlet's own path`() {
         assertThat(urlPatterns("spring.mvc.servlet.path=/app"))
-            .containsExactlyInAnyOrder("/app/__ashurbanipal", "/app/__ashurbanipal/*")
+            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app/__ashurbanipal"))
         assertThat(urlPatterns("spring.mvc.servlet.path=/app/", "ashurbanipal.base-path=viewer"))
-            .containsExactlyInAnyOrder("/app/viewer", "/app/viewer/*")
+            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app/viewer"))
     }
 
     @Test
@@ -114,8 +86,8 @@ class HostAllowListTest {
 
     @Test
     fun `a root mount never covers the host's other routes`() {
-        assertThat(urlPatterns("ashurbanipal.base-path=/")).containsExactlyInAnyOrder("", "/api/*")
+        assertThat(urlPatterns("ashurbanipal.base-path=/")).containsExactlyInAnyOrderElementsOf(viewerPaths("", mount = ""))
         assertThat(urlPatterns("ashurbanipal.base-path=/", "spring.mvc.servlet.path=/app"))
-            .containsExactlyInAnyOrder("/app", "/app/*")
+            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app", "/app/"))
     }
 }

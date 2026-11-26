@@ -2,6 +2,7 @@ package ashurbanipal
 
 import (
 	"fmt"
+	"strings"
 )
 
 // Limits bounds pagination and query duration. The zero value is not
@@ -99,9 +100,15 @@ func (v siblingsView) isInstance(s Sibling) bool {
 	return v.Instance != nil && s.Name == v.Instance.Name && s.Label == v.Instance.Label
 }
 
+// basePath has no trailing slash, and panics on a root mount, which would
+// take / and /api/... from the host (spec/protocol.md §3).
 func (c Config) basePath() string {
 	if c.BasePath == "" {
 		return "/__ashurbanipal"
 	}
-	return c.BasePath
+	base := strings.TrimRight(c.BasePath, "/")
+	if base == "" {
+		panic("ashurbanipal: BasePath must not be the root: it would take / and /api/... from the host app (spec/protocol.md §3)")
+	}
+	return base
 }

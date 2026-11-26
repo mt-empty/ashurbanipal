@@ -127,7 +127,7 @@ max_page_size = 100
 query_timeout_secs = 5
 ```
 
-The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. Set `allowed_hosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, `app_state()` logs a `tracing` warning. A request with another `Host` falls through to your `App`'s 404.
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. Set `allowed_hosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, `app_state()` logs a warning through `tracing`, or through `log` when no `tracing` subscriber is installed. A request with another `Host` falls through to your `App`'s 404.
 
 ## Serving under a prefix
 

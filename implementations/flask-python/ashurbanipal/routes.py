@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from flask import Blueprint, Response, abort, jsonify, request
+from flask import Blueprint, Response, abort, current_app, jsonify, request
 from flask.blueprints import BlueprintSetupState
 
 from . import filter as filter_module
@@ -47,9 +47,19 @@ _SIBLING_HEALTH_TIMEOUT_SECS = 3
 _log = logging.getLogger(__name__)
 
 
-def _under_mount(path: str, prefix: str) -> bool:
-    # The viewer's own routes only: the page and everything under /api/.
-    return path in (prefix, prefix + "/") or path.startswith(prefix + "/api/")
+# The ten API routes (spec/protocol.md §3), relative to the mount.
+VIEWER_API_PATHS = (
+    "/api/sources",
+    "/api/schemas",
+    "/api/tables",
+    "/api/table-counts",
+    "/api/tables/data",
+    "/api/tables/common-values",
+    "/api/tables/referenced-by",
+    "/api/tables/structure",
+    "/api/tables/join",
+    "/api/siblings",
+)
 
 
 _MAX_I64 = 2**63 - 1
@@ -70,24 +80,45 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     for warning in hosts.warnings:
         _log.warning("ashurbanipal: %s", warning)
 
-    # Where the host actually registered the blueprint, which a url_prefix
-    # override or a parent blueprint can move away from `mount`.
-    prefixes: list[str] = []
+    # Each registration's app, full blueprint name and exact viewer paths: a
+    # url_prefix override or a parent blueprint can move the mount.
+    registrations: list[tuple[object, str, frozenset[str]]] = []
 
     @bp.record
-    def _remember_prefix(state: BlueprintSetupState) -> None:
-        prefixes.append((state.url_prefix or "").rstrip("/"))
+    def _remember_registration(state: BlueprintSetupState) -> None:
+        prefix = (state.url_prefix or "").rstrip("/")
+        if not prefix:
+            _log.warning(
+                "ashurbanipal: a root mount takes / and /api/... from the host app and will be refused "
+                "in a later release; mount the viewer under a path of its own (spec/protocol.md §3)"
+            )
+        name = ".".join(part for part in (state.name_prefix, state.name) if part)
+        paths = frozenset((prefix or "/", *(prefix + p for p in VIEWER_API_PATHS)))
+        registrations.append((state.app, name, paths))
+
+    def _is_viewer_request() -> bool:
+        # A matched rule is the viewer's only when it is this blueprint's, so a
+        # host route never is. An unmatched request is the viewer's only on one
+        # of its exact paths (a wrong method), never elsewhere under the mount.
+        app = current_app._get_current_object()  # type: ignore[attr-defined]
+        for registered_app, name, paths in registrations:
+            if registered_app is not app:
+                continue
+            if request.url_rule is not None:
+                if request.blueprint == name:
+                    return True
+            elif request.path in paths:
+                return True
+        return False
 
     if hosts.active:
         # App-wide, because a blueprint's own hooks never run when routing
-        # fails (a wrong method would answer 405); limited to the mount by path.
+        # fails (a wrong method would answer 405).
         @bp.before_app_request
         def _check_host() -> None:
-            if not any(_under_mount(request.path, p) for p in prefixes):
-                return
             # The raw header, not request.host, which falls back to SERVER_NAME
             # and follows ProxyFix (spec/protocol.md §3.1).
-            if not hosts.allows(request.headers.get("Host")):
+            if _is_viewer_request() and not hosts.allows(request.headers.get("Host")):
                 abort(404)
 
     @bp.after_request
@@ -95,7 +126,7 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
         # HTML has neither header; API responses carry both (spec/protocol.md §2).
         # nosniff stops a browser from rendering echoed request text as HTML.
         # A request the Host check rejected stays a bare 404.
-        is_api = any(request.path.startswith(f"{p}/api/") for p in prefixes)
+        is_api = request.endpoint is not None and not request.endpoint.endswith(".serve_html")
         if is_api and hosts.allows(request.headers.get("Host")):
             response.headers[PROTOCOL_HEADER] = PROTOCOL_VERSION
             response.headers["X-Content-Type-Options"] = "nosniff"

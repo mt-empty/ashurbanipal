@@ -156,6 +156,13 @@ by reusing the frontend and fixtures above:
   `X-Forwarded-Host`, `Forwarded` or a framework's proxy-aware host
   (`req.hostname`, `request.host`, `getServerName()`,
   `ConnectionInfo::host()`): any client can set those.
+- **Change a host route.** Only a `GET` or `HEAD` to `{mount}` or an API
+  route is the viewer's (`spec/protocol.md` §3). Match those exact paths,
+  never a `{mount}/*` prefix, in routing, the `Host` check and any error
+  handler, and refuse a root mount. A host route under `{mount}`, beside it
+  (`{mount}-admin`), or on a viewer path with another method keeps its own
+  response, with the check on or off. Prove it with
+  `spec/fixtures/host-routes-untouched.json`.
 - **Add write endpoints.** Every route is a read-only `GET`; there is no
   protocol-level story for mutation.
 - **Add extra endpoints under the mount.** New functionality goes through

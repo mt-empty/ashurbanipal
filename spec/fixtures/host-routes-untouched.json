@@ -1,0 +1,35 @@
+{
+  "$schema_note": "See spec/fixtures/README.md. Source of truth: spec/protocol.md §3 and §3.1.",
+  "viewer_paths": [
+    "",
+    "/api/sources",
+    "/api/schemas",
+    "/api/tables",
+    "/api/table-counts",
+    "/api/tables/data",
+    "/api/tables/common-values",
+    "/api/tables/referenced-by",
+    "/api/tables/structure",
+    "/api/tables/join",
+    "/api/siblings"
+  ],
+  "host_routes": [
+    { "method": "GET", "path": "/health" },
+    { "method": "GET", "path": "/api/orders" },
+    { "method": "GET", "path": "{mount}x" },
+    { "method": "GET", "path": "{mount}-admin" },
+    { "method": "GET", "path": "{mount}/other" },
+    { "method": "GET", "path": "{mount}/api" },
+    { "method": "GET", "path": "{mount}/api/orders" },
+    { "method": "GET", "path": "{mount}/api/tables/extra" },
+    { "method": "POST", "path": "{mount}" },
+    { "method": "POST", "path": "{mount}/api/tables" },
+    { "method": "DELETE", "path": "{mount}/api/sources" }
+  ],
+  "unrouted": [
+    { "method": "GET", "path": "/nothing" },
+    { "method": "GET", "path": "{mount}/nothing" },
+    { "method": "GET", "path": "{mount}/api/nothing" },
+    { "method": "GET", "path": "{mount}x/nothing" }
+  ]
+}
