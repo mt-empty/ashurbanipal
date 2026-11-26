@@ -47,8 +47,9 @@ Ashurbanipal skips the whole chain by not needing a new connection: it runs insi
 
 Ashurbanipal ships no authentication or authorization. Access is a perimeter concern: run the host service behind your corporate VPN, reachable by you and your team but not the outside world. If you want a login or per-user rules, add that in front of the mounted router.
 
-Two things back that up:
+Three things back that up:
 
+- **Host check (recommended)**: list the names the viewer is reached at in `allowed_hosts`. A request with any other `Host` gets a 404, so a web page can't read the viewer through DNS rebinding ([`spec/protocol.md`](spec/protocol.md) §3.1). Without the list, the viewer logs a warning at startup.
 - **Fail-safe default**: the `enabled` flag defaults to off. Ashurbanipal has no concept of "environment"; where to turn it on is the host's call.
 - **Read-only by construction**: `SELECT` only, no DDL or DML. On Postgres and MySQL/MariaDB every query that reads a table or the catalog also runs in a read-only transaction, so the database refuses a write even if one slips through.
 
@@ -271,6 +272,7 @@ Once mounted, the viewer is served under `/__ashurbanipal` (the default mount pa
 | `limits.max_page_size` | `100` | Hard, server-enforced page-size cap. |
 | `limits.query_timeout_secs` | `5` | Per-query timeout. |
 | `siblings` | none | Other instances to show reachability for; each has `name`, `base_url`, `health_path`, and an optional `label`, typically an environment (dev, int) or a region (eu, us). Use one shared list, in the same order, on every instance, so the grid looks the same everywhere. A mistake (two siblings with the same `name` and `label`, an empty label, an incomplete `instance`) never breaks anything: every entry is still shown, and Other services lists a warning for each. |
+| `allowed_hosts` | none (no check) | Names the viewer is reached at, each `name` or `name:port` (IPv6 in brackets: `[::1]:4000`). An entry without a port matches any port. A request with any other `Host` gets a 404; `X-Forwarded-Host` is never read, so behind a proxy that rewrites `Host`, list the name the app receives. A sibling opened from the grid is reached under its `base_url`'s name, so that sibling's list must include it. |
 | `instance` | none | This instance's own `name` and `label`, so the UI can mark it and link the same view elsewhere ([`spec/protocol.md`](spec/protocol.md) §5.6). |
 
 ## Implementations

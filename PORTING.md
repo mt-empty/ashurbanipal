@@ -151,6 +151,11 @@ by reusing the frontend and fixtures above:
 
 - **Add authentication.** Perimeter security is the host's job — this
   crate inherits whatever already guards the host process.
+- **Read a forwarded host for the `Host` check.** The §3.1 allow-list
+  compares the raw `Host` header (HTTP/2: `:authority`), never
+  `X-Forwarded-Host`, `Forwarded` or a framework's proxy-aware host
+  (`req.hostname`, `request.host`, `getServerName()`,
+  `ConnectionInfo::host()`): any client can set those.
 - **Add write endpoints.** Every route is a read-only `GET`; there is no
   protocol-level story for mutation.
 - **Add extra endpoints under the mount.** New functionality goes through

@@ -9,6 +9,7 @@ mod backend;
 mod common;
 mod common_values;
 mod filter_dsl;
+mod host_allow_list;
 mod html_and_siblings;
 mod join;
 mod json_path;

@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Router as ExpressRouter } from "express";
+import type { Express, Router as ExpressRouter } from "express";
 import express from "express";
 import { describe } from "vitest";
 
@@ -12,9 +12,10 @@ export interface TestServer {
   close(): Promise<void>;
 }
 
-export async function startServer(router: ExpressRouter): Promise<TestServer> {
+/** Takes a createRouter() result, or a whole host app when a test needs its own routes around the viewer. */
+export async function startServer(handler: ExpressRouter | Express): Promise<TestServer> {
   const app = express();
-  app.use(router);
+  app.use(handler);
   const server: Server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;

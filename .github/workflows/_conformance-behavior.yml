@@ -61,6 +61,14 @@ on:
         required: false
         type: string
         default: postgres
+      expect-host-check:
+        description: >-
+          Sets CONFORMANCE_EXPECT_HOST_CHECK=1 for the runner, so
+          host_allow_list.rs fails rather than skips; for a demo started with
+          CONFORMANCE_ALLOWED_HOSTS=1 (Spring: profile conformance-allowed-hosts).
+        required: false
+        type: boolean
+        default: false
       engine-image:
         description: >-
           Docker image to run instead of the backend's default, to test
@@ -219,7 +227,10 @@ jobs:
       - name: Run the conformance kit against it (layer 3, behavior)
         env:
           ASHURBANIPAL_CONFORMANCE_URL: ${{ inputs.conformance-url }}
-        run: bash conformance/runner/report.sh
+          INPUTS_EXPECT_HOST_CHECK: ${{ inputs.expect-host-check }}
+        run: |
+          if [ "$INPUTS_EXPECT_HOST_CHECK" = true ]; then export CONFORMANCE_EXPECT_HOST_CHECK=1; fi
+          bash conformance/runner/report.sh
 
       - name: Stop the demo
         if: always()

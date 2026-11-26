@@ -1,10 +1,10 @@
 use std::sync::{Arc, LazyLock};
 
-use axum::extract::{FromRequestParts, State};
-use axum::http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, VARY, X_CONTENT_TYPE_OPTIONS};
+use axum::extract::{FromRequestParts, Request, State};
+use axum::http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, HOST, VARY, X_CONTENT_TYPE_OPTIONS};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::middleware::map_response;
+use axum::middleware::{from_fn, map_response, Next};
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::get;
 use axum::Router;
@@ -16,8 +16,8 @@ use ashurbanipal::protocol_wire::{
     TableParams, TablesResponse,
 };
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, JoinData, ProblemDetails, SiblingChecker, Structure,
-    TableData,
+    resolve_source, Config, DbError, DbSource, HostAllowList, JoinData, ProblemDetails,
+    SiblingChecker, Structure, TableData,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -52,6 +52,7 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
     }
     assert!(!sources.is_empty(), "router() requires at least one source");
     LazyLock::force(&DBVIEWER_HTML_GZIP);
+    let hosts = Arc::new(HostAllowList::from_config(&config));
     let checker = SiblingChecker::new(&config);
     let state = Arc::new(AppState {
         config,
@@ -78,10 +79,34 @@ pub fn router<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Router 
         .route("/__ashurbanipal/api/tables/join", get(table_join::<S>))
         .route("/__ashurbanipal/api/siblings", get(siblings::<S>))
         .layer(map_response(stamp_api_headers));
-    Router::new()
+    let viewer = Router::new()
         .route("/__ashurbanipal", get(serve_html::<S>))
         .merge(api)
-        .with_state(state)
+        .with_state(state);
+    if !hosts.is_active() {
+        return viewer;
+    }
+    // route_layer, so the check never wraps the host's own fallback. A
+    // rejected request gets the same bare 404 as an unmounted path.
+    viewer.route_layer(from_fn(move |req: Request, next: Next| {
+        let allowed = hosts.allows(request_host(&req));
+        async move {
+            if allowed {
+                next.run(req).await
+            } else {
+                StatusCode::NOT_FOUND.into_response()
+            }
+        }
+    }))
+}
+
+/// The URI's authority (HTTP/2's `:authority`) or the raw `Host` header,
+/// never a forwarded one (`spec/protocol.md` §3.1).
+fn request_host(req: &Request) -> Option<&str> {
+    req.uri()
+        .authority()
+        .map(|a| a.as_str())
+        .or_else(|| req.headers().get(HOST).and_then(|v| v.to_str().ok()))
 }
 
 // nosniff stops a browser from rendering echoed request text in a JSON error as HTML.
@@ -351,6 +376,126 @@ mod tests {
             .await
             .unwrap();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn status_for(app: Router, uri: &str, headers: &[(&str, &str)]) -> StatusCode {
+        send(app, axum::http::Method::GET, uri, headers).await
+    }
+
+    async fn send(
+        app: Router,
+        method: axum::http::Method,
+        uri: &str,
+        headers: &[(&str, &str)],
+    ) -> StatusCode {
+        use tower::ServiceExt;
+        let mut req = axum::http::Request::builder().method(method).uri(uri);
+        for (name, value) in headers {
+            req = req.header(*name, *value);
+        }
+        app.oneshot(req.body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status()
+    }
+
+    fn host_checked_app() -> Router {
+        let config = Config::from_toml("enabled = true\nallowed_hosts = [\"localhost\"]").unwrap();
+        router(
+            config,
+            vec![("primary".to_string(), StubSource::<0>("users"))],
+        )
+    }
+
+    #[tokio::test]
+    async fn an_unlisted_host_gets_404_on_every_route() {
+        for uri in ["/__ashurbanipal", "/__ashurbanipal/api/tables"] {
+            let app = host_checked_app();
+            assert_eq!(
+                status_for(app.clone(), uri, &[("host", "rebind.invalid")]).await,
+                StatusCode::NOT_FOUND,
+                "{uri}"
+            );
+            assert_eq!(
+                status_for(
+                    app.clone(),
+                    uri,
+                    &[
+                        ("host", "rebind.invalid"),
+                        ("x-forwarded-host", "localhost")
+                    ]
+                )
+                .await,
+                StatusCode::NOT_FOUND,
+                "{uri} with X-Forwarded-Host"
+            );
+            assert_eq!(
+                status_for(app.clone(), uri, &[]).await,
+                StatusCode::NOT_FOUND,
+                "{uri} with no Host"
+            );
+            assert_eq!(
+                status_for(app, uri, &[("host", "LOCALHOST:4000")]).await,
+                StatusCode::OK,
+                "{uri}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_check_follows_a_nested_mount() {
+        let app = Router::new()
+            .nest("/svc", host_checked_app())
+            .route("/other", get(|| async { "host route" }));
+        let uri = "/svc/__ashurbanipal/api/tables";
+        assert_eq!(
+            status_for(app.clone(), uri, &[("host", "rebind.invalid")]).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status_for(app.clone(), uri, &[("host", "localhost")]).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_for(app, "/other", &[("host", "rebind.invalid")]).await,
+            StatusCode::OK,
+            "the host's own routes are never checked"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wrong_method_from_an_unlisted_host_gets_404() {
+        let status = send(
+            host_checked_app(),
+            axum::http::Method::POST,
+            "/__ashurbanipal/api/tables",
+            &[("host", "rebind.invalid")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn an_http2_authority_is_checked_in_place_of_host() {
+        let app = host_checked_app();
+        assert_eq!(
+            status_for(
+                app.clone(),
+                "http://localhost:4000/__ashurbanipal/api/tables",
+                &[]
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_for(
+                app,
+                "http://rebind.invalid/__ashurbanipal/api/tables",
+                &[("host", "localhost")]
+            )
+            .await,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[test]

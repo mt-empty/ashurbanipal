@@ -95,6 +95,7 @@ impl TestServer {
             .env("PORT", port.to_string())
             .env("DATABASE_URL", database_url)
             .env_remove("SIBLING_PORT")
+            .env("CONFORMANCE_ALLOWED_HOSTS", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

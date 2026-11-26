@@ -42,7 +42,8 @@ type NamedSource struct {
 // When cfg.Enabled is false — including the zero value Config{}, which
 // MUST mean disabled — Router returns a handler that 404s every request,
 // indistinguishable from the viewer never having been mounted at all
-// (spec/protocol.md §4).
+// (spec/protocol.md §4). With cfg.AllowedHosts set, a request whose Host
+// is not listed gets the same 404 (§3.1).
 func Router(cfg Config, sources []NamedSource) http.Handler {
 	if !cfg.IsEnabled() {
 		return http.NotFoundHandler()
@@ -67,7 +68,7 @@ func Router(cfg Config, sources []NamedSource) http.Handler {
 	mux.Handle("GET "+base+"/api/tables/structure", withAPIHeaders(structureHandler(sources)))
 	mux.Handle("GET "+base+"/api/tables/join", withAPIHeaders(tableJoinHandler(sources, limits)))
 	mux.Handle("GET "+base+"/api/siblings", withAPIHeaders(siblingsHandler(client, cfg.siblingsView())))
-	return mux
+	return withHostCheck(newHostAllowList(cfg.AllowedHosts), mux)
 }
 
 // defaultSource is what an absent source param resolves to, which

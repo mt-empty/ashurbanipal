@@ -64,6 +64,19 @@ ashurbanipal:
       health-path: /health
 
 ---
+# conformance/runner/host_allow_list.rs's target — activate with
+# SPRING_PROFILES_ACTIVE=conformance-allowed-hosts.
+spring:
+  config:
+    activate:
+      on-profile: conformance-allowed-hosts
+
+ashurbanipal:
+  allowed-hosts:
+    - localhost
+    - 127.0.0.1
+
+---
 # Single-source demo on MySQL/MariaDB or SQLite, for the conformance kit's
 # other seeds. SPRING_DATASOURCE_URL names the database (jdbc:mysql://… or
 # jdbc:sqlite:…).

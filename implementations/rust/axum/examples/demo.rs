@@ -38,6 +38,9 @@
 //! `other_schema`, for `conformance/runner/two_source.rs` — see that
 //! file's module doc.
 //!
+//! `CONFORMANCE_ALLOWED_HOSTS=1` turns on the `Host` allow-list for
+//! `localhost` and `127.0.0.1`, for `conformance/runner/host_allow_list.rs`.
+//!
 //! `DB_BACKEND` selects the backend: `postgres` (default, from
 //! `DATABASE_URL`), `sqlite` (from `SQLITE_PATH`, needs `--features sqlite`),
 //! or `mysql` (from `DATABASE_URL`, needs `--features mysql`). The
@@ -69,7 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mount_prefix: Option<String> = std::env::var("MOUNT_PREFIX").ok().filter(|p| !p.is_empty());
 
     let config = Config::from_toml(&format!(
-        "enabled = true\n{}",
+        "enabled = true\n{}{}",
+        allowed_hosts_toml(),
         siblings_toml(port, sibling_port)
     ))?;
 
@@ -208,6 +212,16 @@ async fn sqlite_source(
         .connect_with(opts)
         .await?;
     Ok(ashurbanipal_axum::SqliteSource::new(pool))
+}
+
+/// Must come before `siblings_toml`'s tables: a TOML key after a table
+/// header belongs to that table.
+fn allowed_hosts_toml() -> &'static str {
+    if std::env::var("CONFORMANCE_ALLOWED_HOSTS").is_ok() {
+        "allowed_hosts = [\"localhost\", \"127.0.0.1\"]\n"
+    } else {
+        ""
+    }
 }
 
 /// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`

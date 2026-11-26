@@ -29,6 +29,8 @@ class AshurbanipalProperties(
     val limits: Limits = Limits(),
     val instance: Instance? = null,
     val siblings: List<Sibling> = emptyList(),
+    /** `name` or `name:port` entries; empty turns the `Host` check off (`spec/protocol.md` §3.1). */
+    val allowedHosts: List<String> = emptyList(),
 ) {
     init {
         for (source in sources) {

@@ -54,6 +54,9 @@ type Config struct {
 	Limits   Limits
 	Instance *Instance
 	Siblings []Sibling
+	// AllowedHosts holds "name" or "name:port" entries; empty turns the
+	// Host check off (spec/protocol.md §3.1).
+	AllowedHosts []string
 }
 
 func (c Config) IsEnabled() bool {

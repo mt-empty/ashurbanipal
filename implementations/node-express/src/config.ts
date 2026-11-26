@@ -47,6 +47,8 @@ export interface Config {
   limits?: Limits;
   instance?: Instance;
   siblings?: Sibling[];
+  /** `name` or `name:port` entries; absent or empty turns the Host check off (spec/protocol.md §3.1). */
+  allowedHosts?: string[];
 }
 
 export function isEnabled(config: Config): boolean {
