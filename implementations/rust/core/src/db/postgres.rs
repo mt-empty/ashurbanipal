@@ -113,12 +113,13 @@ impl PgPoolSource {
         Self { pool }
     }
 
-    /// `SET LOCAL` scopes the query bound to this transaction (`spec/protocol.md` §6).
+    /// Read-only, so no statement in it can write; `SET LOCAL` scopes the
+    /// query bound to this transaction (`spec/protocol.md` §6).
     async fn bounded_tx(
         &self,
         timeout_secs: u32,
     ) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, DbError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool.begin_with("begin read only").await?;
         // AssertSqlSafe: interpolates only a u32.
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "set local statement_timeout = '{timeout_secs}s'"

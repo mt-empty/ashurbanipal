@@ -99,6 +99,26 @@ def seeded(variant_url):
     db.drop(variant_url)
 
 
+def test_operation_connection_is_in_a_read_only_transaction(seeded) -> None:
+    # A SELECT on a MySQL base table cannot write, so this tries an INSERT on
+    # the connection every operation runs on (`spec/protocol.md` §6).
+    conn = seeded.source._connect()
+    try:
+        with conn.cursor() as cur, pytest.raises(pymysql.err.MySQLError) as exc_info:
+            cur.execute("insert into users (email, age) values ('x@x.com', 1)")
+        assert exc_info.value.args[0] == 1792  # ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION
+    finally:
+        conn.rollback()
+        conn.close()
+    conn = pymysql.connect(**seeded.kwargs)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) from users")
+            assert cur.fetchone() == (3,)
+    finally:
+        conn.close()
+
+
 def test_list_tables_and_query_table_round_trip(seeded) -> None:
     tables = seeded.list_tables(None)
     # Set, not list order: MariaDB's default collation sorts "order_extra"

@@ -190,7 +190,14 @@ class MySqlSource(DbSource):
         self._variant: str | None = None
 
     def _connect(self) -> pymysql.connections.Connection:
-        return pymysql.connect(**self._connect_kwargs)
+        conn = pymysql.connect(**self._connect_kwargs)
+        try:
+            # The operation's one transaction, ended by its commit (`spec/protocol.md` §6).
+            conn.query("START TRANSACTION READ ONLY")
+        except BaseException:
+            conn.close()
+            raise
+        return conn
 
     def _variant_of(self, conn: pymysql.connections.Connection) -> str:
         """Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6)."""

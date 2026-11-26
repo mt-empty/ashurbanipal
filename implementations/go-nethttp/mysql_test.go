@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 // testURL reads the devcontainer's shared MySQL service; MARIADB_TEST_URL
@@ -131,6 +131,38 @@ func stripScheme(url string) string {
 		host = hostpart[:slash]
 	}
 	return userpass + "@tcp(" + host + ")/"
+}
+
+// A SELECT on a MySQL base table cannot write, so this tries an INSERT in the
+// transaction every operation runs on (spec/protocol.md §6).
+func TestMySQLOperationTransactionIsReadOnly(t *testing.T) {
+	runReadOnlyTxCheck(t, testURL(t))
+}
+
+func TestMariaDBOperationTransactionIsReadOnly(t *testing.T) {
+	runReadOnlyTxCheck(t, requireTestEnv(t, "MARIADB_TEST_URL"))
+}
+
+func runReadOnlyTxCheck(t *testing.T, url string) {
+	db := seededMySQLDB(t, url)
+	ctx := context.Background()
+	tx, err := NewMySQLSource(db, 5).pinnedTx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.ExecContext(ctx, "insert into users (email, age) values ('x@x.com', 1)")
+	tx.Rollback()
+	var myErr *mysql.MySQLError
+	if !errors.As(err, &myErr) || myErr.Number != 1792 {
+		t.Fatalf("expected ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION (1792), got %v", err)
+	}
+	var users int
+	if err := db.QueryRowContext(ctx, "select count(*) from users").Scan(&users); err != nil {
+		t.Fatal(err)
+	}
+	if users != 3 {
+		t.Fatalf("users = %d, want 3", users)
+	}
 }
 
 func TestMySQLListTablesAndQueryTableRoundTrip(t *testing.T) {

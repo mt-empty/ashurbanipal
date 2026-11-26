@@ -1049,7 +1049,13 @@ These hold across all routes:
   lookup before being spliced into a query. Everything else MUST be a
   bound parameter.
 - **Read-only.** The only statements an implementation may execute are
-  `SELECT`s (data and catalog) and the statement-timeout setting below.
+  `SELECT`s (data and catalog) and the statements that open, configure or
+  end an operation's transaction (the timeout setting below, say). On an
+  engine that has one (Postgres, MySQL/MariaDB), every query that reads a
+  table or the catalog MUST run in a read-only transaction, so a write
+  fails even when a `SELECT` triggers it (a row-level security policy that
+  calls a writing function, say). SQLite has none
+  (`docs/adapter-decisions.md`).
 - **Every database query MUST be bounded by a timeout** (configuration;
   reference default 5 s) — catalog and metadata queries included, not
   just row fetches — so a pathological query can't hold a host-pool

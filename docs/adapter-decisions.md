@@ -408,6 +408,17 @@ Spring answers 500. `MultipartExceptionResolver` converts it to a 400 Problem
 Details response, only under the mount path and only when no host resolver has
 handled it. The other ports ignore `Content-Type` on these body-less GET routes.
 
+## §6 — read-only transactions
+
+Protocol property: on an engine that has one, every operation runs in a
+read-only transaction, so a write fails even when a `SELECT` triggers it.
+
+| Backend  | Mechanism | Notes |
+|----------|-----------|-------|
+| Postgres | `BEGIN READ ONLY` (sqlx `begin_with`, node-postgres, psycopg's `read_only`); Go `TxOptions{ReadOnly: true}`; Spring `isReadOnly` plus `enforceReadOnly` | A blocked write is SQLSTATE `25006`, an ordinary 500 `database_error`. The API lists only base tables, so the one reachable trigger is a row-level security policy that calls a writing function; each port's test reads such a table as a non-superuser role (RLS does not apply to a superuser). |
+| MySQL/MariaDB | `START TRANSACTION READ ONLY`; Go `TxOptions{ReadOnly: true}`; Spring `isReadOnly` plus its own `set transaction read only` as the transaction's first statement | A scopeless `SET TRANSACTION` covers only the *next* transaction and is refused once one has begun, so it must come before any other statement. A JDBC driver's `setReadOnly` sets only a session default, and MariaDB Connector/J before 3.5.10 sends nothing, so Spring sends its own statement. Spring's `enforceReadOnly` sends it with `executeUpdate`, which Connector/J refuses on a read-only connection. A `SELECT` on a base table cannot write here, so each port's test tries an `INSERT` in the operation's own transaction (Spring's through MariaDB Connector/J with `readOnlyPropagatesToServer=false`). A read-only transaction may still write temporary tables on MySQL; the viewer creates none. Rust, Go and Node run the `select version()` fork probe outside the transaction; it reads no table. Error 1792 (`ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION`). |
+| SQLite   | None | SQLite has no read-only transaction. `PRAGMA query_only` is per connection and outlives the operation, and the Rust, Go, Node and Spring ports run on a connection the host hands in, so setting it could block the host's own writes. Flask opens its own connection, so it could set it safely, but leaves it off to treat SQLite like the other ports. A `SELECT` on SQLite cannot write unless the host registers a function that does. A host that wants the guarantee opens the viewer's connection with `mode=ro` (`readme.md`, Security). |
+
 ## §6 — query timeouts
 
 Protocol property: every database query, catalog and metadata queries
