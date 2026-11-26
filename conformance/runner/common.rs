@@ -18,6 +18,7 @@
 //! (`spec/protocol.md` §3) and the external path must work regardless of
 //! what a port chooses to mount at.
 
+use std::io::Read;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -45,9 +46,33 @@ fn free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
+/// Kills and reaps the demo on drop, so a panic anywhere after spawn can't
+/// leave it running with its connection pool.
+struct DemoProcess(Child);
+
+impl Drop for DemoProcess {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn read_pipe(pipe: Option<impl Read>) -> String {
+    let mut text = String::new();
+    if let Some(mut pipe) = pipe {
+        let _ = pipe.read_to_string(&mut text);
+    }
+    text
+}
+
 enum Target {
-    Spawned { child: Child, mount_root: String },
-    External { mount_root: String },
+    Spawned {
+        _demo: DemoProcess,
+        mount_root: String,
+    },
+    External {
+        mount_root: String,
+    },
 }
 
 pub struct TestServer {
@@ -78,9 +103,8 @@ impl TestServer {
             Err(_) => Self::spawn_demo(&http).await,
         };
 
-        let mount_root = target.mount_root().to_string();
         SEED_READY
-            .get_or_init(|| async { ensure_seed(&http, &mount_root).await })
+            .get_or_init(|| async { ensure_seed(&http, target.mount_root()).await })
             .await;
 
         TestServer { target, http }
@@ -91,15 +115,17 @@ impl TestServer {
         let database_url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set (the devcontainer sets it automatically)");
 
-        let mut child = Command::new(demo_binary_path())
-            .env("PORT", port.to_string())
-            .env("DATABASE_URL", database_url)
-            .env_remove("SIBLING_PORT")
-            .env("CONFORMANCE_ALLOWED_HOSTS", "1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn the `demo` example binary");
+        let mut demo = DemoProcess(
+            Command::new(demo_binary_path())
+                .env("PORT", port.to_string())
+                .env("DATABASE_URL", database_url)
+                .env_remove("SIBLING_PORT")
+                .env("CONFORMANCE_ALLOWED_HOSTS", "1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("failed to spawn the `demo` example binary"),
+        );
 
         let base_url = format!("http://127.0.0.1:{port}");
 
@@ -110,18 +136,14 @@ impl TestServer {
                     break;
                 }
             }
-            if let Some(status) = child.try_wait().expect("failed to poll child status") {
-                let output = child
-                    .wait_with_output()
-                    .expect("failed to collect child output");
+            if let Some(status) = demo.0.try_wait().expect("failed to poll child status") {
                 panic!(
                     "demo server exited early with {status}\nstdout:\n{}\nstderr:\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr),
+                    read_pipe(demo.0.stdout.take()),
+                    read_pipe(demo.0.stderr.take()),
                 );
             }
             if Instant::now() > deadline {
-                let _ = child.kill();
                 panic!("demo server did not become ready on {base_url} within 10s");
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -131,7 +153,7 @@ impl TestServer {
         // the external path supplies its own root directly via
         // ASHURBANIPAL_CONFORMANCE_URL.
         Target::Spawned {
-            child,
+            _demo: demo,
             mount_root: format!("{base_url}/__ashurbanipal"),
         }
     }
@@ -151,15 +173,6 @@ impl Target {
         match self {
             Target::Spawned { mount_root, .. } => mount_root,
             Target::External { mount_root } => mount_root,
-        }
-    }
-}
-
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        if let Target::Spawned { child, .. } = &mut self.target {
-            let _ = child.kill();
-            let _ = child.wait();
         }
     }
 }
