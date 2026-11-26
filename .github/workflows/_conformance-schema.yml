@@ -49,6 +49,11 @@ on:
         required: false
         type: string
         default: ""
+      exclude-checks:
+        description: "Extra comma-separated schemathesis checks to skip; docs/adapter-decisions.md must say why"
+        required: false
+        type: string
+        default: ""
 
 env:
   DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
@@ -155,6 +160,7 @@ jobs:
         env:
           ASHURBANIPAL_CONFORMANCE_URL: ${{ inputs.conformance-url }}
           ASHURBANIPAL_SCHEMA_CHECK_SEED: ${{ inputs.seed }}
+          ASHURBANIPAL_SCHEMA_CHECK_EXCLUDE: ${{ inputs.exclude-checks }}
         run: bash conformance/runner/schema-check.sh
 
       - name: Stop the demo

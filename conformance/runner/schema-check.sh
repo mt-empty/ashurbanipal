@@ -20,7 +20,9 @@
 # express — an empty or nonexistent name legitimately 400s. Likewise the
 # filter AST's "logic required on every element but the first" rule is
 # positional, which JSON Schema's `items` (applied uniformly per element)
-# can't encode either. Every other check stays on.
+# can't encode either. Every other check stays on, unless a port lists
+# more in ASHURBANIPAL_SCHEMA_CHECK_EXCLUDE (comma-separated), with the
+# reason recorded in docs/adapter-decisions.md.
 #
 # Expect an occasional (seed-dependent, non-failing) "mostly rejected
 # generated data" warning on GET /tables/common-values specifically: its
@@ -90,6 +92,6 @@ fi
     ${SEED_ARGS[@]+"${SEED_ARGS[@]}"} \
     --generation-database none \
     --checks all \
-    --exclude-checks positive_data_acceptance \
+    --exclude-checks "positive_data_acceptance${ASHURBANIPAL_SCHEMA_CHECK_EXCLUDE:+,$ASHURBANIPAL_SCHEMA_CHECK_EXCLUDE}" \
     --max-examples "${ASHURBANIPAL_SCHEMA_CHECK_EXAMPLES:-100}" \
     "$@"

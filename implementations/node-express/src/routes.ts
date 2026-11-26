@@ -36,7 +36,8 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
   }
 
   const opts = { limits: withDefaults(config.limits), siblings: siblingsBody(siblingsView(config)) };
-  const mount = basePath(config).replace(/\/+$/, "");
+  let mount = basePath(config);
+  while (mount.endsWith("/")) mount = mount.slice(0, -1);
   if (mount === "") {
     throw new Error(
       "basePath must not be the root: it would take / and /api/... from the host app (spec/protocol.md §3)",
