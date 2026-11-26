@@ -4,41 +4,19 @@ import { expect, it } from "vitest";
 import type { DbSource } from "../src/db/types.js";
 import { allowsHost, hostAllowList } from "../src/host-allow-list.js";
 import { createRouter, type NamedSource } from "../src/routes.js";
+import { readFixture } from "./catalog-fixture.js";
 import { startServer, type TestServer } from "./helpers.js";
 
-// spec/protocol.md §3.1.
-it.each([
-  [[], "anything.example", true],
-  [[], undefined, true],
-  [["billing.internal"], "billing.internal", true],
-  [["billing.internal"], "billing.internal:4000", true],
-  [["billing.internal"], "evil.example", false],
-  [["billing.internal"], "billing.internal.evil.example", false],
-  [["billing.internal:4000"], "billing.internal:4000", true],
-  [["billing.internal:4000"], "billing.internal", false],
-  [["billing.internal:4000"], "billing.internal:4001", false],
-  [["Billing.Internal"], "BILLING.internal:4000", true],
-  [["billing.internal"], "billing.internal.", true],
-  [["billing.internal"], "billing.internal.:4000", true],
-  [["other.internal."], "other.internal", true],
-  [["localhost"], ".", false],
-  [["billing.internal"], "billing.internal..", false],
-  [["[::1]:4000"], "[::1]:4000", true],
-  [["[::1]:4000"], "[::1]:4001", false],
-  [["[fe80::1]"], "[FE80::1]:80", true],
-  [["[::1]"], "::1", false],
-  [["localhost"], undefined, false],
-  [["localhost"], "", false],
-  [["localhost"], "localhost:", false],
-  [["localhost"], "localhost:99999", false],
-  [["localhost"], "localhost:80x", false],
-  [["localhost"], "user@localhost", false],
-  [["localhost"], "localhost/path", false],
-  [["localhost"], "local host", false],
-  [["http://localhost"], "localhost", false],
-  [["http://localhost", "ok.example"], "ok.example", true],
-])("entries %j, Host %j: allowed %s", (entries, host, want) => {
-  expect(allowsHost(hostAllowList(entries), host)).toBe(want);
+interface FixtureCase {
+  name: string;
+  allowed_hosts: string[];
+  host: string | null;
+  allowed: boolean;
+}
+
+// spec/protocol.md §3.1, shared with every port.
+it.each(readFixture<{ cases: FixtureCase[] }>("host-allow-list-tests.json").cases)("$name", (c) => {
+  expect(allowsHost(hostAllowList(c.allowed_hosts), c.host ?? undefined)).toBe(c.allowed);
 });
 
 it("treats a lone value as one entry, never letter by letter", () => {

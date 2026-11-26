@@ -128,98 +128,54 @@ fn parse_host_port(text: &str) -> Option<(&str, Option<u16>)> {
 mod tests {
     use super::*;
 
-    fn list(entries: &[&str]) -> HostAllowList {
-        HostAllowList::new(&entries.iter().map(|e| e.to_string()).collect::<Vec<_>>())
+    const FIXTURES: &str = include_str!("../../../../spec/fixtures/host-allow-list-tests.json");
+
+    #[derive(serde::Deserialize)]
+    struct Fixtures {
+        cases: Vec<Case>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Case {
+        name: String,
+        allowed_hosts: Vec<String>,
+        host: Option<String>,
+        allowed: bool,
     }
 
     #[test]
-    fn no_entries_turns_the_check_off_with_a_warning() {
-        let hosts = list(&[]);
-        assert!(hosts.allows(Some("anything.example")));
-        assert!(hosts.allows(None));
+    fn shared_fixture_cases() {
+        let fixtures: Fixtures = serde_json::from_str(FIXTURES).unwrap();
+        for case in fixtures.cases {
+            let hosts = HostAllowList::new(&case.allowed_hosts);
+            assert_eq!(
+                hosts.allows(case.host.as_deref()),
+                case.allowed,
+                "{}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn no_entries_warns_that_the_check_is_off() {
+        let hosts = HostAllowList::new(&[]);
+        assert!(!hosts.is_active());
         assert_eq!(hosts.warnings.len(), 1);
         assert!(hosts.warnings[0].contains("allowed_hosts is not set"));
     }
 
     #[test]
-    fn a_name_without_a_port_matches_any_port() {
-        let hosts = list(&["billing.internal"]);
-        assert!(hosts.allows(Some("billing.internal")));
-        assert!(hosts.allows(Some("billing.internal:4000")));
-        assert!(!hosts.allows(Some("evil.example")));
-        assert!(!hosts.allows(Some("billing.internal.evil.example")));
-        assert!(hosts.warnings.is_empty());
-    }
-
-    #[test]
-    fn a_name_with_a_port_matches_only_that_port() {
-        let hosts = list(&["billing.internal:4000"]);
-        assert!(hosts.allows(Some("billing.internal:4000")));
-        assert!(!hosts.allows(Some("billing.internal")));
-        assert!(!hosts.allows(Some("billing.internal:4001")));
-    }
-
-    #[test]
-    fn names_compare_case_insensitively() {
-        let hosts = list(&["Billing.Internal"]);
-        assert!(hosts.allows(Some("BILLING.internal:4000")));
-    }
-
-    #[test]
-    fn a_trailing_dot_names_the_same_host() {
-        let hosts = list(&["billing.internal", "other.internal."]);
-        assert!(hosts.allows(Some("billing.internal.")));
-        assert!(hosts.allows(Some("billing.internal.:4000")));
-        assert!(hosts.allows(Some("other.internal")));
-        assert!(!hosts.allows(Some(".")));
-        assert!(!hosts.allows(Some("billing.internal..")));
-    }
-
-    #[test]
-    fn ipv6_literals_use_brackets() {
-        let hosts = list(&["[::1]:4000", "[fe80::1]"]);
-        assert!(hosts.allows(Some("[::1]:4000")));
-        assert!(!hosts.allows(Some("[::1]:4001")));
-        assert!(hosts.allows(Some("[FE80::1]:80")));
-        assert!(!hosts.allows(Some("::1")));
-    }
-
-    #[test]
-    fn a_missing_or_malformed_host_is_rejected() {
-        let hosts = list(&["localhost"]);
-        for host in [
-            None,
-            Some(""),
-            Some("localhost:"),
-            Some("localhost:99999"),
-            Some("localhost:80x"),
-            Some("user@localhost"),
-            Some("localhost/path"),
-            Some("local host"),
-        ] {
-            assert!(!hosts.allows(host), "{host:?}");
-        }
-    }
-
-    #[test]
-    fn bad_entries_match_nothing_and_warn() {
-        let hosts = list(&[
+    fn each_bad_entry_warns() {
+        let entries = [
             "http://localhost",
             "localhost/x",
             "*.example",
             "localhost:abc",
             "ok.example",
-        ]);
+        ];
+        let hosts = HostAllowList::new(&entries.map(String::from));
         assert_eq!(hosts.warnings.len(), 4);
         assert!(hosts.warnings[0].contains("\"http://localhost\""));
-        assert!(!hosts.allows(Some("localhost")));
-        assert!(hosts.allows(Some("ok.example")));
-    }
-
-    #[test]
-    fn a_list_of_only_bad_entries_rejects_everything() {
-        let hosts = list(&["http://localhost"]);
-        assert!(!hosts.allows(Some("localhost")));
-        assert!(!hosts.allows(None));
     }
 }

@@ -2,7 +2,7 @@
 
 Machine-readable fixture sets, generated from the normative docs they
 mirror (`spec/filter-dsl.md` §5, `spec/join-dsl.md` §5 and
-`spec/protocol.md` §5.4.2 and §5.11). The docs
+`spec/protocol.md` §3.1, §5.4.2 and §5.11). The docs
 remain the human-readable source of truth; a change to a doc and its
 fixture file ships in the same PR.
 
@@ -175,3 +175,16 @@ Each entry in `cases`:
 
   An engine missing from `expect` doesn't run the case (no such table
   there, or a type that engine lacks).
+
+## `host-allow-list-tests.json` — `Host` allow-list matching
+
+Consumed by every port's allow-list unit tests. Mirrors `spec/protocol.md`
+§3.1; the HTTP side is `conformance/runner/host_allow_list.rs`.
+
+Each entry in `cases`:
+
+- `name` — what the case shows.
+- `allowed_hosts` — the configured list; `[]` turns the check off.
+- `host` — the request's `Host` (or HTTP/2 `:authority`); `null` means
+  none was sent.
+- `allowed` — whether the request passes.

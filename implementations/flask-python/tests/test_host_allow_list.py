@@ -1,50 +1,22 @@
 """The optional `Host` allow-list (`spec/protocol.md` §3.1)."""
 
+import json
+
 import pytest
 from flask import Flask
 
 from ashurbanipal.config import Config
 from ashurbanipal.host_allow_list import HostAllowList
 from ashurbanipal.routes import router
+from tests._catalog_fixture import FIXTURES_DIR
 from tests.test_killswitch import _client, _UnusedSource
 
+_FIXTURE_CASES = json.loads((FIXTURES_DIR / "host-allow-list-tests.json").read_text())["cases"]
 
-@pytest.mark.parametrize(
-    ("entries", "host", "want"),
-    [
-        ([], "anything.example", True),
-        ([], None, True),
-        (["billing.internal"], "billing.internal", True),
-        (["billing.internal"], "billing.internal:4000", True),
-        (["billing.internal"], "evil.example", False),
-        (["billing.internal"], "billing.internal.evil.example", False),
-        (["billing.internal:4000"], "billing.internal:4000", True),
-        (["billing.internal:4000"], "billing.internal", False),
-        (["billing.internal:4000"], "billing.internal:4001", False),
-        (["Billing.Internal"], "BILLING.internal:4000", True),
-        (["billing.internal"], "billing.internal.", True),
-        (["billing.internal"], "billing.internal.:4000", True),
-        (["other.internal."], "other.internal", True),
-        (["localhost"], ".", False),
-        (["billing.internal"], "billing.internal..", False),
-        (["[::1]:4000"], "[::1]:4000", True),
-        (["[::1]:4000"], "[::1]:4001", False),
-        (["[fe80::1]"], "[FE80::1]:80", True),
-        (["[::1]"], "::1", False),
-        (["localhost"], None, False),
-        (["localhost"], "", False),
-        (["localhost"], "localhost:", False),
-        (["localhost"], "localhost:99999", False),
-        (["localhost"], "localhost:80x", False),
-        (["localhost"], "user@localhost", False),
-        (["localhost"], "localhost/path", False),
-        (["localhost"], "local host", False),
-        (["http://localhost"], "localhost", False),
-        (["http://localhost", "ok.example"], "ok.example", True),
-    ],
-)
-def test_matching(entries: list[str], host: str | None, want: bool) -> None:
-    assert HostAllowList.build(entries).allows(host) is want
+
+@pytest.mark.parametrize("case", _FIXTURE_CASES, ids=[c["name"] for c in _FIXTURE_CASES])
+def test_shared_fixture_case(case: dict) -> None:
+    assert HostAllowList.build(case["allowed_hosts"]).allows(case["host"]) is case["allowed"]
 
 
 def test_warnings() -> None:
