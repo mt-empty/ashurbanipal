@@ -4,20 +4,24 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.web.multipart.MultipartException
 
 class MultipartExceptionResolverTest {
-    private val resolver = MultipartExceptionResolver("/__ashurbanipal")
-
-    private fun resolve(uri: String, ex: Exception, contextPath: String = ""): Pair<Any?, MockHttpServletResponse> {
+    private fun resolve(
+        uri: String,
+        ex: Exception,
+        contextPath: String = "",
+        mount: String = "/__ashurbanipal",
+    ): Pair<Any?, MockHttpServletResponse> {
         val request = MockHttpServletRequest("GET", uri).apply {
             this.contextPath = contextPath
             requestURI = uri
         }
         val response = MockHttpServletResponse()
-        return resolver.resolveException(request, response, null, ex) to response
+        return MultipartExceptionResolver(ViewerMount(mount)).resolveException(request, response, null, ex) to response
     }
 
     @Test
@@ -44,6 +48,51 @@ class MultipartExceptionResolverTest {
             assertNull(result, uri)
             assertEquals(200, response.status, uri)
         }
+    }
+
+    @Test
+    fun `a mount under the DispatcherServlet's path is matched`() {
+        val (result, response) = resolve("/ctx/app/__ashurbanipal/api/sources", MultipartException("x"), "/ctx", "/app/__ashurbanipal")
+        assertNotNull(result)
+        assertEquals(400, response.status)
+    }
+
+    @Test
+    fun `the resolver bean follows the DispatcherServlet's path`() {
+        WebApplicationContextRunner()
+            .withUserConfiguration(AshurbanipalAutoConfiguration::class.java, TestDataSourceConfig::class.java)
+            .withPropertyValues("ashurbanipal.enabled=true", "spring.mvc.servlet.path=/app")
+            .run { context ->
+                val resolver = context.getBean(MultipartExceptionResolver::class.java)
+                val request = MockHttpServletRequest("GET", "/app/__ashurbanipal/api/sources")
+                assertNotNull(resolver.resolveException(request, MockHttpServletResponse(), null, MultipartException("x")))
+            }
+    }
+
+    @Test
+    fun `a root mount leaves the host's other paths alone`() {
+        for (uri in listOf("/upload", "/files/new")) {
+            val (result, _) = resolve(uri, MultipartException("x"), mount = "")
+            assertNull(result, uri)
+        }
+        for (uri in listOf("/", "/api/sources")) {
+            val (result, _) = resolve(uri, MultipartException("x"), mount = "")
+            assertNotNull(result, uri)
+        }
+    }
+
+    @Test
+    fun `another method on a viewer path is left to the host`() {
+        val request = MockHttpServletRequest("POST", "/__ashurbanipal/api/tables")
+        val result = MultipartExceptionResolver(ViewerMount("/__ashurbanipal"))
+            .resolveException(request, MockHttpServletResponse(), null, MultipartException("x"))
+        assertNull(result)
+    }
+
+    @Test
+    fun `a host path under the mount is left alone`() {
+        val (result, _) = resolve("/__ashurbanipal/upload", MultipartException("x"))
+        assertNull(result)
     }
 
     @Test

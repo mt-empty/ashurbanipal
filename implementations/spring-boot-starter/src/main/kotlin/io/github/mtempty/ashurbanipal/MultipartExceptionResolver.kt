@@ -13,10 +13,10 @@ import tools.jackson.databind.json.JsonMapper
  * DispatcherServlet parses a multipart `Content-Type` before choosing a
  * handler, so a boundary-less header throws ahead of any controller
  * `@ExceptionHandler`. Answers it as a malformed request (`spec/protocol.md`
- * §2), only under [basePath] and only when no host resolver has.
+ * §2), only for the viewer's own requests (a `GET` or `HEAD` to a path
+ * [mount] owns, `spec/protocol.md` §3) and only when no host resolver has.
  */
-class MultipartExceptionResolver(basePath: String) : HandlerExceptionResolver, Ordered {
-    private val prefix = basePath.trimEnd('/')
+class MultipartExceptionResolver internal constructor(private val mount: ViewerMount) : HandlerExceptionResolver, Ordered {
     private val mapper = JsonMapper()
 
     override fun getOrder(): Int = Ordered.LOWEST_PRECEDENCE - 1
@@ -28,8 +28,8 @@ class MultipartExceptionResolver(basePath: String) : HandlerExceptionResolver, O
         ex: Exception,
     ): ModelAndView? {
         if (ex !is MultipartException) return null
-        val path = request.requestURI.removePrefix(request.contextPath)
-        if (path != prefix && !path.startsWith("$prefix/")) return null
+        if (request.method != "GET" && request.method != "HEAD") return null
+        if (!mount.owns(request.requestURI.removePrefix(request.contextPath))) return null
 
         val problem = ProblemDetails(
             title = "malformed multipart request",
