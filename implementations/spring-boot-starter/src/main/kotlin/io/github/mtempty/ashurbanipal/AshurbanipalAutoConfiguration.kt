@@ -68,8 +68,10 @@ class AshurbanipalAutoConfiguration {
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build()
 
     @Bean
-    fun ashurbanipalMultipartExceptionResolver(properties: AshurbanipalProperties): MultipartExceptionResolver =
-        MultipartExceptionResolver(properties.basePath)
+    fun ashurbanipalMultipartExceptionResolver(
+        properties: AshurbanipalProperties,
+        environment: Environment,
+    ): MultipartExceptionResolver = MultipartExceptionResolver(ViewerMount.of(environment, properties.basePath))
 
     /** Runs ahead of Spring's own filters, so a rejected request reaches nothing else. */
     @Bean
