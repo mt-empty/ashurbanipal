@@ -284,7 +284,12 @@ ul#tables { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: .375rem 
 #refresh-pop input { accent-color: CanvasText; }
 #refresh-pop-foot { margin: .3rem 0 0; padding: .4rem .5rem .15rem; border-top: 1px solid var(--rule);
           font-size: .75rem; line-height: 1.4; color: var(--text-muted); }
-#row-new-chip, #row-changed-chip { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
+/* A zero basis and min-width, with a margin that cancels #meta's gap, count the
+   chips as no width when #meta decides where to wrap: showing or hiding them
+   never moves #actions, and the slot always stays on the title's line. */
+#row-chips { flex: 1 1 0; min-width: 0; margin-left: calc(-1 * var(--gap)); display: flex; overflow: hidden; }
+#row-new-chip, #row-changed-chip { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px;
           background: var(--row-new-bg); color: CanvasText; font-size: .75rem; }
 #row-changed-chip { background: var(--cell-changed-bg); }
 #row-new-chip:not([hidden]) + #row-changed-chip { margin-left: .25rem; }
@@ -461,6 +466,7 @@ mark.json-match { background: var(--json-match-bg); color: inherit; border-radiu
 #meta { display: flex; justify-content: space-between; align-items: center;
         flex-wrap: wrap; gap: var(--gap); margin-top: var(--gap); line-height: 1.25; }
 #meta-title { color: var(--text-muted); }
+#row-updated { font-variant-numeric: tabular-nums; }
 #sort-note { color: CanvasText; }
 #sort-note-col { font-family: var(--font-mono); }
 #sort-note-show { background: none; border: none; padding: 0 .15rem; font: inherit; color: inherit;
@@ -1037,7 +1043,8 @@ thead tr.bands + tr th { top: var(--band-h); }
         <button id="view-notice-close" type="button" aria-label="Close this note">✕</button>
       </div>
       <div id="meta">
-        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button><button id="sort-note-clear" type="button" aria-label="clear sort" title="clear sort">✕</button></span><span id="row-updated" hidden></span><span id="row-new-chip" hidden></span><span id="row-changed-chip" hidden></span></span>
+        <span id="meta-title"><strong id="current">—</strong><span id="row-meta"></span><span id="sort-note" hidden> · sorted by <code id="sort-note-col"></code> <span id="sort-note-dir"></span> <button id="sort-note-show" type="button">show it</button><button id="sort-note-clear" type="button" aria-label="clear sort" title="clear sort">✕</button></span><span id="row-updated" hidden></span></span>
+        <span id="row-chips"><span id="row-new-chip" hidden></span><span id="row-changed-chip" hidden></span></span>
         <output id="status" aria-live="polite" class="sr-only"></output>
         <span id="actions">
           <button id="join-btn" type="button" disabled title="join this table with others; read-only"><span aria-hidden="true">⋈</span> join</button>
