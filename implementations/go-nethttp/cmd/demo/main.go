@@ -16,6 +16,9 @@
 // CONFORMANCE_SECOND_SOURCE=1 (postgres only) registers a second source,
 // pinned to the other_schema schema via an AfterConnect hook, for
 // conformance/runner/two_source.rs — see that file's module doc.
+//
+// CONFORMANCE_ALLOWED_HOSTS=1 turns on the Host allow-list for localhost and
+// 127.0.0.1, for conformance/runner/host_allow_list.rs.
 package main
 
 import (
@@ -61,6 +64,9 @@ func main() {
 	}
 	if os.Getenv("CONFORMANCE_LABELLED_SIBLINGS") != "" {
 		cfg.Instance, cfg.Siblings = conformanceLabelledSiblings()
+	}
+	if os.Getenv("CONFORMANCE_ALLOWED_HOSTS") != "" {
+		cfg.AllowedHosts = []string{"localhost", "127.0.0.1"}
 	}
 
 	timeout := cfg.Limits.WithDefaults().QueryTimeoutSecs

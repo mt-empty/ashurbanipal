@@ -7,6 +7,7 @@
 pub mod config;
 pub mod db;
 pub mod filter;
+pub mod host_allow_list;
 pub mod join;
 pub mod page_encoding;
 pub mod protocol_wire;
@@ -26,6 +27,7 @@ pub use db::{
     Source, Structure, TableData, TableInfo,
 };
 pub use filter::{Condition, FilterError, FilterOp, FilterValue, Logic};
+pub use host_allow_list::HostAllowList;
 pub use join::{JoinColumnInfo, JoinData, JoinError, JoinOpts, JoinSpec};
 pub use siblings::{SiblingChecker, SiblingStatus, SiblingsResponse};
 

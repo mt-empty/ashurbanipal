@@ -1,7 +1,10 @@
 use std::sync::LazyLock;
 
 use actix_web::body::MessageBody;
+use actix_web::dev::RequestHead;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
+use actix_web::guard;
+use actix_web::http::header::HOST;
 use actix_web::http::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, CONTENT_ENCODING, VARY, X_CONTENT_TYPE_OPTIONS,
 };
@@ -16,7 +19,8 @@ use ashurbanipal::protocol_wire::{
     TableParams, TablesResponse,
 };
 use ashurbanipal::{
-    resolve_source, Config, DbError, DbSource, JoinData, ProblemDetails, SiblingChecker,
+    resolve_source, Config, DbError, DbSource, HostAllowList, JoinData, ProblemDetails,
+    SiblingChecker,
 };
 
 const DBVIEWER_HTML: &str = include_str!("../frontend/dbviewer.html");
@@ -35,6 +39,7 @@ pub struct AppState<S> {
     /// listing order, which callers can rely on for the same reason).
     pub sources: Vec<(String, S)>,
     pub siblings: SiblingChecker,
+    pub hosts: HostAllowList,
 }
 
 /// Built once, not per worker — cheap to share via `web::Data`'s `Arc`,
@@ -49,10 +54,16 @@ pub fn app_state<S: DbSource>(config: Config, sources: Vec<(String, S)>) -> Data
         "app_state() requires at least one source"
     );
     let siblings = SiblingChecker::new(&config);
+    let hosts = if config.is_enabled() {
+        HostAllowList::from_config(&config)
+    } else {
+        HostAllowList::default()
+    };
     Data::new(AppState {
         config,
         sources,
         siblings,
+        hosts,
     })
 }
 
@@ -63,9 +74,18 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
         return web::scope("/__ashurbanipal");
     }
     LazyLock::force(&DBVIEWER_HTML_GZIP);
+    let mut scope = web::scope("/__ashurbanipal");
+    if state.hosts.is_active() {
+        // A request the guard turns away falls through to the host App's
+        // 404, same as unmounted.
+        let hosts = state.hosts.clone();
+        scope = scope.guard(guard::fn_guard(move |ctx| {
+            hosts.allows(request_host(ctx.head()))
+        }));
+    }
     // Version header only applies to /api (separate inner scope). Routes
     // use `web::resource` (not `Scope::route`) so a method mismatch 405s.
-    web::scope("/__ashurbanipal")
+    scope
         .app_data(state)
         .service(web::resource("").route(web::get().to(serve_html)))
         .service(
@@ -92,6 +112,16 @@ pub fn service<S: DbSource>(state: Data<AppState<S>>) -> Scope {
                 .service(web::resource("/tables/join").route(web::get().to(table_join::<S>)))
                 .service(web::resource("/siblings").route(web::get().to(siblings::<S>))),
         )
+}
+
+/// The URI's authority (HTTP/2's `:authority`) or the raw `Host` header.
+/// Not `ConnectionInfo::host`, which trusts forwarded headers
+/// (`spec/protocol.md` §3.1).
+fn request_host(head: &RequestHead) -> Option<&str> {
+    head.uri
+        .authority()
+        .map(|a| a.as_str())
+        .or_else(|| head.headers.get(HOST).and_then(|v| v.to_str().ok()))
 }
 
 // nosniff stops a browser from rendering echoed request text in a JSON error as HTML.
@@ -400,6 +430,86 @@ mod kill_switch_tests {
         )
         .await;
         assert_eq!(api.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn an_unlisted_host_falls_through_to_the_host_app() {
+        let config = Config::from_toml("enabled = true\nallowed_hosts = [\"localhost\"]").unwrap();
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+        let app = test::init_service(
+            App::new()
+                .service(service(state))
+                .default_service(web::to(HttpResponse::ImATeapot)),
+        )
+        .await;
+        let call = |uri: &'static str, headers: Vec<(&'static str, &'static str)>| {
+            let mut req = test::TestRequest::get().uri(uri);
+            for header in headers {
+                req = req.insert_header(header);
+            }
+            test::call_service(&app, req.to_request())
+        };
+
+        for uri in ["/__ashurbanipal", "/__ashurbanipal/api/schemas"] {
+            assert_eq!(
+                call(uri, vec![("host", "rebind.invalid")]).await.status(),
+                418,
+                "{uri}"
+            );
+            assert_eq!(
+                call(
+                    uri,
+                    vec![
+                        ("host", "rebind.invalid"),
+                        ("x-forwarded-host", "localhost")
+                    ]
+                )
+                .await
+                .status(),
+                418,
+                "{uri} with X-Forwarded-Host"
+            );
+            assert_eq!(call(uri, vec![]).await.status(), 418, "{uri} with no Host");
+        }
+        assert_eq!(
+            call("/__ashurbanipal", vec![("host", "LOCALHOST:4000")])
+                .await
+                .status(),
+            200
+        );
+    }
+
+    #[actix_web::test]
+    async fn the_check_follows_a_nested_mount() {
+        use actix_web::http::Method;
+        let config = Config::from_toml("enabled = true\nallowed_hosts = [\"localhost\"]").unwrap();
+        let state = app_state(config, vec![("primary".to_string(), NeverQueried)]);
+        let app = test::init_service(
+            App::new()
+                .service(web::scope("/svc").service(service(state)))
+                .route("/other", web::get().to(HttpResponse::Ok))
+                .default_service(web::to(HttpResponse::ImATeapot)),
+        )
+        .await;
+        for (method, uri, host, want) in [
+            (Method::GET, "/svc/__ashurbanipal", "rebind.invalid", 418),
+            (
+                Method::POST,
+                "/svc/__ashurbanipal/api/schemas",
+                "rebind.invalid",
+                418,
+            ),
+            (Method::GET, "/svc/__ashurbanipal", "localhost", 200),
+            (Method::GET, "/other", "rebind.invalid", 200),
+        ] {
+            let req = test::TestRequest::default()
+                .method(method.clone())
+                .uri(uri)
+                .insert_header(("host", host))
+                .to_request();
+            let status = test::call_service(&app, req).await.status();
+            assert_eq!(status, want, "{method} {uri}, Host {host}");
+        }
     }
 
     // Port 9 refuses at once, so every check is a fast `healthy: false`.

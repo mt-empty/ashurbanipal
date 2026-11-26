@@ -23,6 +23,9 @@
 //! `CONFORMANCE_SECOND_SOURCE=1` registers a second source, pinned to
 //! `other_schema`, for `conformance/runner/two_source.rs` — see that
 //! file's module doc.
+//!
+//! `CONFORMANCE_ALLOWED_HOSTS=1` turns on the `Host` allow-list for
+//! `localhost` and `127.0.0.1`, for `conformance/runner/host_allow_list.rs`.
 
 use actix_web::{web, App, HttpResponse, HttpServer};
 use ashurbanipal_actix_web::{app_state, service, Config, PgPoolSource};
@@ -49,7 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let config = Config::from_toml(&format!(
-        "enabled = true\n{}",
+        "enabled = true\n{}{}",
+        allowed_hosts_toml(),
         siblings_toml(port, sibling_port)
     ))?;
 
@@ -104,6 +108,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .run()
     .await?;
     Ok(())
+}
+
+/// Must come before `siblings_toml`'s tables: a TOML key after a table
+/// header belongs to that table.
+fn allowed_hosts_toml() -> &'static str {
+    if std::env::var("CONFORMANCE_ALLOWED_HOSTS").is_ok() {
+        "allowed_hosts = [\"localhost\", \"127.0.0.1\"]\n"
+    } else {
+        ""
+    }
 }
 
 /// `SIBLING_LABEL` labels the `SIBLING_PORT` sibling and `INSTANCE_LABEL`

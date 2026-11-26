@@ -2,6 +2,7 @@ import express, { type Router as ExpressRouter, type Request, type Response } fr
 import { basePath, type Config, isEnabled, type SiblingsView, siblingsView, withDefaults } from "./config.js";
 import { dbviewerHtml, dbviewerHtmlGzip } from "./embed.js";
 import { API_PATHS, handleApi, type NamedSource } from "./handlers.js";
+import { allowsHost, hostAllowList } from "./host-allow-list.js";
 import { checkSiblings } from "./siblings.js";
 
 export type { NamedSource } from "./handlers.js";
@@ -19,7 +20,8 @@ export type { NamedSource } from "./handlers.js";
  * When cfg.enabled is not true — including an empty/undefined Config,
  * which MUST mean disabled — createRouter returns a router that 404s
  * every request under basePath, indistinguishable from the viewer never
- * having been mounted at all (spec/protocol.md §4).
+ * having been mounted at all (spec/protocol.md §4). With cfg.allowedHosts
+ * set, a request whose Host is not listed falls through the same way (§3.1).
  */
 export function createRouter(config: Config, sources: NamedSource[]): ExpressRouter {
   const router = express.Router();
@@ -35,6 +37,17 @@ export function createRouter(config: Config, sources: NamedSource[]): ExpressRou
 
   const opts = { limits: withDefaults(config.limits), siblings: siblingsBody(siblingsView(config)) };
   const mount = basePath(config);
+
+  const hosts = hostAllowList(config.allowedHosts);
+  for (const warning of hosts.warnings) console.warn(`ashurbanipal: ${warning}`);
+  if (hosts.entries) {
+    // Not req.hostname, which follows `trust proxy` into X-Forwarded-Host.
+    router.use(mount, (req, _res, next) => {
+      const authority = req.headers[":authority"];
+      const host = typeof authority === "string" ? authority : req.headers.host;
+      next(allowsHost(hosts, host) ? undefined : "router");
+    });
+  }
 
   registerGet(router, mount, serveHtml);
   for (const path of API_PATHS) {

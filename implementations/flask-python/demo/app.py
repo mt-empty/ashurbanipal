@@ -107,6 +107,10 @@ def main() -> None:
             for n, label in [("conformance", "a"), ("conformance", "b"), ("other", "a"), ("other", "a")]
         ]
 
+    if os.environ.get("CONFORMANCE_ALLOWED_HOSTS"):
+        # For conformance/runner/host_allow_list.rs.
+        config.allowed_hosts = ["localhost", "127.0.0.1"]
+
     app = Flask(__name__)
 
     @app.get("/health")

@@ -97,7 +97,7 @@ createRouter(
 );
 ```
 
-The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. In TypeScript, write the names in camelCase (`baseUrl`, `healthPath`).
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. In TypeScript, write the names in camelCase (`baseUrl`, `healthPath`). Set `allowedHosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, `createRouter` logs a `console.warn`. A request with another `Host` falls through to your app's later handlers.
 
 ## See also
 

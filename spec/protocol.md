@@ -110,7 +110,41 @@ interpreted as described in RFC 2119.
   reverse-proxy prefix.
 - Implementations MUST NOT expose additional endpoints under `{mount}`
   (extensions go through spec revisions), and MUST NOT add authentication
-  inside the mount — access control is a perimeter concern.
+  inside the mount — access control is a perimeter concern. The §3.1
+  `Host` check is not authentication: it identifies no one.
+
+### 3.1 Host allow-list
+
+DNS rebinding lets a web page read a viewer on a private network: the
+page's name starts resolving to the viewer's address, and the browser then
+treats the viewer as the page's own origin. The browser still sends the
+page's name in `Host`, and the page cannot change that, so checking `Host`
+stops the attack.
+
+- Configuration MUST offer an optional list of allowed hosts. Absent or
+  empty means no check. An implementation SHOULD log a warning when it
+  builds an enabled router with no list.
+- An entry is a host name or IP address with an optional port: `name` or
+  `name:port`, with an IPv6 address in brackets (`[::1]:4000`). Names
+  compare case-insensitively, and one trailing dot is dropped before
+  comparing (`billing.internal.` is `billing.internal`). An entry with no port matches any port; an
+  entry with a port matches only a host that names that port. There are no
+  wildcards, and no port is inferred from the scheme.
+- An entry of any other form (a scheme, a path, a wildcard) matches
+  nothing, and the implementation SHOULD log a warning naming it. It
+  neither stops startup nor turns the check off: a list whose entries are
+  all invalid rejects every request.
+- With the check on, a request passes only when its host matches an entry.
+  The host is the raw `Host` header, or on HTTP/2 the `:authority`
+  pseudo-header. An implementation MUST NOT read `X-Forwarded-Host`,
+  `Forwarded` or a framework's proxy-aware host instead: any client can set
+  them. A request with no host, or a host of any other form, is rejected.
+- A rejected request MUST get a 404 on every route under `{mount}`, the UI
+  included, before anything else runs: the same as an unmounted path
+  (§4).
+- Behind a proxy that rewrites `Host`, the list holds the name the app
+  receives. A sibling's `base_url` (§5.6) is opened under that sibling's
+  name, so the sibling's own list must include it.
 
 ## 4. Kill switch
 
@@ -1108,7 +1142,8 @@ These hold across all routes:
   (`/api/tables/join`) is the fifth, for the same reason. The optional
   per-table `schema` in §5.11.1's `join` object, and the matching response
   `schema` (§5.11.4), are the sixth: a request without them behaves exactly
-  as before.
+  as before. The §3.1 `Host` allow-list is the seventh: it is off unless
+  configured, and changes no response a listed host receives.
   The §2 change from plain-text error bodies to problem+json *is* a
   serialization change, and would bump the version under the rule above —
   but it landed before any external consumer existed, so this document

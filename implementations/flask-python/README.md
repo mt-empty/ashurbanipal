@@ -114,7 +114,7 @@ config = Config(
 app.register_blueprint(router(config, sources, mount="/__ashurbanipal"))  # mount is optional; change the URL path
 ```
 
-The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. Import `Instance` and `Sibling` from `ashurbanipal`.
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `instance` and `siblings`. Those let the UI show which of your other services are reachable. Import `Instance` and `Sibling` from `ashurbanipal`. Set `allowed_hosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, `router()` logs a warning on the `ashurbanipal.routes` logger.
 
 ## See also
 

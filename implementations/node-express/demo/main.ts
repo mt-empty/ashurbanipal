@@ -120,6 +120,11 @@ async function main(): Promise<void> {
     ];
   }
 
+  if (process.env.CONFORMANCE_ALLOWED_HOSTS) {
+    // For conformance/runner/host_allow_list.rs.
+    config.allowedHosts = ["localhost", "127.0.0.1"];
+  }
+
   const sources = [{ name: backend, source: dbSource }];
   if (process.env.CONFORMANCE_SECOND_SOURCE && backend === "postgres") {
     const { Pool } = await loadDriver("pg", () => import("pg"));

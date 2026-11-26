@@ -5,6 +5,7 @@ A disabled Config registers no routes (`spec/protocol.md` §4).
 
 from __future__ import annotations
 
+import logging
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
@@ -12,7 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, abort, jsonify, request
+from flask.blueprints import BlueprintSetupState
 
 from . import filter as filter_module
 from .config import Config, Sibling, SiblingsView
@@ -33,6 +35,7 @@ from .db import (
     Unsortable,
 )
 from .embed import DBVIEWER_HTML, DBVIEWER_HTML_GZIP
+from .host_allow_list import HostAllowList
 from .join import JoinColumnInfo, JoinOpts, parse_join
 
 PROTOCOL_HEADER = "x-ashurbanipal-protocol"
@@ -41,6 +44,14 @@ PROTOCOL_HEADER = "x-ashurbanipal-protocol"
 PROTOCOL_VERSION = "1"
 
 _SIBLING_HEALTH_TIMEOUT_SECS = 3
+_log = logging.getLogger(__name__)
+
+
+def _under_mount(path: str, prefix: str) -> bool:
+    # The viewer's own routes only: the page and everything under /api/.
+    return path in (prefix, prefix + "/") or path.startswith(prefix + "/api/")
+
+
 _MAX_I64 = 2**63 - 1
 
 
@@ -53,13 +64,37 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     # Never rejected: /api/siblings reports what it corrected in "warnings".
     view = config.siblings_view()
 
-    api_prefix = f"{mount}/api/"
+    hosts = HostAllowList.build(config.allowed_hosts)
+    for warning in hosts.warnings:
+        _log.warning("ashurbanipal: %s", warning)
+
+    # Where the host actually registered the blueprint, which a url_prefix
+    # override or a parent blueprint can move away from `mount`.
+    prefixes: list[str] = []
+
+    @bp.record
+    def _remember_prefix(state: BlueprintSetupState) -> None:
+        prefixes.append((state.url_prefix or "").rstrip("/"))
+
+    if hosts.active:
+        # App-wide, because a blueprint's own hooks never run when routing
+        # fails (a wrong method would answer 405); limited to the mount by path.
+        @bp.before_app_request
+        def _check_host() -> None:
+            if not any(_under_mount(request.path, p) for p in prefixes):
+                return
+            # The raw header, not request.host, which falls back to SERVER_NAME
+            # and follows ProxyFix (spec/protocol.md §3.1).
+            if not hosts.allows(request.headers.get("Host")):
+                abort(404)
 
     @bp.after_request
     def _stamp_api_headers(response: Response) -> Response:
         # HTML has neither header; API responses carry both (spec/protocol.md §2).
         # nosniff stops a browser from rendering echoed request text as HTML.
-        if request.path.startswith(api_prefix):
+        # A request the Host check rejected stays a bare 404.
+        is_api = any(request.path.startswith(f"{p}/api/") for p in prefixes)
+        if is_api and hosts.allows(request.headers.get("Host")):
             response.headers[PROTOCOL_HEADER] = PROTOCOL_VERSION
             response.headers["X-Content-Type-Options"] = "nosniff"
         return response

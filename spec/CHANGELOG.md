@@ -156,3 +156,8 @@ strings, and `BETWEEN`, whose `value` is `[lo, hi]`. `IS [NOT] NULL` tests
 a typed column without a cast. Changing what an existing filter returns is not additive,
 so this lands under §7's alpha exception, with every port, the conformance
 runner and the bundled UI changed together.
+
+§3.1 adds an optional `Host` allow-list against DNS rebinding. A request
+whose `Host` (or HTTP/2 `:authority`) is not on the list gets a 404 on
+every route. The check is off unless the host configures it, and a listed
+host gets the same responses as before, so v1 stands.

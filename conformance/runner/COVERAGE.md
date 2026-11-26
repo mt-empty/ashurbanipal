@@ -41,6 +41,17 @@ output exactly.
 | `P3-NO-EXTRA-ENDPOINTS` | No additional endpoints under `{mount}` | `html_and_siblings::unknown_path_under_mount_is_404` |
 | `P3-NO-AUTH` | No authentication inside the mount | implicit: every request in this suite carries no credentials of any kind and every non-error case succeeds |
 
+### §3.1 Host allow-list
+
+Every test below runs against a target started with `CONFORMANCE_ALLOWED_HOSTS=1` (`allowed_hosts = ["localhost", "127.0.0.1"]`; Spring: profile `conformance-allowed-hosts`). The spawned Rust demo always has it; against an external target each test skips when an unlisted `Host` is served, and fails instead under `CONFORMANCE_EXPECT_HOST_CHECK`, which each port's two-source CI job sets.
+
+| ID | Requirement | Test |
+|---|---|---|
+| `P3.1-UNLISTED-404` | An unlisted `Host` gets 404 on every route, the UI included | `host_allow_list::an_unlisted_host_gets_404_on_every_route` |
+| `P3.1-NO-FORWARDED` | `X-Forwarded-Host` and `Forwarded` never pass the check | `host_allow_list::forwarded_headers_do_not_pass_the_check` |
+| `P3.1-MATCH` | Names compare case-insensitively; an entry with no port matches any port | `host_allow_list::a_listed_name_passes_in_any_case_and_on_any_port` |
+| `P3.1-ENTRY-RULES` | Entry ports, IPv6 brackets, a missing or malformed `Host`, bad entries, the startup warnings | out of scope here: each port's own matcher tests (Rust: `core/src/host_allow_list.rs`) |
+
 ## §4 Kill switch
 
 Out of scope for this runner — see [Explicitly out of scope](#explicitly-out-of-scope-for-this-runner).

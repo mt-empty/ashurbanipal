@@ -36,6 +36,15 @@ class Config:
     limits: Limits = field(default_factory=Limits)
     instance: Instance | None = None
     siblings: list[Sibling] = field(default_factory=list)
+    # `name` or `name:port` entries; empty turns the Host check off
+    # (`spec/protocol.md` §3.1).
+    allowed_hosts: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # A lone value is one entry, never iterated letter by letter; a bad
+        # entry is then warned about and matches nothing.
+        if not isinstance(self.allowed_hosts, list):
+            self.allowed_hosts = [self.allowed_hosts]
 
     def is_enabled(self) -> bool:
         return self.enabled
@@ -75,6 +84,7 @@ class Config:
             limits=Limits(**limits_data),
             instance=Instance(**instance_data) if instance_data is not None else None,
             siblings=[Sibling(**s) for s in siblings_data],
+            allowed_hosts=data.get("allowed_hosts", []),
         )
 
 

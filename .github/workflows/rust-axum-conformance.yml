@@ -92,10 +92,11 @@ jobs:
       report-name: conformance-readonly-report
 
   # Same suite, run again (not instead) against a demo started with a
-  # second source and labelled siblings — conformance/runner/two_source.rs
-  # and labelled_siblings.rs are what this proves beyond the job above. The
-  # two configs are independent, so one demo carries both; the job above
-  # must stay unconfigured to prove /api/siblings' default shape.
+  # second source, labelled siblings and a Host allow-list — conformance/runner/two_source.rs
+  # labelled_siblings.rs and host_allow_list.rs are what this proves beyond
+  # the job above. The configs are independent, so one demo carries all
+  # three; the job above must stay unconfigured to prove /api/siblings'
+  # default shape.
   two-source-conformance:
     name: Rust — conformance kit (two-source round-trip, labelled siblings)
     needs: build-and-test
@@ -103,7 +104,8 @@ jobs:
     with:
       toolchain: rust
       start-command: "cargo run -p ashurbanipal-axum --manifest-path implementations/rust/axum/Cargo.toml --example demo"
-      start-env: "CONFORMANCE_SECOND_SOURCE=1 CONFORMANCE_LABELLED_SIBLINGS=1"
+      start-env: "CONFORMANCE_SECOND_SOURCE=1 CONFORMANCE_LABELLED_SIBLINGS=1 CONFORMANCE_ALLOWED_HOSTS=1"
+      expect-host-check: true
       health-url: "http://localhost:4000/health"
       conformance-url: "http://localhost:4000/__ashurbanipal"
       report-name: conformance-two-source-report

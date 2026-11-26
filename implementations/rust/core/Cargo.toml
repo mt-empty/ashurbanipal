@@ -18,6 +18,7 @@ toml = { version = "1", default-features = false, features = ["std", "serde", "p
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 flate2 = "1"
+tracing = "0.1"
 
 [dev-dependencies]
 # Current-thread only: every `#[tokio::test]` here is single-threaded and the

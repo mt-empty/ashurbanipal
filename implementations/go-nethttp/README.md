@@ -127,7 +127,7 @@ cfg := ashurbanipal.Config{
 }
 ```
 
-The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `Instance` and `Siblings`. Those let the UI show which of your other services are reachable.
+The [configuration table](https://github.com/mt-empty/ashurbanipal#configuration) lists every option, including `Instance` and `Siblings`. Those let the UI show which of your other services are reachable. Set `AllowedHosts` to the names the viewer is reached at, so a DNS-rebinding page can't read it; without it, `Router` logs a warning through `log/slog`'s default logger.
 
 ## See also
 

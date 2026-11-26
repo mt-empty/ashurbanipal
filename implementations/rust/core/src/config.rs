@@ -8,6 +8,9 @@ pub struct Config {
     pub limits: Limits,
     pub instance: Option<Instance>,
     pub siblings: Vec<Sibling>,
+    /// `name` or `name:port` entries; empty turns the check off
+    /// (`spec/protocol.md` §3.1).
+    pub allowed_hosts: Vec<String>,
 }
 
 /// This instance's own name and label. Labels are opaque host strings: echoed,
