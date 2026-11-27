@@ -1,6 +1,25 @@
 {
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "chrome-devtools"
   ],
-  "enableAllProjectMcpServers": true
+  "skillOverrides": {
+    "anthropic-skills:google-workspace": "off",
+    "anthropic-skills:morning": "off",
+    "anthropic-skills:docx": "off",
+    "anthropic-skills:pdf": "off",
+    "anthropic-skills:pptx": "off",
+    "anthropic-skills:xlsx": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:import-memory": "off"
+  },
+  "enabledPlugins": {
+    "design@synced": false,
+    "engineering@synced": false,
+    "productivity@synced": false,
+    "product-management@synced": false,
+    "gopls-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "kotlin-lsp@claude-plugins-official": true
+  }
 }

@@ -18,7 +18,12 @@
         "MYSQL_TEST_URL": "mysql://root:ashurbanipal@mysql:3306/ashurbanipal",
         "MARIADB_TEST_URL": "mysql://root:ashurbanipal@mariadb:3306/ashurbanipal"
     },
-    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client sqlite3",
+    // Claude Code and editors start language servers by bare name, outside any mise-activated shell; MISE_ENV=dev loads mise.dev.toml.
+    "remoteEnv": {
+        "MISE_ENV": "dev",
+        "PATH": "${containerEnv:PATH}:/home/vscode/.local/share/mise/shims"
+    },
+    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y postgresql-client default-mysql-client sqlite3 && (mise install || echo 'mise install failed; run it by hand')",
     // docker-in-docker selects iptables-legacy, which fails on a host with no legacy nat table; dockerd then never starts.
     "postStartCommand": "sudo update-alternatives --set iptables /usr/sbin/iptables-nft && sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft && (docker info >/dev/null 2>&1 || sudo sh -c 'nohup dockerd >/tmp/dockerd.log 2>&1 &')"
 }
