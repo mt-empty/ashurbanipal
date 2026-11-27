@@ -71,6 +71,8 @@ GRANT SELECT ON app.* TO 'viewer'@'%';
 
 SQLite has no accounts: where the driver allows, open the viewer's connection read-only with a `file:` URI ending in `?mode=ro`. SQLite reads that option only when the driver turns URI filenames on. On MariaDB a `SELECT`-only account sees no constraints in Structure ([`docs/adapter-decisions.md`](docs/adapter-decisions.md), §5.10).
 
+The viewer adds no `Content-Security-Policy`, `X-Frame-Options` or other policy headers of its own, so it never overrides yours. Add them with your framework's usual middleware. A CSP must allow the page's inline script ([`PORTING.md`](PORTING.md), "CSP and inline scripts").
+
 ## Supported databases
 
 | Database | Supported versions |

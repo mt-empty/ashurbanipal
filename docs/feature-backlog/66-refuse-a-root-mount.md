@@ -4,9 +4,8 @@
 
 `spec/protocol.md` §3 says `{mount}` MUST NOT be the root path, and that an
 implementation MUST refuse a root mount when it builds the router. Go and
-Node already do. Flask and Spring only log a deprecation warning, so that a
-host already mounted at `/` gets one release to move before it breaks. This
-story turns that warning into a refusal.
+Node already do. Flask and Spring only logged a deprecation warning, added
+after 0.15.0. This story turns that warning into a refusal.
 
 ## 1. The ask
 
@@ -50,6 +49,10 @@ story turns that warning into a refusal.
 
 ## 4. When
 
-In the release after the one that first ships the warning (the first release
-after 0.15.0). It breaks a host mounted at `/`, so the CHANGELOG entry needs a
-`!` and a migration line: mount the viewer under a path of its own.
+In 0.16.0, the first release after 0.15.0. The plan was to ship the warning
+in one release and the refusal in the next, but no one was known to use a
+root mount, and one never worked reliably (Werkzeug picks one of two `/`
+rules; Spring fails if the host has its own `GET /`). So the refusal replaced
+the warning before any release shipped it. It breaks a host mounted at `/`,
+so the CHANGELOG entry carries a `!` and the migration line: mount the viewer
+under a path of its own.
