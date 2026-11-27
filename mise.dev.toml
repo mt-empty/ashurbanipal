@@ -1,0 +1,19 @@
+# Editor-only tools, loaded when MISE_ENV=dev, so CI never installs them.
+[tools]
+"go:golang.org/x/tools/gopls" = "latest"
+"npm:pyright" = "latest"
+
+[tools."http:kotlin-lsp"]
+version = "271.2085.0"
+os = ["linux"]
+strip_components = 1
+bin_path = "bin"
+rename_exe = "kotlin-lsp"
+
+[tools."http:kotlin-lsp".platforms.linux-x64]
+url = "https://download.jetbrains.com/language-server/kotlin-server/{{version}}/kotlin-server-{{version}}.tar.gz"
+checksum_url = "https://download.jetbrains.com/language-server/kotlin-server/{{version}}/kotlin-server-{{version}}.tar.gz.sha256"
+
+[tools."http:kotlin-lsp".platforms.linux-arm64]
+url = "https://download.jetbrains.com/language-server/kotlin-server/{{version}}/kotlin-server-{{version}}-aarch64.tar.gz"
+checksum_url = "https://download.jetbrains.com/language-server/kotlin-server/{{version}}/kotlin-server-{{version}}-aarch64.tar.gz.sha256"
