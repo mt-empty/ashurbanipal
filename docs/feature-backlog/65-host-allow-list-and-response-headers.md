@@ -1,6 +1,6 @@
 # Host allow-list and host-chosen response headers
 
-> **Status:** PARTIAL · **Area:** spec, ports, conformance, docs · **Ref:** part A (`Host` allow-list) shipped; part B (`[headers]`) open
+> **Status:** DONE · **Area:** spec, ports, conformance, docs · **Ref:** part A (`Host` allow-list) shipped; part B (`[headers]`) declined 2026-11-27
 
 Two config additions that close the cross-origin gaps found by the
 2026-11-25 red-team run: an optional `Host` allow-list against DNS
@@ -9,8 +9,16 @@ headers, with a safe framing default. Both add a config key, need a
 `spec/protocol.md` change and touch every port's router setup, so one spec
 revision covers both.
 
-Part A shipped as `spec/protocol.md` §3.1, in every port. Part B is still
-open; decisions marked **Confirm** are proposals, not settled.
+Part A shipped as `spec/protocol.md` §3.1, in every port.
+
+**Part B was declined (user, 2026-11-27).** A host already adds response
+headers with its own framework's middleware (Spring Security, helmet,
+Flask-Talisman and the like). A `[headers]` table would duplicate that,
+could clash with it (two CSPs are both enforced), and would need a config
+key, validation and a protected-name list in every port. A framing default
+would also block hosts that embed the viewer. The viewer sets no policy
+headers; `readme.md` "Security" tells hosts to add their own. The part B
+design below is kept as the record of what was considered.
 
 ## 1. The ask
 
