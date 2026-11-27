@@ -1,4 +1,5 @@
 {
+    "git.detectWorktrees": true,
     "rust-analyzer.linkedProjects": [
         "implementations/rust/Cargo.toml",
         "tools/seed-gen/Cargo.toml"
