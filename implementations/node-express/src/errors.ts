@@ -17,7 +17,14 @@ export function quoteIdent(name: string): string {
 export function isQueryTimeout(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const { code, errno } = err as { code?: unknown; errno?: unknown };
-  return code === "57014" || errno === 3024 || errno === 1969 || code === "SQLITE_INTERRUPT";
+  return (
+    code === "57014" ||
+    errno === 3024 ||
+    errno === 1969 ||
+    code === "SQLITE_INTERRUPT" ||
+    // mysql2's client-side per-query timeout (the MySQL version probe).
+    code === "PROTOCOL_SEQUENCE_TIMEOUT"
+  );
 }
 
 /** Guards a timeout interpolated into SQL syntax that cannot use bound parameters. */

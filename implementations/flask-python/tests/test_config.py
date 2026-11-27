@@ -3,7 +3,13 @@
 Conformance cannot observe absent configuration over HTTP.
 """
 
-from ashurbanipal.config import Config
+from ashurbanipal.config import Config, Limits
+
+
+def test_query_timeout_below_one_second_falls_back_to_the_default() -> None:
+    assert Limits(query_timeout_secs=0).query_timeout_secs == 5
+    assert Limits(query_timeout_secs=-3).query_timeout_secs == 5
+    assert Limits(query_timeout_secs=9).query_timeout_secs == 9
 
 
 def test_disabled_by_default() -> None:

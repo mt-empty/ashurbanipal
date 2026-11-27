@@ -167,10 +167,11 @@ export class MySqlSource implements DbSource {
   constructor(private readonly pool: Pool) {}
 
   // Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6).
-  private async variant(): Promise<Variant> {
+  private async variant(timeoutMs: number): Promise<Variant> {
     if (this.variantPromise === undefined) {
       const detect = (async (): Promise<Variant> => {
-        const [rows] = await this.pool.query<RowDataPacket[]>("select version() as v");
+        // The variant picks the server-side timeout syntax, so this probe is bounded on the client.
+        const [rows] = await this.pool.query<RowDataPacket[]>({ sql: "select version() as v", timeout: timeoutMs });
         const version = String(rows[0]?.v ?? "");
         return version.toLowerCase().includes("mariadb") ? "mariadb" : "mysql";
       })();
@@ -185,8 +186,8 @@ export class MySqlSource implements DbSource {
   }
 
   // Keep schema resolution on one connection (`spec/protocol.md` §5).
-  private async withTx<T>(fn: (conn: PoolConnection, variant: Variant) => Promise<T>): Promise<T> {
-    const variant = await this.variant();
+  private async withTx<T>(timeoutMs: number, fn: (conn: PoolConnection, variant: Variant) => Promise<T>): Promise<T> {
+    const variant = await this.variant(timeoutMs);
     const conn = await this.pool.getConnection();
     try {
       await conn.query("START TRANSACTION READ ONLY");
@@ -356,7 +357,7 @@ export class MySqlSource implements DbSource {
   }
 
   async listSchemas(timeoutMs: number): Promise<SchemaListing> {
-    return this.withTx(async (conn, variant) =>
+    return this.withTx(timeoutMs, async (conn, variant) =>
       schemaListing(
         await this.listSchemasInTx(conn, variant, timeoutMs),
         await this.defaultSchemaInTx(conn, variant, timeoutMs),
@@ -365,7 +366,7 @@ export class MySqlSource implements DbSource {
   }
 
   async listTables(schema: string | undefined, timeoutMs: number): Promise<TableInfo[]> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       // Byte order: MariaDB's catalog collation folds case, so `_` sorts after letters.
       const sql = timedSelect(
@@ -386,7 +387,7 @@ export class MySqlSource implements DbSource {
   }
 
   async tableCounts(schema: string | undefined, timeoutMs: number): Promise<CountEntry[]> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       // TABLE_ROWS is a potentially stale InnoDB estimate (`spec/protocol.md` §5.3).
       const sql = timedSelect(
@@ -492,7 +493,7 @@ export class MySqlSource implements DbSource {
   }
 
   async queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const listed = await this.listSchemasInTx(conn, variant, timeoutMs);
       const realSchema = await this.resolveSchemaAmong(conn, variant, listed, schema, timeoutMs);
       const refs = joinTableRefs(spec);
@@ -528,7 +529,7 @@ export class MySqlSource implements DbSource {
   }
 
   async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
       const realTable = findExact(tables, table);
@@ -595,7 +596,7 @@ export class MySqlSource implements DbSource {
     column: string,
     timeoutMs: number,
   ): Promise<CommonValueEntry[]> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
       const realTable = findExact(tables, table);
@@ -612,7 +613,7 @@ export class MySqlSource implements DbSource {
   }
 
   async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       // One allow-list read, shared by the target-table check and the
       // referrer post-filter — MySQL/MariaDB have no cross-schema
@@ -656,7 +657,7 @@ export class MySqlSource implements DbSource {
   }
 
   async structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure> {
-    return this.withTx(async (conn, variant) => {
+    return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
       if (!allowed.includes(table)) {

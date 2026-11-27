@@ -84,8 +84,15 @@ class AshurbanipalProperties(
 data class Limits(
     val defaultPageSize: Int = 50,
     val maxPageSize: Int = 100,
-    val queryTimeoutSecs: Int = 5,
-)
+    val queryTimeoutSecs: Int = DEFAULT_QUERY_TIMEOUT_SECS,
+) {
+    val effectiveQueryTimeoutSecs: Int get() = effectiveQueryTimeoutSecs(queryTimeoutSecs)
+}
+
+private const val DEFAULT_QUERY_TIMEOUT_SECS = 5
+
+/** Below 1 s falls back to the default: 0 would disable the engine's statement timeout (`spec/protocol.md` §6). */
+internal fun effectiveQueryTimeoutSecs(secs: Int): Int = secs.takeIf { it >= 1 } ?: DEFAULT_QUERY_TIMEOUT_SECS
 
 /** This instance's own name and label. Labels are opaque host strings: echoed, never parsed or acted on (`spec/protocol.md` §4). */
 data class Instance(

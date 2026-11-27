@@ -1107,7 +1107,9 @@ These hold across all routes:
 - **Every database query MUST be bounded by a timeout** (configuration;
   reference default 5 s) — catalog and metadata queries included, not
   just row fetches — so a pathological query can't hold a host-pool
-  connection indefinitely. A timed-out query is a 500.
+  connection indefinitely. A timed-out query is a 500. A configured value
+  below 1 second MUST fall back to the default, never disable the timeout
+  (on Postgres and MySQL a 0 timeout means none).
 - **Single-table data queries.** A data response MUST retrieve rows from
   exactly one browsed table and MUST NOT combine user rows from multiple
   tables. The one exception is §5.11, which combines rows only from the

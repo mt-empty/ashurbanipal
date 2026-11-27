@@ -18,6 +18,16 @@ func defaultLimits() Limits {
 	return Limits{DefaultPageSize: 50, MaxPageSize: 100, QueryTimeoutSecs: 5}
 }
 
+// effectiveQueryTimeoutSecs falls back to the default below 1 s: 0 would
+// disable a server-side timeout, and a negative one would fail every query
+// (spec/protocol.md §6).
+func effectiveQueryTimeoutSecs(secs int) int {
+	if secs < 1 {
+		return defaultLimits().QueryTimeoutSecs
+	}
+	return secs
+}
+
 // WithDefaults fills zero fields from the protocol defaults.
 func (l Limits) WithDefaults() Limits {
 	d := defaultLimits()
@@ -27,9 +37,7 @@ func (l Limits) WithDefaults() Limits {
 	if l.MaxPageSize == 0 {
 		l.MaxPageSize = d.MaxPageSize
 	}
-	if l.QueryTimeoutSecs == 0 {
-		l.QueryTimeoutSecs = d.QueryTimeoutSecs
-	}
+	l.QueryTimeoutSecs = effectiveQueryTimeoutSecs(l.QueryTimeoutSecs)
 	return l
 }
 

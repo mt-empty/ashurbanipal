@@ -18,9 +18,11 @@ use pg_cleanup::PgCleanup;
 
 const SCHEMA: &str = "ashb_test_table_privileges";
 const ROLE: &str = "ashb_test_table_privileges_role";
+// No USAGE grant: its table is SELECT-able, but the role cannot reach it.
+const HIDDEN_SCHEMA: &str = "ashb_test_table_privileges_hidden";
 
 async fn setup(database_url: &str) -> (PgPool, PgCleanup) {
-    let cleanup = PgCleanup::new(database_url, &[SCHEMA], &[ROLE]);
+    let cleanup = PgCleanup::new(database_url, &[HIDDEN_SCHEMA, SCHEMA], &[ROLE]);
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(database_url)
@@ -31,7 +33,8 @@ async fn setup(database_url: &str) -> (PgPool, PgCleanup) {
     // the schema or role behind. `grant {ROLE} to current_user` is what
     // lets the setup session `set role` to it in `after_connect` below.
     pool.execute(sqlx::AssertSqlSafe(format!(
-        "drop schema if exists {SCHEMA} cascade; \
+        "drop schema if exists {HIDDEN_SCHEMA} cascade; \
+         drop schema if exists {SCHEMA} cascade; \
          drop role if exists {ROLE}; \
          create role {ROLE} nosuperuser; \
          grant {ROLE} to current_user; \
@@ -42,7 +45,11 @@ async fn setup(database_url: &str) -> (PgPool, PgCleanup) {
          create table {SCHEMA}.write_only (id int primary key); \
          create table {SCHEMA}.no_grant (id int primary key); \
          grant select on {SCHEMA}.readable to {ROLE}; \
-         grant insert on {SCHEMA}.write_only to {ROLE};"
+         grant insert on {SCHEMA}.write_only to {ROLE}; \
+         create schema {HIDDEN_SCHEMA}; \
+         create table {HIDDEN_SCHEMA}.child (id int primary key, \
+             readable_id int references {SCHEMA}.readable(id)); \
+         grant select on {HIDDEN_SCHEMA}.child to {ROLE};"
     )))
     .await
     .expect("setup schema/role");
@@ -117,5 +124,14 @@ async fn listing_and_allow_list_exclude_non_selectable_tables() {
             Err(DbError::NotAllowed(_))
         ),
         "a table the role has no privilege on must be rejected as NotAllowed"
+    );
+
+    let referrers = source
+        .referenced_by(Some(SCHEMA), "readable")
+        .await
+        .expect("referenced_by");
+    assert!(
+        referrers.is_empty(),
+        "a referrer in a schema without USAGE must be omitted, got {referrers:?}"
     );
 }

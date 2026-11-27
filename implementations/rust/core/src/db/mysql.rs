@@ -143,10 +143,15 @@ impl MySqlSource {
         if let Some(v) = self.variant.get() {
             return Ok(*v);
         }
-        let version: String =
-            sqlx::query_scalar(sqlx::AssertSqlSafe("select version()".to_string()))
-                .fetch_one(&self.pool)
-                .await?;
+        // The variant picks the server-side timeout syntax, so this probe is
+        // bounded on the client instead.
+        let probe = sqlx::query_scalar::<_, String>("select version()").fetch_one(&self.pool);
+        let version = tokio::time::timeout(
+            std::time::Duration::from_secs(CATALOG_TIMEOUT_SECS.into()),
+            probe,
+        )
+        .await
+        .map_err(|_| DbError::QueryTimeout)??;
         let detected = if version.to_ascii_lowercase().contains("mariadb") {
             Variant::MariaDb
         } else {

@@ -20,7 +20,7 @@ type PostgresSource struct {
 
 // NewPostgresSource bounds catalog and data queries (`spec/protocol.md` §6).
 func NewPostgresSource(db *sql.DB, queryTimeoutSecs int) *PostgresSource {
-	return &PostgresSource{db: db, timeout: time.Duration(queryTimeoutSecs) * time.Second}
+	return &PostgresSource{db: db, timeout: time.Duration(effectiveQueryTimeoutSecs(queryTimeoutSecs)) * time.Second}
 }
 
 var _ DbSource = (*PostgresSource)(nil)
@@ -883,6 +883,7 @@ func (c *PostgresSource) ReferencedBy(ctx context.Context, schema *string, table
 		   and con.confrelid = $1
 		   and rc.relkind = 'r'
 		   and has_table_privilege(con.conrelid, 'SELECT')
+		   and has_schema_privilege(rc.relnamespace, 'USAGE')
 		 order by rn.nspname, rc.relname, con.conname, k.n`, targetOID)
 	if err != nil {
 		return nil, err

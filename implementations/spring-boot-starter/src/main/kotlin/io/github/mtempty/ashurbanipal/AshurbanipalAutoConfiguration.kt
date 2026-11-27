@@ -46,7 +46,7 @@ class AshurbanipalAutoConfiguration {
         properties: AshurbanipalProperties,
         applicationContext: ApplicationContext,
     ): Map<String, DbSource> {
-        val queryTimeoutSecs = properties.limits.queryTimeoutSecs
+        val queryTimeoutSecs = properties.limits.effectiveQueryTimeoutSecs
         val result = LinkedHashMap<String, DbSource>()
         for (source in properties.resolvedSources) {
             val dataSource = source.dataSourceBean

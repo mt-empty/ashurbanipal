@@ -4,11 +4,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // Tests fail-closed router behavior directly. A nil *sql.DB is safe throughout:
 // Router never touches the database at construction time, only
 // per-request.
+
+// A timeout below 1 s would disable or break the engine's statement timeout.
+func TestQueryTimeoutBelowOneSecondFallsBackToTheDefault(t *testing.T) {
+	for _, secs := range []int{0, -3} {
+		if got := (Limits{QueryTimeoutSecs: secs}).WithDefaults().QueryTimeoutSecs; got != 5 {
+			t.Errorf("QueryTimeoutSecs %d -> %d, want 5", secs, got)
+		}
+	}
+	if got := (Limits{QueryTimeoutSecs: 9}).WithDefaults().QueryTimeoutSecs; got != 9 {
+		t.Errorf("QueryTimeoutSecs 9 -> %d", got)
+	}
+	// A host may pass the raw value straight to a constructor.
+	if got := NewPostgresSource(nil, 0).timeout; got != 5*time.Second {
+		t.Errorf("NewPostgresSource(nil, 0).timeout = %v, want 5s", got)
+	}
+}
 
 // PORTING.md hardening item 2: absent config MUST mean disabled, never
 // "enabled with defaults".

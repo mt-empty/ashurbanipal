@@ -175,7 +175,7 @@ impl DataParams {
             offset: self.offset.unwrap_or(0),
             sort: self.sort.clone(),
             descending: is_descending(self.order.as_deref())?,
-            timeout_secs: limits.query_timeout_secs,
+            timeout_secs: limits.effective_query_timeout_secs(),
             filter,
         })
     }
@@ -217,7 +217,7 @@ impl JoinParams {
             sort: self.sort.clone(),
             sort_join,
             descending,
-            timeout_secs: limits.query_timeout_secs,
+            timeout_secs: limits.effective_query_timeout_secs(),
             filter,
         };
         Ok((spec, opts))

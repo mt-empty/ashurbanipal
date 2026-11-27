@@ -87,7 +87,8 @@ internal fun sqliteColumnClass(declared: String): ColumnClass {
 }
 
 /** SQLite source uses a progress handler, not `Statement.setQueryTimeout`, to interrupt running queries. */
-class SqliteSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
+class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
+    private val queryTimeoutSecs = effectiveQueryTimeoutSecs(queryTimeoutSecs)
     override val engine = Engine.SQLITE
 
     /** Clears the progress handler before pool reuse so it cannot abort the next query. */
@@ -122,20 +123,15 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         "select name from sqlite_master where type = 'table' and name not like 'sqlite\\_%' escape '\\' order by name",
     ) { rs -> rs.getString(1) }
 
-    /** `table` is validated against [allowedTables] by every caller before reaching here — PRAGMA doesn't accept bound parameters for the table name, so this is the one identifier spliced into a PRAGMA string rather than bound. */
-    private fun allowedColumns(table: String): List<String> = bounded(queryTimeoutSecs) { conn ->
-        val quoted = quoteIdent(table)
-        query(conn, "select cid, name from pragma_table_info($quoted) order by cid") { rs -> rs.getString(2) }
-    }
+    private fun allowedColumnsOn(conn: Connection, table: String): List<String> =
+        query(conn, "select cid, name from pragma_table_info(?) order by cid", listOf(table)) { rs -> rs.getString(2) }
 
-    private fun requireTable(table: String): String =
-        allowedTables().find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
+    private fun requireTableOn(conn: Connection, table: String): String =
+        allowedTablesOn(conn).find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
 
-    /** [table] must already be allow-listed: it is spliced into the pragma call. */
     private fun tableMeta(conn: Connection, table: String): TableMeta {
         val (pk, fkColumns) = keyMetadataOn(conn, table)
-        val quoted = quoteIdent(table)
-        val columns = query(conn, "select cid, name, type from pragma_table_info($quoted) order by cid") { rs ->
+        val columns = query(conn, "select cid, name, type from pragma_table_info(?) order by cid", listOf(table)) { rs ->
             rs.getString(2) to (rs.getString(3) ?: "")
         }.map { (col, declared) ->
             val columnClass = sqliteColumnClass(declared)
@@ -149,7 +145,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
                 references = fkColumns[col],
             )
         }
-        return TableMeta(table, columns, orderKeys = tieBreakKeys(columns, uniqueKeys(conn, quoted)))
+        return TableMeta(table, columns, orderKeys = tieBreakKeys(columns, uniqueKeys(conn, table)))
     }
 
     /**
@@ -157,17 +153,18 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
      * non-partial index whose key columns are all NOT NULL table columns. An
      * expression key part has no pragma_table_info row.
      */
-    private fun uniqueKeys(conn: Connection, quoted: String): List<UniqueKey> = groupUniqueKeys(
+    private fun uniqueKeys(conn: Connection, table: String): List<UniqueKey> = groupUniqueKeys(
         query(
             conn,
-            "select '', 1, name, 1, pk from pragma_table_info($quoted) where pk > 0 " +
+            "select '', 1, name, 1, pk from pragma_table_info(?) where pk > 0 " +
                 "union all " +
                 "select il.name, 0, ti.name, ti.\"notnull\", ii.seqno " +
-                "from pragma_index_list($quoted) il " +
+                "from pragma_index_list(?) il " +
                 "join pragma_index_xinfo(il.name) ii " +
-                "left join pragma_table_info($quoted) ti on ti.cid = ii.cid " +
+                "left join pragma_table_info(?) ti on ti.cid = ii.cid " +
                 "where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 " +
                 "order by 1, 5",
+            listOf(table, table, table),
         ) { rs ->
             val primary = rs.getInt(2) == 1
             val column: String? = rs.getString(3)
@@ -178,8 +175,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
 
     /** Composite FKs are dropped rather than risk mislabeling which columns pair up. */
     private fun keyMetadataOn(conn: Connection, table: String): Pair<List<String>, Map<String, ColumnRef>> {
-        val quoted = quoteIdent(table)
-        val cols = query(conn, "select cid, name, pk from pragma_table_info($quoted) order by cid") { rs ->
+        val cols = query(conn, "select cid, name, pk from pragma_table_info(?) order by cid", listOf(table)) { rs ->
             Triple(rs.getLong(1), rs.getString(2), rs.getLong(3))
         }
         val pkColumns = cols.filter { it.third > 0 }.map { it.second }
@@ -187,8 +183,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // (id, seq, table, from, to) — `id` groups columns belonging to the
         // same constraint (composite FKs share an id). The quoted
         // "table"/"from"/"to" are pragma_foreign_key_list's own fixed output
-        // column names (SQL keywords needing escape), not the caller-supplied
-        // table.
+        // column names (SQL keywords needing escape).
         //
         // "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
         // position against the parent's PK, correlated per FK row since each
@@ -198,8 +193,9 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         val fks = query(
             conn,
             "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid') " +
-                "from pragma_foreign_key_list($quoted) fkl " +
+                "from pragma_foreign_key_list(?) fkl " +
                 "left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1",
+            listOf(table),
         ) { rs ->
             FkRow(rs.getLong(1), rs.getString(3), rs.getString(4), rs.getString(5))
         }
@@ -259,37 +255,38 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
 
     override fun queryTable(schema: String?, table: String, opts: QueryOpts): TableData {
         checkSchema(schema)
-        val realTable = requireTable(table)
-        // The join route's lookup, so both routes report the same columns; its
-        // names are the live catalog's, so they also serve as the allow-list.
-        val meta = bounded(queryTimeoutSecs) { conn -> tableMeta(conn, realTable) }
-        val columns = meta.columns.map { it.columnInfo() }
-        val columnNames = columns.map { it.name }
+        // One connection for the whole operation (spec/protocol.md §1).
+        return bounded(queryTimeoutSecs) { conn ->
+            val realTable = requireTableOn(conn, table)
+            // The join route's lookup, so both routes report the same columns; its
+            // names are the live catalog's, so they also serve as the allow-list.
+            val meta = tableMeta(conn, realTable)
+            val columns = meta.columns.map { it.columnInfo() }
+            val columnNames = columns.map { it.name }
 
-        val sort = opts.sort?.let { requested ->
-            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
+            val sort = opts.sort?.let { requested ->
+                columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
+            }
+
+            val whereClause = opts.filter?.let { tableWhereClause(it, meta, SQLITE_DIALECT) } ?: WhereClause("", emptyList())
+            val quotedTable = quoteIdent(realTable)
+
+            val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
+            val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdent)
+            val sql = "select $selectList from $quotedTable${whereClause.sql}$orderClause limit ? offset ?"
+
+            val bindArgs = mutableListOf<Any?>()
+            bindArgs.addAll(whereClause.values)
+            bindArgs.add(opts.limit)
+            bindArgs.add(opts.offset)
+
+            val rows = query(conn, sql, bindArgs) { rs -> rowToJson(rs, columns) }
+
+            // No reltuples-equivalent estimate to read; -1 is the documented
+            // "no estimate" sentinel (spec/protocol.md §5.4.4), not a second
+            // COUNT(*) scan on every page load.
+            TableData(columns, rows, -1L)
         }
-
-        val whereClause = opts.filter?.let { tableWhereClause(it, meta, SQLITE_DIALECT) } ?: WhereClause("", emptyList())
-        val quotedTable = quoteIdent(realTable)
-
-        val selectList = columns.joinToString(", ") { "CAST(${quoteIdent(it.name)} AS TEXT)" }
-        val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdent)
-        val sql = "select $selectList from $quotedTable${whereClause.sql}$orderClause limit ? offset ?"
-
-        val bindArgs = mutableListOf<Any?>()
-        bindArgs.addAll(whereClause.values)
-        bindArgs.add(opts.limit)
-        bindArgs.add(opts.offset)
-
-        val rows = bounded(queryTimeoutSecs) { conn ->
-            query(conn, sql, bindArgs) { rs -> rowToJson(rs, columns) }
-        }
-
-        // No reltuples-equivalent estimate to read; -1 is the documented
-        // "no estimate" sentinel (spec/protocol.md §5.4.4), not a second
-        // COUNT(*) scan on every page load.
-        return TableData(columns, rows, -1L)
     }
 
     private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
@@ -308,14 +305,16 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
      */
     override fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> {
         checkSchema(schema)
-        val realTable = requireTable(table)
-        allowedColumns(realTable).find { it == column } ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
+        bounded(queryTimeoutSecs) { conn ->
+            val realTable = requireTableOn(conn, table)
+            allowedColumnsOn(conn, realTable).find { it == column }
+                ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
+        }
         return emptyList()
     }
 
     override fun referencedBy(schema: String?, table: String): List<ReferencedByEntry> {
         checkSchema(schema)
-        requireTable(table)
 
         // No reverse-FK index and no information_schema: walk every table's
         // pragma_foreign_key_list (the schema is parsed in memory on open).
@@ -335,6 +334,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
         // no declared primary key, where SQLite's parent key is the
         // implicit rowid.
         val rows = bounded(queryTimeoutSecs) { conn ->
+            requireTableOn(conn, table)
             query(
                 conn,
                 "select m.name, fkl.id, fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid') " +
@@ -364,21 +364,18 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
 
     override fun structure(schema: String?, table: String): Structure {
         checkSchema(schema)
-        requireTable(table)
-        // The validated name is quoted into the pragma's table-valued-function
-        // argument, never bound (pragma functions cannot bind it).
-        val quoted = quoteIdent(table)
-
         return bounded(queryTimeoutSecs) { conn ->
+            requireTableOn(conn, table)
             // key = 1 drops trailing rowid/auxiliary entries. An expression key
             // part has a NULL name and no recoverable text.
             val indexRows = query(
                 conn,
                 "select il.name, il.\"unique\", il.origin, il.partial, ix.name " +
-                    "from pragma_index_list($quoted) il " +
+                    "from pragma_index_list(?) il " +
                     "join pragma_index_xinfo(il.name) ix " +
                     "where ix.key = 1 " +
                     "order by il.name, ix.seqno",
+                listOf(table),
             ) { rs ->
                 listOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5))
             }
@@ -413,7 +410,7 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
                 indexes.find { it.name == name }?.let { ConstraintUnique(name, it.columns) }
             }
 
-            val pk = query(conn, "select name from pragma_table_info($quoted) where pk > 0 order by pk") { rs ->
+            val pk = query(conn, "select name from pragma_table_info(?) where pk > 0 order by pk", listOf(table)) { rs ->
                 rs.getString(1)
             }
             val primaryKey = if (pk.isEmpty()) null else ConstraintPk(columns = pk)
@@ -424,9 +421,10 @@ class SqliteSource(private val dataSource: DataSource, private val queryTimeoutS
                 conn,
                 "select fkl.id, fkl.\"table\", fkl.\"from\", coalesce(fkl.\"to\", ppk.name, 'rowid'), " +
                     "       fkl.on_delete, fkl.on_update " +
-                    "from pragma_foreign_key_list($quoted) fkl " +
+                    "from pragma_foreign_key_list(?) fkl " +
                     "left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1 " +
                     "order by fkl.id, fkl.seq",
+                listOf(table),
             ) { rs -> (1..6).map { rs.getString(it) } }
             val foreignKeys = ArrayList<ConstraintFk>()
             var lastId: String? = null

@@ -39,6 +39,17 @@ impl Default for Limits {
     }
 }
 
+impl Limits {
+    /// A configured 0 falls back to the default: 0 would disable the
+    /// engine's statement timeout (`spec/protocol.md` §6).
+    pub fn effective_query_timeout_secs(&self) -> u32 {
+        match self.query_timeout_secs {
+            0 => Limits::default().query_timeout_secs,
+            secs => secs,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Sibling {
     pub name: String,
@@ -188,6 +199,20 @@ mod tests {
         assert!(config.is_enabled());
         assert_eq!(config.limits.max_page_size, 50);
         assert_eq!(config.siblings.len(), 1);
+    }
+
+    #[test]
+    fn zero_query_timeout_falls_back_to_the_default() {
+        let limits = Limits {
+            query_timeout_secs: 0,
+            ..Limits::default()
+        };
+        assert_eq!(limits.effective_query_timeout_secs(), 5);
+        let limits = Limits {
+            query_timeout_secs: 9,
+            ..Limits::default()
+        };
+        assert_eq!(limits.effective_query_timeout_secs(), 9);
     }
 
     #[test]

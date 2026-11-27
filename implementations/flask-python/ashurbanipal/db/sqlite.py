@@ -200,7 +200,8 @@ class SqliteSource(DbSource):
         self._path = path
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._path)
+        # uri=True lets a host pass `file:app.db?mode=ro`; a plain path is unchanged.
+        conn = sqlite3.connect(self._path, uri=True)
         conn.text_factory = _lenient_text_factory
         return conn
 
@@ -225,14 +226,12 @@ class SqliteSource(DbSource):
         return [row[0] for row in cur.fetchall()]
 
     def _allowed_columns(self, cur: sqlite3.Cursor, table: str) -> list[str]:
-        # PRAGMA cannot bind table names; callers supply an allow-listed table.
-        cur.execute(f"select cid, name from pragma_table_info({quote_ident(table)}) order by cid")
+        cur.execute("select cid, name from pragma_table_info(?) order by cid", (table,))
         return [row[1] for row in cur.fetchall()]
 
     def _table_meta(self, cur: sqlite3.Cursor, table: str) -> TableMeta:
-        """`table` must already be allow-listed: it is spliced into the pragma call."""
         pk_columns, fk_columns = self._key_metadata(cur, table)
-        cur.execute(f"select cid, name, type from pragma_table_info({quote_ident(table)}) order by cid")
+        cur.execute("select cid, name, type from pragma_table_info(?) order by cid", (table,))
         columns = [
             ColMeta(
                 name=col,
@@ -252,18 +251,17 @@ class SqliteSource(DbSource):
     def _unique_keys(self, cur: sqlite3.Cursor, table: str) -> list[UniqueKey]:
         """The primary key (an INTEGER PRIMARY KEY has no index row) and every unique,
         non-partial index whose key columns are all NOT NULL table columns. An
-        expression key part has no pragma_table_info row. `table` must already be
-        allow-listed."""
-        t = quote_ident(table)
+        expression key part has no pragma_table_info row."""
         cur.execute(
-            f"select '', 1, name, 1, pk from pragma_table_info({t}) where pk > 0 "
+            "select '', 1, name, 1, pk from pragma_table_info(?) where pk > 0 "
             "union all "
             'select il.name, 0, ti.name, ti."notnull", ii.seqno '
-            f"from pragma_index_list({t}) il "
+            "from pragma_index_list(?) il "
             "join pragma_index_xinfo(il.name) ii "
-            f"left join pragma_table_info({t}) ti on ti.cid = ii.cid "
+            "left join pragma_table_info(?) ti on ti.cid = ii.cid "
             "where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 "
-            "order by 1, 5"
+            "order by 1, 5",
+            (table, table, table),
         )
         return group_unique_keys(
             (index, bool(is_pk), column, bool(is_pk) or (column is not None and not_null == 1))
@@ -271,8 +269,7 @@ class SqliteSource(DbSource):
         )
 
     def _key_metadata(self, cur: sqlite3.Cursor, table: str) -> tuple[list[str], dict[str, ColumnRef]]:
-        quoted = quote_ident(table)
-        cur.execute(f"select cid, name, pk from pragma_table_info({quoted}) order by cid")
+        cur.execute("select cid, name, pk from pragma_table_info(?) order by cid", (table,))
         pk_columns = [name for _, name, pk in cur.fetchall() if pk > 0]
 
         # (id, seq, table, from, to) — id groups columns belonging to the
@@ -283,9 +280,10 @@ class SqliteSource(DbSource):
         # can reference a different parent — unlike referenced_by's single
         # bound parent (docs/adapter-decisions.md §5.4.1).
         cur.execute(
-            f'select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, \'rowid\') '
-            f"from pragma_foreign_key_list({quoted}) fkl "
-            f'left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1'
+            'select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, \'rowid\') '
+            "from pragma_foreign_key_list(?) fkl "
+            'left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1',
+            (table,),
         )
         by_constraint: dict[int, list[tuple[str, str, str]]] = {}
         for constraint_id, _seq, ref_table, from_col, to_col in cur.fetchall():
@@ -526,19 +524,15 @@ class SqliteSource(DbSource):
             try:
                 if table not in self._allowed_tables(cur):
                     raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.TABLE)
-                # The validated name is quoted into the pragma's
-                # table-valued-function argument, never bound (pragma
-                # functions cannot bind it).
-                quoted = quote_ident(table)
-
                 # key = 1 drops trailing rowid/auxiliary entries. An
                 # expression key part has a NULL name and no recoverable text.
                 cur.execute(
                     'select il.name, il."unique", il.origin, il.partial, ix.name '
-                    f"from pragma_index_list({quoted}) il "
+                    "from pragma_index_list(?) il "
                     "join pragma_index_xinfo(il.name) ix "
                     "where ix.key = 1 "
-                    "order by il.name, ix.seqno"
+                    "order by il.name, ix.seqno",
+                    (table,),
                 )
                 partial: set[str] = set()
                 unique_origin: list[str] = []
@@ -562,7 +556,7 @@ class SqliteSource(DbSource):
                     idx = next(i for i in out.indexes if i.name == name)
                     out.constraints.unique.append(ConstraintUnique(name=name, columns=list(idx.columns)))
 
-                cur.execute(f"select name from pragma_table_info({quoted}) where pk > 0 order by pk")
+                cur.execute("select name from pragma_table_info(?) where pk > 0 order by pk", (table,))
                 pk = [row[0] for row in cur.fetchall()]
                 if pk:
                     out.constraints.primary_key = ConstraintPk(columns=pk)
@@ -573,9 +567,10 @@ class SqliteSource(DbSource):
                 cur.execute(
                     'select fkl.id, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, \'rowid\'), '
                     "       fkl.on_delete, fkl.on_update "
-                    f"from pragma_foreign_key_list({quoted}) fkl "
+                    "from pragma_foreign_key_list(?) fkl "
                     'left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1 '
-                    "order by fkl.id, fkl.seq"
+                    "order by fkl.id, fkl.seq",
+                    (table,),
                 )
                 last_id = None
                 for fk_id, ref_table, from_col, to_col, on_delete, on_update in cur.fetchall():
