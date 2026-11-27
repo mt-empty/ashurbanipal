@@ -1,6 +1,5 @@
 package io.github.mtempty.ashurbanipal
 
-import org.apache.commons.logging.LogFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
@@ -81,12 +80,6 @@ class AshurbanipalAutoConfiguration {
         introspector: ObjectProvider<HandlerMappingIntrospector>,
     ): FilterRegistrationBean<HostAllowListFilter> {
         val mount = ViewerMount.of(environment, properties.basePath)
-        if (mount.root) {
-            LogFactory.getLog(AshurbanipalAutoConfiguration::class.java).warn(
-                "ashurbanipal: a root base-path takes / and /api/... from the host app and will be refused " +
-                    "in a later release; mount the viewer under a path of its own (spec/protocol.md §3)",
-            )
-        }
         val hosts = HostAllowList(properties.allowedHosts)
         val hostRoutes = HostRouteLookup { introspector.ifAvailable?.handlerMappings }
         return FilterRegistrationBean(HostAllowListFilter(hosts, hostRoutes)).apply {

@@ -59,20 +59,38 @@ def test_host_routes_are_untouched(mount: str, nest: str | None) -> None:
         assert set(answers.values()) == {(404, "host-404")}, (req, answers)
 
 
-def test_a_root_mount_leaves_the_host_routes_alone(caplog: pytest.LogCaptureFixture) -> None:
-    routes = [
-        {"method": "GET", "path": "/health"},
-        {"method": "GET", "path": "/api/orders"},
-        {"method": "GET", "path": "/api/tables/extra"},
-        {"method": "POST", "path": "/"},
-        {"method": "POST", "path": "/api/tables"},
-    ]
-    for req, answers in _answers("/", routes, routes):
-        assert set(answers.values()) == {(200, "host-route")}, (req, answers)
-    unrouted = [{"method": "GET", "path": "/nothing"}, {"method": "GET", "path": "/api/nothing"}]
-    for req, answers in _answers("/", routes, unrouted):
-        assert set(answers.values()) == {(404, "host-404")}, (req, answers)
-    assert "a root mount takes / and /api/..." in caplog.text
+@pytest.mark.parametrize("mount", ["/", ""])
+def test_a_root_mount_argument_is_refused_at_registration(mount: str) -> None:
+    viewer = router(Config(enabled=True), [("primary", _UnusedSource())], mount=mount)
+    with pytest.raises(ValueError, match="must not be the root"):
+        Flask(__name__).register_blueprint(viewer)
+
+
+def test_a_root_mount_argument_moved_by_url_prefix_is_accepted() -> None:
+    app = Flask(__name__)
+    app.register_blueprint(
+        router(Config(enabled=True), [("primary", _UnusedSource())], mount="/"), url_prefix="/viewer"
+    )
+    assert any(rule.rule == "/viewer/api/sources" for rule in app.url_map.iter_rules())
+
+
+@pytest.mark.parametrize("nest", [None, ""], ids=["app", "parent blueprint"])
+def test_a_root_url_prefix_is_refused_at_registration(nest: str | None) -> None:
+    app = Flask(__name__)
+    viewer = router(Config(enabled=True), [("primary", _UnusedSource())])
+    with pytest.raises(ValueError, match="must not be the root"):
+        if nest is None:
+            app.register_blueprint(viewer, url_prefix="/")
+        else:
+            parent = Blueprint("parent", __name__, url_prefix=nest)
+            parent.register_blueprint(viewer, url_prefix="/")
+            app.register_blueprint(parent)
+
+
+def test_a_disabled_root_mount_registers_nothing() -> None:
+    app = Flask(__name__)
+    app.register_blueprint(router(Config(enabled=False), [], mount="/"))
+    assert app.test_client().get("/").status_code == 404
 
 
 def test_viewer_paths_match_the_routes() -> None:

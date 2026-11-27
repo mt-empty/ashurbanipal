@@ -404,8 +404,8 @@ test.
 | actix-web | Scope guard: `GET`/`HEAD` whose path ends in `/__ashurbanipal` plus a viewer path, and a listed `Host` | A scope that matches answers every path under it, so the guard sends everything else on to the host. The guard sees only the full path, so a host route whose own path repeats `/__ashurbanipal/api/...` under the mount would also match; no real route looks like that. A wrong method with no host route gets the host's 404, not 405, so CI skips Schemathesis's `unsupported_method` check, which wants 405. |
 | Go | `Paths(cfg)` lists the exact paths to register | The older `{mount}/` subtree registration still works, but the viewer's mux then answers unrouted paths under the mount with Go's plain 404 instead of a host's own catch-all. |
 | Node | `router.get` on each exact path; the `Host` check calls `next("router")` | A wrong method with no host route gets Express's 404, not 405, so CI skips Schemathesis's `unsupported_method` check, which wants 405. |
-| Flask | App-wide hook: the viewer's own blueprint matched the request, or no rule matched and the path is one of the viewer's | A root mount (`mount="/"` or `url_prefix="/"`) logs a deprecation warning and will be refused in a later release. |
-| Spring | Filter on the exact paths; for another method from an unlisted `Host`, the handler mappings decide whether a host handler answers | `ashurbanipal.base-path=/` logs a deprecation warning and will be refused in a later release. |
+| Flask | App-wide hook: the viewer's own blueprint matched the request, or no rule matched and the path is one of the viewer's | A root mount (`mount="/"` or `url_prefix="/"`) raises `ValueError` at registration. |
+| Spring | Filter on the exact paths; for another method from an unlisted `Host`, the handler mappings decide whether a host handler answers | `ashurbanipal.base-path=/` fails startup when the viewer is enabled. |
 
 ## §5.4.2 — request size limits (Spring Boot)
 

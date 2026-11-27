@@ -57,7 +57,7 @@ class HostAllowListTest {
         return patterns
     }
 
-    private fun viewerPaths(vararg page: String, mount: String = page[0]) = page.toList() + VIEWER_API_PATHS.map { mount + it }
+    private fun viewerPaths(mount: String) = listOf(mount) + VIEWER_API_PATHS.map { mount + it }
 
     @Test
     fun `the filter covers only the viewer's exact paths`() {
@@ -82,12 +82,5 @@ class HostAllowListTest {
                 val registration = context.getBean("ashurbanipalHostAllowListFilter", FilterRegistrationBean::class.java)
                 assertThat(registration.isEnabled).isFalse()
             }
-    }
-
-    @Test
-    fun `a root mount never covers the host's other routes`() {
-        assertThat(urlPatterns("ashurbanipal.base-path=/")).containsExactlyInAnyOrderElementsOf(viewerPaths("", mount = ""))
-        assertThat(urlPatterns("ashurbanipal.base-path=/", "spring.mvc.servlet.path=/app"))
-            .containsExactlyInAnyOrderElementsOf(viewerPaths("/app", "/app/"))
     }
 }
