@@ -61,7 +61,7 @@ def require_admin():
 app.register_blueprint(bp)
 ```
 
-A hook on the blueprint follows it to any `mount` path you choose, and checks only the viewer's own routes, never yours.
+A hook on the blueprint follows it to any `mount` path you choose, and checks only the viewer's own routes, never yours. A root mount (`mount="/"`, or `url_prefix="/"` at registration) raises `ValueError`, because it would take `/` and `/api/...` from your app.
 
 ## MySQL, MariaDB, or SQLite
 

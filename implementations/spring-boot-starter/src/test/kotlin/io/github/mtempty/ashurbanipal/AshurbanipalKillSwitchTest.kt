@@ -83,6 +83,30 @@ class AshurbanipalKillSwitchTest {
     }
 
     @Test
+    fun `a root base-path fails startup`() {
+        val cases = listOf(
+            arrayOf("ashurbanipal.base-path=/"),
+            arrayOf("ashurbanipal.base-path="),
+            arrayOf("ashurbanipal.base-path=/", "spring.mvc.servlet.path=/app"),
+        )
+        for (properties in cases) {
+            runner()
+                .withPropertyValues("ashurbanipal.enabled=true", *properties)
+                .run { context ->
+                    assertThat(context).describedAs(properties.joinToString()).hasFailed()
+                    assertThat(context.startupFailure).hasRootCauseInstanceOf(InvalidBasePathException::class.java)
+                }
+        }
+    }
+
+    @Test
+    fun `a root base-path on a disabled viewer is ignored`() {
+        runner()
+            .withPropertyValues("ashurbanipal.enabled=false", "ashurbanipal.base-path=/")
+            .run { context -> assertThat(context).hasNotFailed() }
+    }
+
+    @Test
     fun `explicit mysql backend constructs MySqlSource`() {
         runner()
             .withPropertyValues(

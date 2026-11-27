@@ -70,18 +70,6 @@ class MultipartExceptionResolverTest {
     }
 
     @Test
-    fun `a root mount leaves the host's other paths alone`() {
-        for (uri in listOf("/upload", "/files/new")) {
-            val (result, _) = resolve(uri, MultipartException("x"), mount = "")
-            assertNull(result, uri)
-        }
-        for (uri in listOf("/", "/api/sources")) {
-            val (result, _) = resolve(uri, MultipartException("x"), mount = "")
-            assertNotNull(result, uri)
-        }
-    }
-
-    @Test
     fun `another method on a viewer path is left to the host`() {
         val request = MockHttpServletRequest("POST", "/__ashurbanipal/api/tables")
         val result = MultipartExceptionResolver(ViewerMount("/__ashurbanipal"))

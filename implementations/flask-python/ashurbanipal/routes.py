@@ -64,8 +64,6 @@ VIEWER_API_PATHS = (
 
 _MAX_I64 = 2**63 - 1
 
-_log = logging.getLogger(__name__)
-
 
 def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str = "/__ashurbanipal") -> Blueprint:
     bp = Blueprint("ashurbanipal", __name__, url_prefix=mount)
@@ -88,12 +86,12 @@ def router(config: Config, sources: Sequence[tuple[str, DbSource]], mount: str =
     def _remember_registration(state: BlueprintSetupState) -> None:
         prefix = (state.url_prefix or "").rstrip("/")
         if not prefix:
-            _log.warning(
-                "ashurbanipal: a root mount takes / and /api/... from the host app and will be refused "
-                "in a later release; mount the viewer under a path of its own (spec/protocol.md §3)"
+            raise ValueError(
+                "the viewer's mount (mount= or url_prefix=) must not be the root: it would take / and "
+                "/api/... from the host app (spec/protocol.md §3)"
             )
         name = ".".join(part for part in (state.name_prefix, state.name) if part)
-        paths = frozenset((prefix or "/", *(prefix + p for p in VIEWER_API_PATHS)))
+        paths = frozenset((prefix, *(prefix + p for p in VIEWER_API_PATHS)))
         registrations.append((state.app, name, paths))
 
     def _is_viewer_request() -> bool:
