@@ -35,10 +35,17 @@ private fun bindParams(ps: PreparedStatement, params: List<Any?>) {
 }
 
 /** Connector/J rejects MariaDB's wrapper in executeQuery; use execute instead (`spec/protocol.md` §6). */
-private fun <T> query(dataSource: DataSource, sql: String, params: List<Any?> = emptyList(), mapper: (ResultSet) -> T): List<T> {
+private fun <T> query(
+    dataSource: DataSource,
+    sql: String,
+    params: List<Any?> = emptyList(),
+    timeoutSecs: Int = 0,
+    mapper: (ResultSet) -> T,
+): List<T> {
     val conn = DataSourceUtils.getConnection(dataSource)
     try {
         conn.prepareStatement(sql).use { ps ->
+            ps.queryTimeout = timeoutSecs
             bindParams(ps, params)
             ps.execute()
             // getResultSet is nullable after non-SELECT statements.
@@ -116,7 +123,8 @@ internal fun mysqlColumnClass(dataType: String, columnType: String): ColumnClass
     }
 
 /** MySQL/MariaDB [DbSource] (`spec/protocol.md` §5). */
-class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSecs: Int) : DbSource {
+class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
+    private val queryTimeoutSecs = effectiveQueryTimeoutSecs(queryTimeoutSecs)
     override val engine = Engine.MYSQL
 
     private val transactionTemplate = TransactionTemplate(DataSourceTransactionManager(dataSource)).apply {
@@ -145,7 +153,8 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
     /** Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6). */
     internal fun variant(): Variant {
         variantRef.get()?.let { return it }
-        val version = query(dataSource, "select version()") { rs -> rs.getString(1) }.first()
+        // The variant picks the server-side timeout syntax, so this probe uses the driver's timeout.
+        val version = query(dataSource, "select version()", timeoutSecs = queryTimeoutSecs) { rs -> rs.getString(1) }.first()
         val detected = if (version.lowercase().contains("mariadb")) Variant.MARIADB else Variant.MYSQL
         variantRef.compareAndSet(null, detected)
         return variantRef.get()!!
@@ -407,7 +416,7 @@ class MySqlSource(private val dataSource: DataSource, private val queryTimeoutSe
      */
     private fun mapSelectError(e: SQLException, table: String, filtered: Boolean): Exception = when {
         e.errorCode == 1142 -> NotAllowedException("not allowed: table $table", NotAllowedKind.NOT_READABLE)
-        filtered && e.sqlState in BAD_VALUE_SQLSTATES -> FilterException("value invalid for this backend: ${e.message}")
+        filtered && e.sqlState in MYSQL_BAD_VALUE_SQLSTATES -> FilterException("value invalid for this backend: ${e.message}")
         else -> e
     }
 

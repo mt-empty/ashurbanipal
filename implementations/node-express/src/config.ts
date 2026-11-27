@@ -19,10 +19,12 @@ const DEFAULT_LIMITS: ResolvedLimits = {
 };
 
 export function withDefaults(limits: Limits | undefined): ResolvedLimits {
+  const timeout = limits?.queryTimeoutSecs;
   return {
     defaultPageSize: limits?.defaultPageSize ?? DEFAULT_LIMITS.defaultPageSize,
     maxPageSize: limits?.maxPageSize ?? DEFAULT_LIMITS.maxPageSize,
-    queryTimeoutSecs: limits?.queryTimeoutSecs ?? DEFAULT_LIMITS.queryTimeoutSecs,
+    // Below 1 s falls back to the default: 0 would disable the engine's statement timeout (`spec/protocol.md` §6).
+    queryTimeoutSecs: timeout !== undefined && timeout >= 1 ? timeout : DEFAULT_LIMITS.queryTimeoutSecs,
   };
 }
 

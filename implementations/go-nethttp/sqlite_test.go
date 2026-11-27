@@ -178,6 +178,41 @@ func TestSQLitePartialIndexPredicateFindsTheTopLevelWhereOnly(t *testing.T) {
 	}
 }
 
+// Each name is also a column of pragma_table_info, pragma_index_list or pragma_index_xinfo.
+func TestSQLiteTablesNamedLikePragmaColumnsKeepTheirMetadata(t *testing.T) {
+	for _, name := range []string{"type", "name", "key", "cid"} {
+		db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), name+".db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		if _, err := db.Exec(fmt.Sprintf(`create table %[1]q (a text not null, b text not null unique);
+			insert into %[1]q values ('1', 'z'), ('2', 'a');`, name)); err != nil {
+			t.Fatal(err)
+		}
+		source := NewSQLiteSource(db, 5)
+		ctx := context.Background()
+		data, err := source.QueryTable(ctx, nil, name, QueryOpts{Limit: 10})
+		if err != nil {
+			t.Fatalf("%s: QueryTable: %v", name, err)
+		}
+		if len(data.Columns) != 2 || data.Columns[0].Name != "a" || data.Columns[1].Name != "b" {
+			t.Errorf("%s: columns = %v", name, data.Columns)
+		}
+		// No primary key, so the unique column b is the tie-break key.
+		if len(data.Rows) != 2 || data.Rows[0]["b"] == nil || *data.Rows[0]["b"] != "a" {
+			t.Errorf("%s: first row not ordered by the unique key", name)
+		}
+		s, err := source.Structure(ctx, nil, name)
+		if err != nil {
+			t.Fatalf("%s: Structure: %v", name, err)
+		}
+		if len(s.Constraints.Unique) != 1 {
+			t.Errorf("%s: unique constraints = %v", name, s.Constraints.Unique)
+		}
+	}
+}
+
 func TestSQLiteStructureReportsIndexesPartialPredicateUniqueAndFKActions(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "structure.db"))
 	if err != nil {

@@ -412,10 +412,9 @@ impl PgPoolSource {
         table: &ReadableTable,
     ) -> Result<TableMeta, DbError> {
         // information_schema.columns drives the list (column privileges, order);
-        // pg_attribute adds the full type spelling, comment and collation, keyed
-        // by attnum, which can diverge from ordinal_position after a drop. The
-        // default collation (oid 100) is left out: it yields to an explicit one
-        // in a comparison, so it never clashes.
+        // pg_attribute, joined by column name, adds the full type spelling,
+        // comment and collation. The default collation (oid 100) is left out:
+        // it yields to an explicit one in a comparison, so it never clashes.
         let columns = sqlx::query_as::<
             _,
             (
@@ -908,6 +907,7 @@ impl DbSource for PgPoolSource {
                and con.confrelid = $1 \
                and rc.relkind = 'r' \
                and has_table_privilege(con.conrelid, 'SELECT') \
+               and has_schema_privilege(rc.relnamespace, 'USAGE') \
              order by rn.nspname, rc.relname, con.conname, k.n",
         )
         .bind(target_oid)

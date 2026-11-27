@@ -75,20 +75,19 @@ impl SqliteSource {
         })
         .await
     }
+}
 
-    /// `PRAGMA` takes no bound parameters, so the table name is quoted into the call.
-    async fn allowed_columns(&self, table: &Ident) -> Result<Vec<String>, DbError> {
-        let table = quote_ident(table);
-        self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-            let rows = sqlx::query_as::<_, (i64, String)>(sqlx::AssertSqlSafe(format!(
-                "select cid, name from pragma_table_info({table}) order by cid"
-            )))
-            .fetch_all(&mut *conn)
-            .await?;
-            Ok(rows.into_iter().map(|(_, name)| name).collect())
-        })
-        .await
-    }
+async fn allowed_columns_on(
+    conn: &mut sqlx::SqliteConnection,
+    table: &Ident,
+) -> Result<Vec<String>, DbError> {
+    let rows = sqlx::query_as::<_, (i64, String)>(
+        "select cid, name from pragma_table_info(?) order by cid",
+    )
+    .bind(table.as_str())
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.into_iter().map(|(_, name)| name).collect())
 }
 
 async fn allowed_tables_on(conn: &mut sqlx::SqliteConnection) -> Result<Vec<Ident>, DbError> {
@@ -109,32 +108,32 @@ async fn key_metadata_on(
     conn: &mut sqlx::SqliteConnection,
     table: &Ident,
 ) -> Result<(Vec<String>, HashMap<String, ColumnRef>), DbError> {
-    let table = quote_ident(table);
-    let pk_columns = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
-        "select name from pragma_table_info({table}) where pk > 0 order by pk"
-    )))
+    let table = table.as_str();
+    let pk_columns = sqlx::query_scalar::<_, String>(
+        "select name from pragma_table_info(?) where pk > 0 order by pk",
+    )
+    .bind(table)
     .fetch_all(&mut *conn)
     .await?;
 
     // (id, seq, table, from, to) — `id` groups columns belonging to
     // the same constraint (composite FKs share an id). The quoted
     // "table"/"from"/"to" are pragma_foreign_key_list's own fixed
-    // output column names (SQL keywords needing escape), not the
-    // caller-supplied table.
+    // output column names (SQL keywords needing escape).
     //
     // `REFERENCES parent` shorthand leaves `to` NULL; `ppk` resolves
     // it by position against the parent's PK, correlated per FK row
     // since each can reference a different parent — unlike
     // `referenced_by`'s single bound parent (docs/adapter-decisions.md §5.4.1).
-    let fks =
-        sqlx::query_as::<_, (i64, i64, String, String, String)>(sqlx::AssertSqlSafe(format!(
-            "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", \
-                    coalesce(fkl.\"to\", ppk.name, 'rowid') \
-             from pragma_foreign_key_list({table}) fkl \
-             left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1"
-        )))
-        .fetch_all(&mut *conn)
-        .await?;
+    let fks = sqlx::query_as::<_, (i64, i64, String, String, String)>(
+        "select fkl.id, fkl.seq, fkl.\"table\", fkl.\"from\", \
+                coalesce(fkl.\"to\", ppk.name, 'rowid') \
+         from pragma_foreign_key_list(?) fkl \
+         left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1",
+    )
+    .bind(table)
+    .fetch_all(&mut *conn)
+    .await?;
     let mut by_constraint: HashMap<i64, Vec<(String, String, String)>> = HashMap::new();
     for (id, _seq, ref_table, from, to) in fks {
         by_constraint
@@ -284,10 +283,10 @@ async fn table_meta(
     conn: &mut sqlx::SqliteConnection,
     table: &Ident,
 ) -> Result<TableMeta, DbError> {
-    let quoted = quote_ident(table);
-    let columns = sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(format!(
-        "select cid, name, type from pragma_table_info({quoted}) order by cid"
-    )))
+    let columns = sqlx::query_as::<_, (i64, String, String)>(
+        "select cid, name, type from pragma_table_info(?) order by cid",
+    )
+    .bind(table.as_str())
     .fetch_all(&mut *conn)
     .await?;
     let (pk_columns, fk_columns) = key_metadata_on(conn, table).await?;
@@ -386,50 +385,48 @@ impl DbSource for SqliteSource {
         opts: QueryOpts,
     ) -> Result<TableData, DbError> {
         check_schema(schema)?;
-        let tables = self.allowed_tables().await?;
-        let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
-
-        // The join route's lookup, so both routes report the same columns; its
-        // names are the live catalog's, so they also serve as the allow-list.
-        let meta_table = table.clone();
-        let meta = self
-            .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
-                table_meta(conn, &meta_table).await
-            })
-            .await?;
-        let column_names: Vec<Ident> = meta.columns.iter().map(|c| c.name.clone()).collect();
-        let sort = opts
-            .sort
-            .as_deref()
-            .map(|requested| Ident::find_in(&column_names, requested, NotAllowedKind::Column))
-            .transpose()?;
-
-        let (where_clause, filter_values) = match &opts.filter {
-            Some(filter) => join::table_where_clause(filter, &meta, &DIALECT)?,
-            None => (String::new(), Vec::new()),
-        };
-
-        let select_list = column_names
-            .iter()
-            .map(|c| format!("CAST({} AS TEXT)", quote_ident(c)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident);
-        let columns: Vec<ColumnInfo> = meta.columns.into_iter().map(ColumnInfo::from).collect();
-        let quoted_table = quote_ident(table);
-        let sql = format!(
-            "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
-        );
-
-        let limit = opts.limit as i64;
-        let offset = opts.offset as i64;
+        // One connection for the whole operation (`spec/protocol.md` §1).
         let (rows, columns) = self
             .bounded(opts.timeout_secs, async move |conn| {
+                let tables = allowed_tables_on(conn).await?;
+                let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
+                // The join route's lookup, so both routes report the same columns;
+                // its names are the live catalog's, so they also serve as the
+                // allow-list.
+                let meta = table_meta(conn, table).await?;
+                let column_names: Vec<Ident> =
+                    meta.columns.iter().map(|c| c.name.clone()).collect();
+                let sort = opts
+                    .sort
+                    .as_deref()
+                    .map(|requested| {
+                        Ident::find_in(&column_names, requested, NotAllowedKind::Column)
+                    })
+                    .transpose()?;
+
+                let (where_clause, filter_values) = match &opts.filter {
+                    Some(filter) => join::table_where_clause(filter, &meta, &DIALECT)?,
+                    None => (String::new(), Vec::new()),
+                };
+
+                let select_list = column_names
+                    .iter()
+                    .map(|c| format!("CAST({} AS TEXT)", quote_ident(c)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let order_clause = table_order_clause(&meta, sort, opts.descending, quote_ident);
+                let quoted_table = quote_ident(table);
+                let sql = format!(
+                    "select {select_list} from {quoted_table}{where_clause}{order_clause} limit ? offset ?"
+                );
+                let columns: Vec<ColumnInfo> =
+                    meta.columns.into_iter().map(ColumnInfo::from).collect();
+
                 let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
                 for value in &filter_values {
                     query = query.bind(value);
                 }
-                query = query.bind(limit).bind(offset);
+                query = query.bind(opts.limit as i64).bind(opts.offset as i64);
                 let sqlite_rows = query.fetch_all(&mut *conn).await?;
 
                 let rows = sqlite_rows
@@ -507,9 +504,13 @@ impl DbSource for SqliteSource {
         column: &str,
     ) -> Result<Vec<(String, f32)>, DbError> {
         check_schema(schema)?;
-        let tables = self.allowed_tables().await?;
-        let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
-        let columns = self.allowed_columns(table).await?;
+        let columns = self
+            .bounded(CATALOG_TIMEOUT_SECS, async |conn| {
+                let tables = allowed_tables_on(conn).await?;
+                let table = Ident::find_in(&tables, table, NotAllowedKind::Table)?;
+                allowed_columns_on(conn, table).await
+            })
+            .await?;
         columns
             .iter()
             .find(|c| c.as_str() == column)
@@ -529,13 +530,6 @@ impl DbSource for SqliteSource {
         table: &str,
     ) -> Result<Vec<ReferencedBy>, DbError> {
         check_schema(schema)?;
-        let allowed = self.allowed_tables().await?;
-        if !allowed.iter().any(|t| t.as_str() == table) {
-            return Err(DbError::not_allowed(
-                NotAllowedKind::Table,
-                format!("table {table:?}"),
-            ));
-        }
         let table = table.to_string();
 
         // No reverse-FK index and no `information_schema`: walk every
@@ -558,6 +552,8 @@ impl DbSource for SqliteSource {
         // implicit rowid.
         let rows = self
             .bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+                let allowed = allowed_tables_on(conn).await?;
+                Ident::find_in(&allowed, &table, NotAllowedKind::Table)?;
                 let rows = sqlx::query_as::<_, (String, i64, String, String)>(sqlx::AssertSqlSafe(
                     "select m.name, fkl.id, fkl.\"from\", \
                             coalesce(fkl.\"to\", ppk.name, 'rowid') \
@@ -594,24 +590,19 @@ impl DbSource for SqliteSource {
 
     async fn structure(&self, schema: Option<&str>, table: &str) -> Result<Structure, DbError> {
         check_schema(schema)?;
-        let allowed = self.allowed_tables().await?;
-        let table = Ident::find_in(&allowed, table, NotAllowedKind::Table)?;
-        // PRAGMA table-valued functions take the table as a column-reference argument, so it is quoted, not bound.
-        let quoted = quote_ident(table);
-        let table = table.as_str().to_string();
-
         self.bounded(CATALOG_TIMEOUT_SECS, async move |conn| {
+            let allowed = allowed_tables_on(conn).await?;
+            let table = Ident::find_in(&allowed, table, NotAllowedKind::Table)?.as_str();
             // `key = 1` drops the trailing rowid/auxiliary entries. An
             // expression key part has a NULL `name` and no recoverable text.
             let index_rows = sqlx::query_as::<_, (String, i64, String, i64, Option<String>)>(
-                sqlx::AssertSqlSafe(format!(
-                    "select il.name, il.\"unique\", il.origin, il.partial, ix.name \
-                     from pragma_index_list({quoted}) il \
-                     join pragma_index_xinfo(il.name) ix \
-                     where ix.key = 1 \
-                     order by il.name, ix.seqno"
-                )),
+                "select il.name, il.\"unique\", il.origin, il.partial, ix.name \
+                 from pragma_index_list(?) il \
+                 join pragma_index_xinfo(il.name) ix \
+                 where ix.key = 1 \
+                 order by il.name, ix.seqno",
             )
+            .bind(table)
             .fetch_all(&mut *conn)
             .await?;
 
@@ -619,7 +610,7 @@ impl DbSource for SqliteSource {
                 "select name, sql from sqlite_master where type = 'index' and tbl_name = ?"
                     .to_string(),
             ))
-            .bind(&table)
+            .bind(table)
             .fetch_all(&mut *conn)
             .await?;
             let sql_of: HashMap<String, String> = sql_rows
@@ -663,9 +654,10 @@ impl DbSource for SqliteSource {
                 })
                 .collect();
 
-            let pk_columns = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
-                "select name from pragma_table_info({quoted}) where pk > 0 order by pk"
-            )))
+            let pk_columns = sqlx::query_scalar::<_, String>(
+                "select name from pragma_table_info(?) where pk > 0 order by pk",
+            )
+            .bind(table)
             .fetch_all(&mut *conn)
             .await?;
             let primary_key = (!pk_columns.is_empty()).then_some(ConstraintPk {
@@ -677,15 +669,14 @@ impl DbSource for SqliteSource {
             // it from the parent's primary key (`docs/adapter-decisions.md`
             // §5.4.1).
             let fk_rows = sqlx::query_as::<_, (i64, String, String, String, String, String)>(
-                sqlx::AssertSqlSafe(format!(
-                    "select fkl.id, fkl.\"table\", fkl.\"from\", \
-                            coalesce(fkl.\"to\", ppk.name, 'rowid'), \
-                            fkl.on_delete, fkl.on_update \
-                     from pragma_foreign_key_list({quoted}) fkl \
-                     left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1 \
-                     order by fkl.id, fkl.seq"
-                )),
+                "select fkl.id, fkl.\"table\", fkl.\"from\", \
+                        coalesce(fkl.\"to\", ppk.name, 'rowid'), \
+                        fkl.on_delete, fkl.on_update \
+                 from pragma_foreign_key_list(?) fkl \
+                 left join pragma_table_info(fkl.\"table\") ppk on ppk.pk = fkl.seq + 1 \
+                 order by fkl.id, fkl.seq",
             )
+            .bind(table)
             .fetch_all(&mut *conn)
             .await?;
             let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
@@ -727,18 +718,18 @@ async fn unique_keys_on(
     table: &Ident,
     pk_in_key_order: &[String],
 ) -> Result<Vec<UniqueKey>, DbError> {
-    let table = quote_ident(table);
-    let rows =
-        sqlx::query_as::<_, (String, Option<String>, Option<i64>)>(sqlx::AssertSqlSafe(format!(
-            "select il.name, ti.name, ti.\"notnull\" \
-             from pragma_index_list({table}) il \
-             join pragma_index_xinfo(il.name) ii \
-             left join pragma_table_info({table}) ti on ti.cid = ii.cid \
-             where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 \
-             order by il.name, ii.seqno"
-        )))
-        .fetch_all(&mut *conn)
-        .await?;
+    let rows = sqlx::query_as::<_, (String, Option<String>, Option<i64>)>(
+        "select il.name, ti.name, ti.\"notnull\" \
+         from pragma_index_list(?) il \
+         join pragma_index_xinfo(il.name) ii \
+         left join pragma_table_info(?) ti on ti.cid = ii.cid \
+         where il.\"unique\" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1 \
+         order by il.name, ii.seqno",
+    )
+    .bind(table.as_str())
+    .bind(table.as_str())
+    .fetch_all(&mut *conn)
+    .await?;
     let mut keys = group_unique_keys(rows.into_iter().map(|(index, column, not_null)| KeyPart {
         index,
         primary: false,
@@ -1018,6 +1009,37 @@ mod tests {
             pets.columns[0].to, "id",
             "an unnamed parent column must resolve to users' primary key, not NULL/empty"
         );
+    }
+
+    #[tokio::test]
+    async fn tables_named_like_pragma_columns_keep_their_metadata() {
+        let opts = || QueryOpts {
+            limit: 10,
+            offset: 0,
+            sort: None,
+            descending: false,
+            timeout_secs: 5,
+            filter: None,
+        };
+        // Each name is also a column of pragma_table_info, pragma_index_list or pragma_index_xinfo.
+        for name in ["type", "name", "key", "cid"] {
+            let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "create table \"{name}\" (a text not null, b text not null unique); \
+                 insert into \"{name}\" values ('1', 'z'), ('2', 'a');"
+            )))
+            .execute(&pool)
+            .await
+            .unwrap();
+            let source = SqliteSource::new(pool);
+            let data = source.query_table(None, name, opts()).await.unwrap();
+            let columns: Vec<&str> = data.columns.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(columns, ["a", "b"], "{name}: columns");
+            // No primary key, so the unique column b is the tie-break key.
+            assert_eq!(data.rows[0]["b"], "a", "{name}: ordered by unique key");
+            let s = source.structure(None, name).await.unwrap();
+            assert_eq!(s.constraints.unique.len(), 1, "{name}: unique constraint");
+        }
     }
 
     #[tokio::test]

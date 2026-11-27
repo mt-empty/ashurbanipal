@@ -21,6 +21,8 @@ flate2 = "1"
 # `log`: with no tracing subscriber installed, warnings still reach a host's
 # `log` logger (env_logger and the like).
 tracing = { version = "0.1", features = ["log"] }
+# Already in the tree via sqlx/reqwest; bounds the MySQL version probe.
+tokio = { version = "1", default-features = false, features = ["time"], optional = true }
 
 [dev-dependencies]
 # Current-thread only: every `#[tokio::test]` here is single-threaded and the
@@ -40,4 +42,4 @@ postgres = ["sqlx/postgres"]
 sqlite = ["sqlx/sqlite"]
 # Off by default, same rationale as `sqlite`. See docs/adapter-decisions.md
 # for the per-clause decisions MySqlSource makes vs. the Postgres reference.
-mysql = ["sqlx/mysql"]
+mysql = ["sqlx/mysql", "dep:tokio"]

@@ -72,6 +72,14 @@ function setup() {
   return { source, sources: [{ name: "primary", source }] };
 }
 
+describe("withDefaults", () => {
+  it("falls back to the default timeout below 1 s", () => {
+    expect(withDefaults({ queryTimeoutSecs: 0 }).queryTimeoutSecs).toBe(5);
+    expect(withDefaults({ queryTimeoutSecs: -3 }).queryTimeoutSecs).toBe(5);
+    expect(withDefaults({ queryTimeoutSecs: 9 }).queryTimeoutSecs).toBe(9);
+  });
+});
+
 describe("handleApi", () => {
   it("stamps every response with the protocol and nosniff headers", async () => {
     const { sources } = setup();

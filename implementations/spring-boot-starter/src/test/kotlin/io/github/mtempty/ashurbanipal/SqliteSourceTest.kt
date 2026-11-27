@@ -52,6 +52,24 @@ class SqliteSourceTest {
         dbFile.delete()
     }
 
+    /** Each name is also a column of pragma_table_info, pragma_index_list or pragma_index_xinfo. */
+    @Test
+    fun `tables named like pragma columns keep their columns and unique key`() {
+        for (name in listOf("type", "name", "key", "cid")) {
+            dataSourceFor(
+                "create table \"$name\" (a text not null, b text not null unique)",
+                "insert into \"$name\" values ('1', 'z'), ('2', 'a')",
+            ).use { ds ->
+                val source = SqliteSource(ds, 5)
+                val data = source.queryTable(null, name, QueryOpts(10, 0, null, false, null))
+                assertEquals(listOf("a", "b"), data.columns.map { it.name }, "$name: columns")
+                // No primary key, so the unique column b is the tie-break key.
+                assertEquals("a", data.rows.first()["b"], "$name: ordered by unique key")
+                assertEquals(1, source.structure(null, name).constraints.unique.size, "$name: unique constraint")
+            }
+        }
+    }
+
     @Test
     fun `list tables and query table round trip`() {
         val ds = seededDataSource()

@@ -61,13 +61,12 @@ internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String,
         else -> ColumnClass.OTHER
     }
 
-/** Postgres [DbSource]; queryTimeout bounds catalog and data operations (`spec/protocol.md` §6). */
+/** Postgres [DbSource]; `statement_timeout` bounds catalog and data operations (`spec/protocol.md` §6). */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
+    private val queryTimeoutSecs = effectiveQueryTimeoutSecs(queryTimeoutSecs)
     override val engine = Engine.POSTGRES
 
-    private val jdbcTemplate = JdbcTemplate(dataSource).apply {
-        queryTimeout = queryTimeoutSecs
-    }
+    private val jdbcTemplate = JdbcTemplate(dataSource)
     // enforceReadOnly sends SET TRANSACTION READ ONLY itself rather than
     // trusting the driver's setReadOnly (`spec/protocol.md` §6).
     private val transactionTemplate = TransactionTemplate(
@@ -79,7 +78,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     private fun <T> inReadOnlyTransaction(action: () -> T): T =
         transactionTemplate.execute {
             // Typed filters read values in ISO form, and a cell's text must be one.
-            jdbcTemplate.execute("set local datestyle = 'ISO'")
+            // One round trip for both settings.
+            jdbcTemplate.execute("set local datestyle = 'ISO'; set local statement_timeout = '${queryTimeoutSecs}s'")
             action()
         }
             ?: throw IllegalStateException("read-only transaction did not produce a result")
@@ -344,7 +344,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
             // A filter value Postgres rejects (a bad-value SQLSTATE: a NUL byte, or a
             // value a typed comparison's cast refuses) is a 400, never a raw 500
             // (docs/adapter-decisions.md §5.4.2).
-            sqlState in BAD_VALUE_SQLSTATES && filtered ->
+            sqlState in POSTGRES_BAD_VALUE_SQLSTATES && filtered ->
                 FilterException("value invalid for this backend: ${e.mostSpecificCause.message}")
             // With a sort, an undefined function is the sort column's type having no
             // ordering operator (json, xml, geometric types).
@@ -489,6 +489,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 "  and con.confrelid = ? " +
                 "  and rc.relkind = 'r' " +
                 "  and has_table_privilege(con.conrelid, 'SELECT') " +
+                "  and has_schema_privilege(rc.relnamespace, 'USAGE') " +
                 "order by rn.nspname, rc.relname, con.conname, k.n",
             RowMapper { rs, _ ->
                 ReferencedByEntry(

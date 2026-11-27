@@ -583,6 +583,7 @@ export class PostgresSource implements DbSource {
            and con.confrelid = $1
            and rc.relkind = 'r'
            and has_table_privilege(con.conrelid, 'SELECT')
+           and has_schema_privilege(rc.relnamespace, 'USAGE')
          order by rn.nspname, rc.relname, con.conname, k.n`,
         [targetOid],
       );

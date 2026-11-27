@@ -134,6 +134,35 @@ def test_partial_index_predicate_finds_the_top_level_where_only() -> None:
     assert partial_index_predicate("CREATE INDEX i ON t(lower(a) )") is None
 
 
+@pytest.mark.parametrize("name", ["type", "name", "key", "cid"])
+def test_table_named_like_a_pragma_column_keeps_its_metadata(name: str) -> None:
+    # Each name is also a column of pragma_table_info, pragma_index_list or pragma_index_xinfo.
+    path = _tmp_sqlite_path(
+        f"""create table "{name}" (a text not null, b text not null unique);
+        insert into "{name}" values ('1', 'z'), ('2', 'a');"""
+    )
+    try:
+        source = SqliteSource(path)
+        data = source.query_table(None, name, QueryOpts(limit=10, offset=0, timeout_secs=5))
+        assert [c.name for c in data.columns] == ["a", "b"]
+        # No primary key, so the unique column b is the tie-break key.
+        assert data.rows[0]["b"] == "a"
+        assert len(source.structure(None, name).constraints.unique) == 1
+    finally:
+        Path(path).unlink()
+
+
+def test_a_file_uri_opens_the_database_read_only() -> None:
+    path = _tmp_sqlite_path("create table t (id integer primary key); insert into t values (1);")
+    try:
+        source = SqliteSource(f"file:{path}?mode=ro")
+        assert len(source.query_table(None, "t", QueryOpts(limit=10, offset=0, timeout_secs=5)).rows) == 1
+        with source._connect() as ro, pytest.raises(sqlite3.OperationalError, match="readonly"):
+            ro.execute("insert into t values (2)")
+    finally:
+        Path(path).unlink()
+
+
 def test_structure_reports_indexes_partial_predicate_unique_and_fk_actions() -> None:
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)

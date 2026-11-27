@@ -36,7 +36,7 @@ type SQLiteSource struct {
 // (catalog and data alike) by queryTimeoutSecs. db must already be opened
 // with a SQLite driver (e.g. modernc.org/sqlite).
 func NewSQLiteSource(db *sql.DB, queryTimeoutSecs int) *SQLiteSource {
-	return &SQLiteSource{db: db, timeout: time.Duration(queryTimeoutSecs) * time.Second}
+	return &SQLiteSource{db: db, timeout: time.Duration(effectiveQueryTimeoutSecs(queryTimeoutSecs)) * time.Second}
 }
 
 var _ DbSource = (*SQLiteSource)(nil)
@@ -116,7 +116,7 @@ func sqliteColumnClass(declared string) columnClass {
 func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (tableMeta, error) {
 	metaCtx, cancel := c.bounded(ctx)
 	rows, err := q.QueryContext(metaCtx,
-		fmt.Sprintf("select cid, name, type from pragma_table_info(%s) order by cid", quoteIdent(table)))
+		"select cid, name, type from pragma_table_info(?) order by cid", table)
 	if err != nil {
 		cancel()
 		return tableMeta{}, err
@@ -169,16 +169,15 @@ func (c *SQLiteSource) tableMeta(ctx context.Context, q queryer, table string) (
 func (c *SQLiteSource) uniqueKeys(ctx context.Context, q queryer, table string) ([]uniqueKey, error) {
 	keyCtx, cancel := c.bounded(ctx)
 	defer cancel()
-	t := quoteIdent(table)
-	rows, err := q.QueryContext(keyCtx, fmt.Sprintf(
-		`select '', 1, name, 1, pk from pragma_table_info(%[1]s) where pk > 0
+	rows, err := q.QueryContext(keyCtx,
+		`select '', 1, name, 1, pk from pragma_table_info(?) where pk > 0
 		 union all
 		 select il.name, 0, ti.name, ti."notnull", ii.seqno
-		 from pragma_index_list(%[1]s) il
+		 from pragma_index_list(?) il
 		 join pragma_index_xinfo(il.name) ii
-		 left join pragma_table_info(%[1]s) ti on ti.cid = ii.cid
+		 left join pragma_table_info(?) ti on ti.cid = ii.cid
 		 where il."unique" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1
-		 order by 1, 5`, t))
+		 order by 1, 5`, table, table, table)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +209,9 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 	if err := checkSchema(schema); err != nil {
 		return JoinData{}, err
 	}
-	conn, err := c.db.Conn(ctx)
+	connCtx, connCancel := c.bounded(ctx)
+	conn, err := c.db.Conn(connCtx)
+	connCancel()
 	if err != nil {
 		return JoinData{}, err
 	}
@@ -305,13 +306,24 @@ func (c *SQLiteSource) allowedTablesOn(ctx context.Context, q queryer) ([]string
 	return out, rows.Err()
 }
 
-// allowedColumns requires an allow-listed table: pragma_table_info cannot bind
-// its identifier argument (spec/protocol.md §6).
-func (c *SQLiteSource) allowedColumns(ctx context.Context, table string) ([]string, error) {
+// requireTableOn returns the catalog's spelling of an allow-listed table.
+func (c *SQLiteSource) requireTableOn(ctx context.Context, q queryer, table string) (string, error) {
+	tables, err := c.allowedTablesOn(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	realTable, ok := findExact(tables, table)
+	if !ok {
+		return "", &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	}
+	return realTable, nil
+}
+
+func (c *SQLiteSource) allowedColumnsOn(ctx context.Context, q queryer, table string) ([]string, error) {
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
-	rows, err := c.db.QueryContext(ctx,
-		fmt.Sprintf("select cid, name from pragma_table_info(%s) order by cid", quoteIdent(table)))
+	rows, err := q.QueryContext(ctx,
+		"select cid, name from pragma_table_info(?) order by cid", table)
 	if err != nil {
 		return nil, err
 	}
@@ -330,12 +342,11 @@ func (c *SQLiteSource) allowedColumns(ctx context.Context, table string) ([]stri
 
 // Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
 func (c *SQLiteSource) keyMetadata(ctx context.Context, q queryer, table string) (map[string]bool, map[string]ColumnRef, error) {
-	quoted := quoteIdent(table)
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 
 	pkRows, err := q.QueryContext(ctx,
-		fmt.Sprintf("select name, pk from pragma_table_info(%s)", quoted))
+		"select name, pk from pragma_table_info(?)", table)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -360,16 +371,16 @@ func (c *SQLiteSource) keyMetadata(ctx context.Context, q queryer, table string)
 	// (id, seq, table, from, to) — id groups columns belonging to the same
 	// constraint (composite FKs share an id). The quoted "table"/"from"/"to"
 	// are pragma_foreign_key_list's own fixed output column names (SQL
-	// keywords needing escape), not the caller-supplied table.
+	// keywords needing escape).
 	//
 	// REFERENCES parent shorthand leaves "to" NULL; ppk resolves it by
 	// position against the parent's PK, correlated per FK row since each
 	// can reference a different parent — unlike ReferencedBy's single
 	// bound parent (docs/adapter-decisions.md §5.4.1).
 	fkRows, err := q.QueryContext(ctx,
-		fmt.Sprintf(`select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid')
-		 from pragma_foreign_key_list(%s) fkl
-		 left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`, quoted))
+		`select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid')
+		 from pragma_foreign_key_list(?) fkl
+		 left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`, table)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -448,18 +459,22 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	if err := checkSchema(schema); err != nil {
 		return TableData{}, err
 	}
-	tables, err := c.allowedTables(ctx)
+	// One connection for the whole operation (spec/protocol.md §1).
+	connCtx, connCancel := c.bounded(ctx)
+	conn, err := c.db.Conn(connCtx)
+	connCancel()
 	if err != nil {
 		return TableData{}, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	defer conn.Close()
+	realTable, err := c.requireTableOn(ctx, conn, table)
+	if err != nil {
+		return TableData{}, err
 	}
 
 	// The join route's lookup, so both routes report the same columns; its
 	// names are the live catalog's, so they also serve as the allow-list.
-	meta, err := c.tableMeta(ctx, c.db, realTable)
+	meta, err := c.tableMeta(ctx, conn, realTable)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -492,7 +507,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	orderClause := tableOrderClause(meta, sort, opts.Descending, quoteIdent)
 
 	// Identifiers spliced here are schema-validated (realTable via
-	// allowedTables, columns via allowedColumns, sort via the findExact
+	// requireTableOn, columns via tableMeta, sort via the findExact
 	// check above, filter columns via tableWhereClause's own
 	// allow-list check); every value is a bound ? parameter.
 	query := fmt.Sprintf("select %s from %s%s%s limit ? offset ?",
@@ -506,7 +521,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 
 	queryCtx, queryCancel := c.bounded(ctx)
 	defer queryCancel()
-	rows, err := c.db.QueryContext(queryCtx, query, args...)
+	rows, err := conn.QueryContext(queryCtx, query, args...)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -549,15 +564,19 @@ func (c *SQLiteSource) CommonValues(ctx context.Context, schema *string, table, 
 	if err := checkSchema(schema); err != nil {
 		return nil, err
 	}
-	tables, err := c.allowedTables(ctx)
+	// One connection for the whole operation (spec/protocol.md §1).
+	connCtx, connCancel := c.bounded(ctx)
+	conn, err := c.db.Conn(connCtx)
+	connCancel()
 	if err != nil {
 		return nil, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	defer conn.Close()
+	realTable, err := c.requireTableOn(ctx, conn, table)
+	if err != nil {
+		return nil, err
 	}
-	columns, err := c.allowedColumns(ctx, realTable)
+	columns, err := c.allowedColumnsOn(ctx, conn, realTable)
 	if err != nil {
 		return nil, err
 	}
@@ -575,12 +594,16 @@ func (c *SQLiteSource) ReferencedBy(ctx context.Context, schema *string, table s
 	if err := checkSchema(schema); err != nil {
 		return nil, err
 	}
-	tables, err := c.allowedTables(ctx)
+	// One connection for the whole operation (spec/protocol.md §1).
+	connCtx, connCancel := c.bounded(ctx)
+	conn, err := c.db.Conn(connCtx)
+	connCancel()
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := findExact(tables, table); !ok {
-		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	defer conn.Close()
+	if _, err := c.requireTableOn(ctx, conn, table); err != nil {
+		return nil, err
 	}
 
 	qctx, cancel := c.bounded(ctx)
@@ -604,7 +627,7 @@ func (c *SQLiteSource) ReferencedBy(ctx context.Context, schema *string, table s
 	// PK, so this pairing holds for composite keys too. The 'rowid'
 	// fallback covers a parent with no declared primary key, where
 	// SQLite's parent key is the implicit rowid.
-	rows, err := c.db.QueryContext(qctx,
+	rows, err := conn.QueryContext(qctx,
 		`select m.name, fkl.id, fkl."from", coalesce(fkl."to", ppk.name, 'rowid')
 		 from sqlite_master m
 		 join pragma_foreign_key_list(m.name) fkl
@@ -686,27 +709,30 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 	if err := checkSchema(schema); err != nil {
 		return Structure{}, err
 	}
-	tables, err := c.allowedTables(ctx)
+	// One connection for the whole operation (spec/protocol.md §1).
+	connCtx, connCancel := c.bounded(ctx)
+	conn, err := c.db.Conn(connCtx)
+	connCancel()
 	if err != nil {
 		return Structure{}, err
 	}
-	if _, ok := findExact(tables, table); !ok {
-		return Structure{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	defer conn.Close()
+	if _, err := c.requireTableOn(ctx, conn, table); err != nil {
+		return Structure{}, err
 	}
 
 	qctx, cancel := c.bounded(ctx)
 	defer cancel()
 	out := newStructure()
-	quoted := quoteIdent(table)
 
 	// key = 1 drops trailing rowid/auxiliary entries. An expression key
 	// part has a NULL name and no recoverable text.
-	rows, err := c.db.QueryContext(qctx,
-		fmt.Sprintf(`select il.name, il."unique", il.origin, il.partial, ix.name
-		 from pragma_index_list(%s) il
+	rows, err := conn.QueryContext(qctx,
+		`select il.name, il."unique", il.origin, il.partial, ix.name
+		 from pragma_index_list(?) il
 		 join pragma_index_xinfo(il.name) ix
 		 where ix.key = 1
-		 order by il.name, ix.seqno`, quoted))
+		 order by il.name, ix.seqno`, table)
 	if err != nil {
 		return Structure{}, err
 	}
@@ -744,7 +770,7 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 		return Structure{}, err
 	}
 
-	rows, err = c.db.QueryContext(qctx,
+	rows, err = conn.QueryContext(qctx,
 		`select name, sql from sqlite_master where type = 'index' and tbl_name = ?`, table)
 	if err != nil {
 		return Structure{}, err
@@ -782,8 +808,8 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 		}
 	}
 
-	rows, err = c.db.QueryContext(qctx,
-		fmt.Sprintf(`select name from pragma_table_info(%s) where pk > 0 order by pk`, quoted))
+	rows, err = conn.QueryContext(qctx,
+		`select name from pragma_table_info(?) where pk > 0 order by pk`, table)
 	if err != nil {
 		return Structure{}, err
 	}
@@ -807,12 +833,12 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 
 	// "to" is NULL for REFERENCES parent shorthand; ppk resolves it from the
 	// parent's primary key (docs/adapter-decisions.md §5.4.1).
-	rows, err = c.db.QueryContext(qctx,
-		fmt.Sprintf(`select fkl.id, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid'),
+	rows, err = conn.QueryContext(qctx,
+		`select fkl.id, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid'),
 		        fkl.on_delete, fkl.on_update
-		 from pragma_foreign_key_list(%s) fkl
+		 from pragma_foreign_key_list(?) fkl
 		 left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1
-		 order by fkl.id, fkl.seq`, quoted))
+		 order by fkl.id, fkl.seq`, table)
 	if err != nil {
 		return Structure{}, err
 	}

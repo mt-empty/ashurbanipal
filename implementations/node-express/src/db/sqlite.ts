@@ -122,12 +122,9 @@ async function allowedTables(db: Database, timeoutMs: number): Promise<string[]>
   return bounded(db, timeoutMs, () => allowedTablesUnbounded(db));
 }
 
-// PRAGMA cannot bind table names; callers supply an allow-listed table
-// (spec/protocol.md §6).
 async function allowedColumns(db: Database, table: string, timeoutMs: number): Promise<string[]> {
-  const quoted = quoteIdent(table);
   const rows = await bounded(db, timeoutMs, () =>
-    dbAll<{ cid: number; name: string }>(db, `select cid, name from pragma_table_info(${quoted}) order by cid`),
+    dbAll<{ cid: number; name: string }>(db, "select cid, name from pragma_table_info(?) order by cid", [table]),
   );
   return rows.map((r) => r.name);
 }
@@ -138,16 +135,15 @@ async function keyMetadata(
   db: Database,
   table: string,
 ): Promise<{ pkColumns: Set<string>; fkColumns: Map<string, ColumnRef> }> {
-  const quoted = quoteIdent(table);
   const cols = await dbAll<{ cid: number; name: string; pk: number }>(
     db,
-    `select cid, name, pk from pragma_table_info(${quoted}) order by cid`,
+    "select cid, name, pk from pragma_table_info(?) order by cid",
+    [table],
   );
   // (id, seq, table, from, to) — `id` groups columns belonging to the
   // same constraint (composite FKs share an id). The quoted
   // "table"/"from"/"to" are pragma_foreign_key_list's own fixed output
-  // column names (SQL keywords needing escape), not the caller-supplied
-  // table.
+  // column names (SQL keywords needing escape).
   //
   // "REFERENCES parent" shorthand leaves "to" NULL; ppk resolves it by
   // position against the parent's PK, correlated per FK row since each
@@ -156,8 +152,9 @@ async function keyMetadata(
   const fks = await dbAll<{ id: number; seq: number; table: string; from: string; to: string }>(
     db,
     `select fkl.id, fkl.seq, fkl."table", fkl."from", coalesce(fkl."to", ppk.name, 'rowid') as "to"
-     from pragma_foreign_key_list(${quoted}) fkl
+     from pragma_foreign_key_list(?) fkl
      left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1`,
+    [table],
   );
 
   const pkColumns = new Set(cols.filter((c) => c.pk > 0).map((c) => c.name));
@@ -226,11 +223,11 @@ export function sqliteColumnClass(declared: string): ColumnClass {
   return { kind: "number" };
 }
 
-// `table` must already be allow-listed: it is spliced into the pragma call.
 async function tableMeta(db: Database, table: string): Promise<TableMeta> {
   const declared = await dbAll<{ cid: number; name: string; type: string }>(
     db,
-    `select cid, name, type from pragma_table_info(${quoteIdent(table)}) order by cid`,
+    "select cid, name, type from pragma_table_info(?) order by cid",
+    [table],
   );
   const { pkColumns, fkColumns } = await keyMetadata(db, table);
   const columns = declared.map((ct): ColMeta => {
@@ -256,20 +253,19 @@ async function tableMeta(db: Database, table: string): Promise<TableMeta> {
 
 // The primary key (an INTEGER PRIMARY KEY has no index row) and every unique,
 // non-partial index whose key columns are all NOT NULL table columns. An
-// expression key part has no pragma_table_info row. `table` must already be
-// allow-listed.
+// expression key part has no pragma_table_info row.
 async function uniqueKeys(db: Database, table: string): Promise<UniqueKey[]> {
-  const t = quoteIdent(table);
   const rows = await dbAll<{ idx: string; is_pk: number; col: string | null; not_null: number | null }>(
     db,
-    `select '' as idx, 1 as is_pk, name as col, 1 as not_null, pk as pos from pragma_table_info(${t}) where pk > 0
+    `select '' as idx, 1 as is_pk, name as col, 1 as not_null, pk as pos from pragma_table_info(?) where pk > 0
      union all
      select il.name, 0, ti.name, ti."notnull", ii.seqno
-     from pragma_index_list(${t}) il
+     from pragma_index_list(?) il
      join pragma_index_xinfo(il.name) ii
-     left join pragma_table_info(${t}) ti on ti.cid = ii.cid
+     left join pragma_table_info(?) ti on ti.cid = ii.cid
      where il."unique" = 1 and il.partial = 0 and il.origin <> 'pk' and ii.key = 1
      order by 1, 5`,
+    [table, table, table],
   );
   return groupUniqueKeys(
     rows.map((r) => ({
@@ -475,9 +471,6 @@ export class SqliteSource implements DbSource {
       throw new NotAllowedError(`table "${table}"`, "table");
     }
     const out = emptyStructure();
-    // The validated name is quoted into the pragma's table-valued-function
-    // argument, never bound (pragma functions cannot bind it).
-    const quoted = quoteIdent(table);
 
     // key = 1 drops trailing rowid/auxiliary entries. An expression key part
     // has a NULL name and no recoverable text.
@@ -485,10 +478,11 @@ export class SqliteSource implements DbSource {
       dbAll<{ name: string; unique: number; origin: string; partial: number; col: string | null }>(
         this.db,
         `select il.name as name, il."unique" as "unique", il.origin as origin, il.partial as partial, ix.name as col
-         from pragma_index_list(${quoted}) il
+         from pragma_index_list(?) il
          join pragma_index_xinfo(il.name) ix
          where ix.key = 1
          order by il.name, ix.seqno`,
+        [table],
       ),
     );
     const sqlRows = await bounded(this.db, timeoutMs, () =>
@@ -523,7 +517,7 @@ export class SqliteSource implements DbSource {
     }
 
     const pk = await bounded(this.db, timeoutMs, () =>
-      dbAll<{ name: string }>(this.db, `select name from pragma_table_info(${quoted}) where pk > 0 order by pk`),
+      dbAll<{ name: string }>(this.db, "select name from pragma_table_info(?) where pk > 0 order by pk", [table]),
     );
     if (pk.length > 0) out.constraints.primary_key = { columns: pk.map((r) => r.name) };
 
@@ -534,9 +528,10 @@ export class SqliteSource implements DbSource {
         this.db,
         `select fkl.id as id, fkl."table" as "table", fkl."from" as "from",
                 coalesce(fkl."to", ppk.name, 'rowid') as "to", fkl.on_delete as on_delete, fkl.on_update as on_update
-         from pragma_foreign_key_list(${quoted}) fkl
+         from pragma_foreign_key_list(?) fkl
          left join pragma_table_info(fkl."table") ppk on ppk.pk = fkl.seq + 1
          order by fkl.id, fkl.seq`,
+        [table],
       ),
     );
     let lastId: number | undefined;

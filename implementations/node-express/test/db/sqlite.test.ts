@@ -172,6 +172,27 @@ describe("SqliteSource", () => {
     ]);
   });
 
+  // Each name is also a column of pragma_table_info, pragma_index_list or pragma_index_xinfo.
+  it.each(["type", "name", "key", "cid"])("a table named %s keeps its columns and unique key", async (name) => {
+    db = await new Promise<Database>((resolve, reject) => {
+      const conn = new Database(":memory:", (err) => {
+        if (err) return reject(err);
+        conn.exec(
+          `create table "${name}" (a text not null, b text not null unique);
+           insert into "${name}" values ('1', 'z'), ('2', 'a');`,
+          (execErr) => (execErr ? reject(execErr) : resolve(conn)),
+        );
+      });
+    });
+    const source = new SqliteSource(db);
+    const data = await source.queryTable(undefined, name, baseOpts, 5000);
+    expect(data.columns.map((c) => c.name)).toEqual(["a", "b"]);
+    // No primary key, so the unique column b is the tie-break key.
+    expect(data.rows[0]?.b).toBe("a");
+    const s = await source.structure(undefined, name, 5000);
+    expect(s.constraints.unique).toHaveLength(1);
+  });
+
   // Same shorthand-FK bug, forward direction: keyMetadata (which supplies
   // query_table's per-column references) shares referencedBy's pre-fix
   // bug — pragma_foreign_key_list.to is NULL for "REFERENCES parent" with

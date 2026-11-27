@@ -48,6 +48,7 @@ type MySQLSource struct {
 
 // NewMySQLSource bounds catalog and data queries (`spec/protocol.md` §6).
 func NewMySQLSource(db *sql.DB, queryTimeoutSecs int) *MySQLSource {
+	queryTimeoutSecs = effectiveQueryTimeoutSecs(queryTimeoutSecs)
 	return &MySQLSource{
 		db:         db,
 		timeoutSec: queryTimeoutSecs,

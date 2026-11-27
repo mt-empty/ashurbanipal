@@ -65,7 +65,7 @@ describeWithEnv("DATABASE_URL")("read-only transaction — postgres (live db)", 
 
 // A SELECT on a MySQL base table cannot write, so this opens the source's own
 // operation transaction and tries an INSERT in it.
-type WithTx = <T>(fn: (conn: PoolConnection) => Promise<T>) => Promise<T>;
+type WithTx = <T>(timeoutMs: number, fn: (conn: PoolConnection) => Promise<T>) => Promise<T>;
 
 function runMySqlSuite(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL"): void {
   describeWithEnv(envVar)(`read-only transaction — ${label} (live db)`, () => {
@@ -88,7 +88,9 @@ function runMySqlSuite(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_U
     it("an insert inside the operation transaction fails", async () => {
       const source = new MySqlSource(pool);
       const withTx = (source as unknown as { withTx: WithTx }).withTx.bind(source);
-      await expect(withTx((conn) => conn.query(`insert into ${SCHEMA}.audit () values ()`))).rejects.toMatchObject({
+      await expect(
+        withTx(5000, (conn) => conn.query(`insert into ${SCHEMA}.audit () values ()`)),
+      ).rejects.toMatchObject({
         sqlState: "25006",
       });
       const [rows] = await pool.query<mysql.RowDataPacket[]>(`select count(*) as n from ${SCHEMA}.audit`);

@@ -12,6 +12,12 @@ class Limits:
     max_page_size: int = 100
     query_timeout_secs: int = 5
 
+    def __post_init__(self) -> None:
+        # Below 1 s falls back to the default: 0 would disable the engine's
+        # statement timeout (`spec/protocol.md` §6).
+        if self.query_timeout_secs < 1:
+            self.query_timeout_secs = Limits.query_timeout_secs
+
 
 @dataclass
 class Instance:
