@@ -478,13 +478,62 @@ pub(crate) fn quote_ident(ident: &Ident) -> String {
     format!("\"{}\"", ident.as_str().replace('"', "\"\""))
 }
 
-/// Whether an engine's SQLSTATE reports a bad value, which in a filtered
-/// query is the filter's (`spec/protocol.md` §5.4.2).
-pub(crate) fn is_bad_value_sqlstate(code: &str) -> bool {
+/// Bounds catalog queries (`spec/protocol.md` §6).
+pub(crate) const CATALOG_TIMEOUT_SECS: u32 = 5;
+
+/// Maps a bad-value SQLSTATE to a filter error when the query bound filter
+/// values; only then is the bad value the filter's (`spec/protocol.md` §5.4.2).
+pub(crate) fn filter_value_error(
+    db: &dyn sqlx::error::DatabaseError,
+    filtered: bool,
+) -> Option<DbError> {
+    if !filtered {
+        return None;
+    }
+    let code = db.code()?;
     matches!(
-        code,
+        code.as_ref(),
         "22P02" | "22003" | "22007" | "22008" | "22021" | "22025" | "22P05"
     )
+    .then(|| DbError::FilterParse(format!("value invalid for this backend: {}", db.message())))
+}
+
+/// One result row as JSON, every column read as text; a value the driver
+/// can't decode as text becomes `"<undecodable>"`.
+pub(crate) fn row_to_json<'a, R>(
+    row: &R,
+    names: impl ExactSizeIterator<Item = &'a str>,
+) -> serde_json::Map<String, serde_json::Value>
+where
+    R: sqlx::Row,
+    usize: sqlx::ColumnIndex<R>,
+    for<'r> Option<String>: sqlx::Decode<'r, R::Database> + sqlx::Type<R::Database>,
+{
+    let mut map = serde_json::Map::with_capacity(names.len());
+    for (i, name) in names.enumerate() {
+        let value = match row.try_get::<Option<String>, _>(i) {
+            Ok(Some(text)) => serde_json::Value::String(text),
+            Ok(None) => serde_json::Value::Null,
+            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
+        };
+        map.insert(name.to_string(), value);
+    }
+    map
+}
+
+/// A column's `key` and `references`; a PK column keeps its FK reference.
+pub(crate) fn column_key(
+    name: &str,
+    is_pk: bool,
+    fk_columns: &std::collections::HashMap<String, ColumnRef>,
+) -> (Option<KeyKind>, Option<ColumnRef>) {
+    let references = fk_columns.get(name).cloned();
+    let key = if is_pk {
+        Some(KeyKind::Pk)
+    } else {
+        references.as_ref().map(|_| KeyKind::Fk)
+    };
+    (key, references)
 }
 
 /// The hardcoded operator→SQL-keyword table — wire text never becomes an

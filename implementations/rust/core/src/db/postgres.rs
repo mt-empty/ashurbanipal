@@ -1,23 +1,19 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use sqlx::postgres::PgRow;
-use sqlx::{PgPool, Postgres, Row, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 
 use super::{
-    group_referenced_by, no_default_schema, quote_ident, ColumnInfo, ColumnPair, ColumnRef,
-    ConstraintCheck, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
-    Engine, Ident, IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing,
-    Structure, TableData, TableInfo,
+    column_key, filter_value_error, group_referenced_by, no_default_schema, quote_ident,
+    row_to_json, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk, ConstraintPk,
+    ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo, NotAllowedKind,
+    QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo, CATALOG_TIMEOUT_SECS,
 };
 use crate::filter::ValueForm;
 use crate::join::{
     self, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect, IlikeStyle, JoinData,
     JoinOpts, JoinSpec, TableMeta, TypedCompare, UniqueKey,
 };
-
-/// Bounds catalog queries (`spec/protocol.md` §6).
-const CATALOG_TIMEOUT_SECS: u32 = 5;
 
 /// A table `readable_table_oid_in_tx` found, named as the catalog spells it.
 struct ReadableTable {
@@ -467,13 +463,8 @@ impl PgPoolSource {
                     comment,
                     collation,
                 )| {
-                    let (key, references) = if pk_columns.contains(&name) {
-                        (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                    } else if let Some(r) = fk_columns.get(&name) {
-                        (Some(KeyKind::Fk), Some(r.clone()))
-                    } else {
-                        (None, None)
-                    };
+                    let (key, references) =
+                        column_key(&name, pk_columns.contains(&name), &fk_columns);
                     ColMeta {
                         compare: typed_compare(&data_type),
                         class: column_class(&data_type, &udt_schema, &udt_name, is_enum),
@@ -564,38 +555,18 @@ fn map_select_denied(e: sqlx::Error, table: &str, sort: Option<&str>, filtered: 
                     format!("table {table:?}"),
                 )
             }
-            Some("57014") => return DbError::QueryTimeout,
             Some("42883") => {
                 if let Some(column) = sort {
                     return DbError::Unsortable(column.to_string());
                 }
             }
-            Some(code) if filtered && super::is_bad_value_sqlstate(code) => {
-                return DbError::FilterParse(format!(
-                    "value invalid for this backend: {}",
-                    db.message()
-                ))
-            }
             _ => {}
         }
+        if let Some(err) = filter_value_error(db.as_ref(), filtered) {
+            return err;
+        }
     }
-    DbError::Sqlx(e)
-}
-
-fn row_to_json<'a>(
-    row: &PgRow,
-    names: impl ExactSizeIterator<Item = &'a str>,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(names.len());
-    for (i, name) in names.enumerate() {
-        let value = match row.try_get::<Option<String>, _>(i) {
-            Ok(Some(text)) => serde_json::Value::String(text),
-            Ok(None) => serde_json::Value::Null,
-            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
-        };
-        map.insert(name.to_string(), value);
-    }
-    map
+    DbError::from(e)
 }
 
 impl DbSource for PgPoolSource {

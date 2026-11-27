@@ -619,9 +619,3 @@ internal fun isQueryTimeout(e: Throwable): Boolean {
     }
     return false
 }
-
-internal fun readCell(rs: java.sql.ResultSet, index: Int): String? = try {
-    rs.getString(index)
-} catch (e: Exception) {
-    "<undecodable>"
-}

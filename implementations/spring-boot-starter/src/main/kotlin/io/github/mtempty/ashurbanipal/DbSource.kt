@@ -40,6 +40,10 @@ class NotAllowedException(message: String, val kind: NotAllowedKind) : RuntimeEx
  */
 internal fun quoteIdent(ident: String): String = "\"" + ident.replace("\"", "\"\"") + "\""
 
+/** The catalog's spelling of an allow-listed name; anything else is [NotAllowedException] (`spec/protocol.md` §5.2). */
+internal fun requireExact(allowed: List<String>, name: String, kind: NotAllowedKind): String =
+    allowed.find { it == name } ?: throw NotAllowedException("not allowed: ${kind.name.lowercase()} $name", kind)
+
 // `@JsonInclude(NON_NULL)` per optional field, not mapper-wide: a mapper-wide
 // NON_NULL setting would also strip null *row cell* values (Map<String,
 // String?> entries) elsewhere, which spec/protocol.md §5.4.3 requires to stay
@@ -206,3 +210,34 @@ interface DbSource {
     /** Rows from the tables a join names (`spec/protocol.md` §5.11). */
     fun queryJoin(schema: String?, spec: JoinSpec, opts: JoinOpts): JoinData
 }
+
+internal fun readCell(rs: java.sql.ResultSet, index: Int): String? = try {
+    rs.getString(index)
+} catch (e: Exception) {
+    "<undecodable>"
+}
+
+/** One result row keyed by column name, each cell read as text. */
+internal fun rowToJson(rs: java.sql.ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
+    val map = LinkedHashMap<String, String?>(columns.size)
+    for ((i, col) in columns.withIndex()) {
+        map[col.name] = readCell(rs, i + 1)
+    }
+    return map
+}
+
+internal fun bindParams(ps: java.sql.PreparedStatement, params: List<Any?>) {
+    params.forEachIndexed { i, param ->
+        when (param) {
+            is Long -> ps.setLong(i + 1, param)
+            is Int -> ps.setInt(i + 1, param)
+            is String -> ps.setString(i + 1, param)
+            null -> ps.setNull(i + 1, java.sql.Types.NULL)
+            else -> ps.setObject(i + 1, param)
+        }
+    }
+}
+
+/** A column that is both PK and FK reports `pk`. */
+internal fun columnKey(name: String, pkColumns: Collection<String>, fkColumns: Map<String, *>): String? =
+    if (name in pkColumns) "pk" else if (name in fkColumns) "fk" else null

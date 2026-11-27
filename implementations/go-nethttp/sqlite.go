@@ -268,7 +268,7 @@ func (c *SQLiteSource) QueryJoin(ctx context.Context, schema *string, spec JoinS
 		return JoinData{}, err
 	}
 	defer dataRows.Close()
-	out, hasMore, err := scanJoinRows(dataRows, plan.labels, opts.Limit)
+	out, hasMore, err := scanJoinPage(dataRows, plan.labels, opts.Limit)
 	if err != nil {
 		return JoinData{}, err
 	}
@@ -285,25 +285,10 @@ func (c *SQLiteSource) allowedTables(ctx context.Context) ([]string, error) {
 }
 
 func (c *SQLiteSource) allowedTablesOn(ctx context.Context, q queryer) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := q.QueryContext(ctx,
+	return queryStrings(ctx, q, c.timeout,
 		`select name from sqlite_master
 		 where type = 'table' and name not like 'sqlite\_%' escape '\'
 		 order by name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
 }
 
 // requireTableOn returns the catalog's spelling of an allow-listed table.
@@ -312,32 +297,12 @@ func (c *SQLiteSource) requireTableOn(ctx context.Context, q queryer, table stri
 	if err != nil {
 		return "", err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return "", &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
-	}
-	return realTable, nil
+	return requireExact(tables, table, NotAllowedTable)
 }
 
 func (c *SQLiteSource) allowedColumnsOn(ctx context.Context, q queryer, table string) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := q.QueryContext(ctx,
-		"select cid, name from pragma_table_info(?) order by cid", table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var cid int64
-		var name string
-		if err := rows.Scan(&cid, &name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
+	return queryStrings(ctx, q, c.timeout,
+		"select name from pragma_table_info(?) order by cid", table)
 }
 
 // Composite FKs are omitted rather than risk mislabeling columns (spec/protocol.md §5.4.1).
@@ -482,9 +447,9 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	columnNames := meta.columnNames()
 	var sort *string
 	if opts.Sort != nil {
-		found, ok := findExact(columnNames, *opts.Sort)
-		if !ok {
-			return TableData{}, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", *opts.Sort)}
+		found, err := requireExact(columnNames, *opts.Sort, NotAllowedColumn)
+		if err != nil {
+			return TableData{}, err
 		}
 		sort = &found
 	}
@@ -502,7 +467,7 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	for i, col := range columns {
 		selectParts[i] = fmt.Sprintf("CAST(%s AS TEXT)", quoteIdent(col.Name))
 	}
-	selectList := joinComma(selectParts)
+	selectList := strings.Join(selectParts, ", ")
 
 	orderClause := tableOrderClause(meta, sort, opts.Descending, quoteIdent)
 
@@ -527,27 +492,9 @@ func (c *SQLiteSource) QueryTable(ctx context.Context, schema *string, table str
 	}
 	defer rows.Close()
 
-	var out []map[string]*string
-	for rows.Next() {
-		cells := make([]interface{}, len(columns))
-		values := make([]cellValue, len(columns))
-		for i := range values {
-			cells[i] = &values[i]
-		}
-		if err := rows.Scan(cells...); err != nil {
-			return TableData{}, err
-		}
-		row := make(map[string]*string, len(columns))
-		for i, col := range columns {
-			row[col.Name] = values[i].asJSON()
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
+	out, err := scanLabeledRows(rows, columnNames)
+	if err != nil {
 		return TableData{}, err
-	}
-	if out == nil {
-		out = []map[string]*string{}
 	}
 
 	return TableData{
@@ -580,8 +527,8 @@ func (c *SQLiteSource) CommonValues(ctx context.Context, schema *string, table, 
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := findExact(columns, column); !ok {
-		return nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
+	if _, err := requireExact(columns, column, NotAllowedColumn); err != nil {
+		return nil, err
 	}
 	// No pg_stats equivalent to read; an empty list is the documented "no
 	// statistics available" answer (spec/protocol.md §5.5), not a live
@@ -808,22 +755,8 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 		}
 	}
 
-	rows, err = conn.QueryContext(qctx,
+	pk, err := queryStrings(qctx, conn, c.timeout,
 		`select name from pragma_table_info(?) where pk > 0 order by pk`, table)
-	if err != nil {
-		return Structure{}, err
-	}
-	var pk []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return Structure{}, err
-		}
-		pk = append(pk, name)
-	}
-	err = rows.Err()
-	rows.Close()
 	if err != nil {
 		return Structure{}, err
 	}

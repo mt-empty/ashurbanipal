@@ -26,6 +26,7 @@ import {
   type UniqueKey,
 } from "../join.js";
 import {
+  applyKeys,
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
@@ -37,6 +38,8 @@ import {
   groupReferencedBy,
   type QueryOpts,
   type ReferencedByEntry,
+  requireExact,
+  rowToJson,
   type SchemaListing,
   type Structure,
   schemaListing,
@@ -254,11 +257,7 @@ export class MySqlSource implements DbSource {
       }
       resolved = defaultDatabase;
     }
-    const real = findExact(schemas, resolved);
-    if (!real) {
-      throw new NotAllowedError(`schema "${resolved}"`, "schema");
-    }
-    return real;
+    return requireExact(schemas, resolved, "schema");
   }
 
   private async allowedTablesInTx(
@@ -447,13 +446,7 @@ export class MySqlSource implements DbSource {
       const compare = jsonColumns.has(name) ? undefined : mysqlTypedCompare(r.data_type as string);
       if (compare) col.compare = compare;
       if (r.collation_name) col.collation = r.collation_name as string;
-      if (pkColumns.has(name)) {
-        col.key = "pk";
-        if (fkColumns.has(name)) col.references = fkColumns.get(name);
-      } else if (fkColumns.has(name)) {
-        col.key = "fk";
-        col.references = fkColumns.get(name);
-      }
+      applyKeys(col, pkColumns, fkColumns);
       const comment = r.column_comment as string;
       if (comment.length > 0) col.comment = comment;
       return col;
@@ -532,23 +525,14 @@ export class MySqlSource implements DbSource {
     return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
-      const realTable = findExact(tables, table);
-      if (!realTable) {
-        throw new NotAllowedError(`table "${table}"`, "table");
-      }
+      const realTable = requireExact(tables, table, "table");
 
       // The join route's lookup, so both routes report the same columns; its
       // names are the live catalog's, so they also serve as the allow-list.
       const meta = await this.tableMeta(conn, variant, realSchema, realTable, timeoutMs);
       const columns: ColumnInfo[] = meta.columns.map(columnInfo);
       const columnNames = columns.map((c) => c.name);
-      let sort: string | undefined;
-      if (opts.sort !== undefined) {
-        sort = findExact(columnNames, opts.sort);
-        if (!sort) {
-          throw new NotAllowedError(`column "${opts.sort}"`, "column");
-        }
-      }
+      const sort = opts.sort === undefined ? undefined : requireExact(columnNames, opts.sort, "column");
 
       const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
 
@@ -568,13 +552,7 @@ export class MySqlSource implements DbSource {
           throw mapSelectDeniedMysql(err, realTable, filterValues.length > 0);
         },
       );
-      const outRows: Record<string, string | null>[] = dataRows.map((row) => {
-        const out: Record<string, string | null> = {};
-        for (const col of columns) {
-          out[col.name] = cellToJson(row[col.name]);
-        }
-        return out;
-      });
+      const outRows = dataRows.map((row: Record<string, unknown>) => rowToJson(row, columnNames));
 
       const totalSql = timedSelect(
         variant,
@@ -599,14 +577,9 @@ export class MySqlSource implements DbSource {
     return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
       const tables = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
-      const realTable = findExact(tables, table);
-      if (!realTable) {
-        throw new NotAllowedError(`table "${table}"`, "table");
-      }
+      const realTable = requireExact(tables, table, "table");
       const columnNames = await this.allowedColumnsInTx(conn, variant, realSchema, realTable, timeoutMs);
-      if (!findExact(columnNames, column)) {
-        throw new NotAllowedError(`column "${column}"`, "column");
-      }
+      requireExact(columnNames, column, "column");
       // MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
       return [];
     });
@@ -659,10 +632,7 @@ export class MySqlSource implements DbSource {
   async structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure> {
     return this.withTx(timeoutMs, async (conn, variant) => {
       const realSchema = await this.resolveSchemaInTx(conn, variant, schema, timeoutMs);
-      const allowed = await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs);
-      if (!allowed.includes(table)) {
-        throw new NotAllowedError(`table "${table}"`, "table");
-      }
+      requireExact(await this.allowedTablesInTx(conn, variant, realSchema, timeoutMs), table, "table");
       const out = emptyStructure();
 
       // MariaDB's statistics view has no expression column; MySQL 8.0.13+

@@ -1064,38 +1064,24 @@ func (p *joinPlan) columnInfos(requestSchema string) []JoinColumnInfo {
 	return out
 }
 
-// scanJoinRows reads up to limit rows keyed by label and reports whether a
-// further row exists (the query asked for limit+1).
-func scanJoinRows(rows interface {
-	Next() bool
-	Scan(...interface{}) error
-	Err() error
-}, labels []string, limit int64) ([]map[string]*string, bool, error) {
+// scanJoinPage reads a join query that fetched limit+1 rows and reports
+// whether the extra row exists, without decoding it.
+func scanJoinPage(rows rowScanner, labels []string, limit int64) ([]map[string]*string, bool, error) {
 	out := []map[string]*string{}
-	hasMore := false
 	for rows.Next() {
 		if int64(len(out)) >= limit {
-			hasMore = true
-			break
+			return out, true, nil
 		}
-		cells := make([]interface{}, len(labels))
-		values := make([]cellValue, len(labels))
-		for i := range values {
-			cells[i] = &values[i]
-		}
-		if err := rows.Scan(cells...); err != nil {
+		row, err := scanLabeledRow(rows, labels)
+		if err != nil {
 			return nil, false, err
-		}
-		row := make(map[string]*string, len(labels))
-		for i, label := range labels {
-			row[label] = values[i].asJSON()
 		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	return out, hasMore, nil
+	return out, false, nil
 }
 
 // joinKeyOf merges PK/FK metadata onto a column.

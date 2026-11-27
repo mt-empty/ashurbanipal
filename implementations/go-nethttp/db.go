@@ -3,6 +3,8 @@ package ashurbanipal
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"time"
 )
 
 // KeyKind is "pk" or "fk" — spec/protocol.md §5.4.1.
@@ -196,7 +198,7 @@ type DbSource interface {
 
 // queryer is satisfied by both *sql.DB and *sql.Tx — every backend's
 // catalog helpers accept this so the same code runs whether it's querying
-// outside a transaction or pinned to one (spec/design.md §5's "resolve
+// outside a transaction or pinned to one (docs/design.md §5's "resolve
 // once per operation" requirement).
 type queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -227,6 +229,26 @@ func newSchemaListing(schemas []string, def *string) SchemaListing {
 // default schema (spec/protocol.md §1).
 func errNoDefaultSchema() error {
 	return &NotAllowedError{Kind: NotAllowedSchema, What: "no schema given, and this connection has no default schema"}
+}
+
+// requireExact returns name's catalog spelling, or a NotAllowedError when the
+// allow-list lacks it.
+func requireExact(allowed []string, name string, kind NotAllowedKind) (string, error) {
+	if real, ok := findExact(allowed, name); ok {
+		return real, nil
+	}
+	var noun string
+	switch kind {
+	case NotAllowedSchema:
+		noun = "schema"
+	case NotAllowedTable:
+		noun = "table"
+	case NotAllowedColumn:
+		noun = "column"
+	default:
+		panic(fmt.Sprintf("requireExact called with kind %d", kind))
+	}
+	return "", &NotAllowedError{Kind: kind, What: fmt.Sprintf("%s %q", noun, name)}
 }
 
 func findExact(haystack []string, needle string) (string, bool) {
@@ -267,6 +289,45 @@ func (c *cellValue) asJSON() *string {
 	return &s
 }
 
+type rowScanner interface {
+	Next() bool
+	Scan(...interface{}) error
+	Err() error
+}
+
+// scanLabeledRow reads the current row as text cells keyed by label.
+func scanLabeledRow(rows rowScanner, labels []string) (map[string]*string, error) {
+	cells := make([]interface{}, len(labels))
+	values := make([]cellValue, len(labels))
+	for i := range values {
+		cells[i] = &values[i]
+	}
+	if err := rows.Scan(cells...); err != nil {
+		return nil, err
+	}
+	row := make(map[string]*string, len(labels))
+	for i, label := range labels {
+		row[label] = values[i].asJSON()
+	}
+	return row, nil
+}
+
+// scanLabeledRows reads every row; the query's own LIMIT bounds them.
+func scanLabeledRows(rows rowScanner, labels []string) ([]map[string]*string, error) {
+	out := []map[string]*string{}
+	for rows.Next() {
+		row, err := scanLabeledRow(rows, labels)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // groupReferencedBy merges single-pair ReferencedByEntry rows into one
 // entry per (schema, table, constraint). It relies on the caller's catalog
 // ORDER BY putting a constraint's columns adjacent — a run-length merge,
@@ -288,13 +349,39 @@ func groupReferencedBy(rows []ReferencedByEntry) []ReferencedByEntry {
 	return out
 }
 
-func joinComma(parts []string) string {
-	out := ""
-	for i, p := range parts {
-		if i > 0 {
-			out += ", "
-		}
-		out += p
+// queryStrings runs a bounded query whose rows are one text column.
+func queryStrings(ctx context.Context, q queryer, timeout time.Duration, query string, args ...any) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
 	}
-	return out
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// pickSchema resolves the requested schema, or the connection's default when
+// none is requested, against the allow-list (spec/protocol.md §5).
+func pickSchema(schemas []string, requested *string, defaultSchema func() (*string, error)) (string, error) {
+	resolved := requested
+	if resolved == nil {
+		def, err := defaultSchema()
+		if err != nil {
+			return "", err
+		}
+		if def == nil {
+			return "", errNoDefaultSchema()
+		}
+		resolved = def
+	}
+	return requireExact(schemas, *resolved, NotAllowedSchema)
 }
