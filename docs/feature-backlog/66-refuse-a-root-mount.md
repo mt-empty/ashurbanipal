@@ -1,6 +1,6 @@
 # Refuse a root mount in Flask and Spring
 
-> **Status:** DONE · **Area:** flask, spring, docs · **Ref:** branch `fix/story66-refuse-root-mount`
+> **Status:** DONE · **Area:** flask, spring, docs · **Ref:** PR #326
 
 `spec/protocol.md` §3 says `{mount}` MUST NOT be the root path, and that an
 implementation MUST refuse a root mount when it builds the router. Go and

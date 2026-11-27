@@ -80,7 +80,7 @@ Each row links its rationale doc. Status lives in that doc's
 | [58](58-supported-database-versions.md) | Supported database versions | ports, conformance, infra, docs | range in `readme.md` and `docs/adapter-decisions.md` ("Supported engine versions"); Postgres 15, MySQL 8.4, MariaDB 10.11, SQLite 3.16 |
 | [59](59-join-builder-golden-sql-fixtures.md) | Golden-SQL fixtures for the join builder | ports, conformance | `spec/fixtures/join-builder-tests.json`, run per engine in all five ports; per-engine `filter-builder-tests.json` is [60](60-per-engine-filter-builder-fixtures.md) |
 | [60](60-per-engine-filter-builder-fixtures.md) | Per-engine expectations for the filter-builder fixtures | ports, conformance | `spec/fixtures/filter-builder-tests.json` over the shared `spec/fixtures/catalogs.json`, run per engine in all five ports; follow-up to [59](59-join-builder-golden-sql-fixtures.md) |
-| [66](66-refuse-a-root-mount.md) | Refuse a root mount in Flask and Spring | flask, spring, docs | branch `fix/story66-refuse-root-mount` |
+| [66](66-refuse-a-root-mount.md) | Refuse a root mount in Flask and Spring | flask, spring, docs | PR #326 |
 
 ## Reference
 
