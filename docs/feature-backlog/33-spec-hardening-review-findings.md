@@ -28,6 +28,8 @@ Fix:
    is a new optional parameter, so v1 stands (§7). It must keep working if
    [[05-multi-column-sort]] lands.
 
+Story: [[64-cursor-paging]].
+
 ### B4 — `<undecodable>` is an in-band sentinel
 
 §5.4.3 replaces a cell that can't be decoded with the string
