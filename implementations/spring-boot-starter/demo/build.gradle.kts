@@ -1,3 +1,13 @@
+// The Spring Boot plugin's build-time commons-compress (never shipped) resolves a
+// commons-lang3 affected by GHSA-j288-q9x7-2f5v.
+buildscript {
+    dependencies {
+        constraints {
+            classpath("org.apache.commons:commons-lang3:3.18.0")
+        }
+    }
+}
+
 plugins {
     kotlin("jvm") version "2.4.21"
     kotlin("plugin.spring") version "2.4.21"
