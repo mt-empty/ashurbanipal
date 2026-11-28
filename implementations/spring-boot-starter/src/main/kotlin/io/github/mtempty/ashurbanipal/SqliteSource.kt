@@ -364,30 +364,17 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
                 listOf(table),
             ) { rs -> rs.getString(1) to rs.getString(2) }.filter { it.second != null }.toMap()
 
-            val indexes = ArrayList<IndexInfo>()
-            val partial = HashSet<String>()
-            val uniqueOrigin = ArrayList<String>()
-            for (r in indexRows) {
-                val name = r[0]!!
-                val column = r[4] ?: "<expression>"
-                val last = indexes.lastOrNull()
-                if (last != null && last.name == name) {
-                    indexes[indexes.size - 1] = last.copy(columns = last.columns + column)
-                    continue
-                }
-                if (r[2] == "u") uniqueOrigin.add(name)
-                if (r[3] != "0") partial.add(name)
-                indexes.add(IndexInfo(name, listOf(column), unique = r[1] != "0", method = "btree"))
+            val partial = indexRows.filter { it[3] != "0" }.mapTo(HashSet()) { it[0]!! }
+            val uniqueOrigin = indexRows.filter { it[2] == "u" }.mapTo(HashSet()) { it[0]!! }
+            val indexes = mergeRuns(
+                indexRows.map { r -> IndexInfo(r[0]!!, listOf(r[4] ?: "<expression>"), unique = r[1] != "0", method = "btree") },
+                { a, b -> a.name == b.name },
+                { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+            ).map { idx ->
+                val sql = sqlOf[idx.name]
+                if (idx.name in partial && sql != null) idx.copy(predicate = partialIndexPredicate(sql)) else idx
             }
-            for (i in indexes.indices) {
-                val idx = indexes[i]
-                if (idx.name in partial) {
-                    sqlOf[idx.name]?.let { indexes[i] = idx.copy(predicate = partialIndexPredicate(it)) }
-                }
-            }
-            val unique = uniqueOrigin.mapNotNull { name ->
-                indexes.find { it.name == name }?.let { ConstraintUnique(name, it.columns) }
-            }
+            val unique = indexes.filter { it.name in uniqueOrigin }.map { ConstraintUnique(it.name, it.columns) }
 
             val pk = query(conn, "select name from pragma_table_info(?) where pk > 0 order by pk", listOf(table)) { rs ->
                 rs.getString(1)
@@ -405,26 +392,19 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
                     "order by fkl.id, fkl.seq",
                 listOf(table),
             ) { rs -> (1..6).map { rs.getString(it) } }
-            val foreignKeys = ArrayList<ConstraintFk>()
-            var lastId: String? = null
-            for (r in fkRows) {
-                val pair = ColumnPair(r[2]!!, r[3]!!)
-                val last = foreignKeys.lastOrNull()
-                if (last != null && lastId == r[0]) {
-                    foreignKeys[foreignKeys.size - 1] = last.copy(columns = last.columns + pair)
-                    continue
-                }
-                lastId = r[0]
-                foreignKeys.add(
+            val foreignKeys = mergeRuns(
+                fkRows.map { r ->
                     ConstraintFk(
                         name = "fk_" + r[0],
                         table = r[1]!!,
-                        columns = listOf(pair),
+                        columns = listOf(ColumnPair(r[2]!!, r[3]!!)),
                         onDelete = r[4]!!.uppercase(),
                         onUpdate = r[5]!!.uppercase(),
-                    ),
-                )
-            }
+                    )
+                },
+                { a, b -> a.name == b.name },
+                { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+            )
             Structure(indexes, Constraints(primaryKey, unique, foreignKeys, emptyList()))
         }
     }

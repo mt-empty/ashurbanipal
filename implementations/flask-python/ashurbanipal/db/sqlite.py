@@ -63,8 +63,11 @@ from . import (
     TableData,
     TableInfo,
     column_key,
+    concat_columns,
     group_referenced_by,
+    merge_runs,
     quote_ident,
+    same_name,
     wrap_driver_errors,
 )
 
@@ -492,27 +495,27 @@ class SqliteSource(DbSource):
                 "order by il.name, ix.seqno",
                 (table,),
             )
-            partial: set[str] = set()
-            unique_origin: list[str] = []
-            for name, unique, origin, is_partial, column in cur.fetchall():
-                column = column if column is not None else "<expression>"
-                if out.indexes and out.indexes[-1].name == name:
-                    out.indexes[-1].columns.append(column)
-                    continue
-                if origin == "u":
-                    unique_origin.append(name)
-                if is_partial:
-                    partial.add(name)
-                out.indexes.append(IndexInfo(name=name, columns=[column], unique=bool(unique), method="btree"))
+            rows = cur.fetchall()
+            partial = {name for name, _, _, is_partial, _ in rows if is_partial}
+            unique_origin = {name for name, _, origin, _, _ in rows if origin == "u"}
+            indexes = [
+                IndexInfo(
+                    name=name,
+                    columns=[column if column is not None else "<expression>"],
+                    unique=bool(unique),
+                    method="btree",
+                )
+                for name, unique, _, _, column in rows
+            ]
+            out.indexes = merge_runs(indexes, same_name, concat_columns)
 
             cur.execute("select name, sql from sqlite_master where type = 'index' and tbl_name = ?", (table,))
             sql_of = {name: text for name, text in cur.fetchall() if text is not None}
             for idx in out.indexes:
                 if idx.name in partial and idx.name in sql_of:
                     idx.predicate = partial_index_predicate(sql_of[idx.name])
-            for name in unique_origin:
-                idx = next(i for i in out.indexes if i.name == name)
-                out.constraints.unique.append(ConstraintUnique(name=name, columns=list(idx.columns)))
+                if idx.name in unique_origin:
+                    out.constraints.unique.append(ConstraintUnique(name=idx.name, columns=list(idx.columns)))
 
             cur.execute("select name from pragma_table_info(?) where pk > 0 order by pk", (table,))
             pk = [row[0] for row in cur.fetchall()]
@@ -530,21 +533,15 @@ class SqliteSource(DbSource):
                 "order by fkl.id, fkl.seq",
                 (table,),
             )
-            last_id = None
-            for fk_id, ref_table, from_col, to_col, on_delete, on_update in cur.fetchall():
-                pair = ColumnPair(from_=from_col, to=to_col)
-                fks = out.constraints.foreign_keys
-                if fks and last_id == fk_id:
-                    fks[-1].columns.append(pair)
-                    continue
-                last_id = fk_id
-                fks.append(
-                    ConstraintFk(
-                        name=f"fk_{fk_id}",
-                        table=ref_table,
-                        columns=[pair],
-                        on_delete=on_delete.upper(),
-                        on_update=on_update.upper(),
-                    )
+            fks = [
+                ConstraintFk(
+                    name=f"fk_{fk_id}",
+                    table=ref_table,
+                    columns=[ColumnPair(from_=from_col, to=to_col)],
+                    on_delete=on_delete.upper(),
+                    on_update=on_update.upper(),
                 )
+                for fk_id, ref_table, from_col, to_col, on_delete, on_update in cur.fetchall()
+            ]
+            out.constraints.foreign_keys = merge_runs(fks, same_name, concat_columns)
         return out

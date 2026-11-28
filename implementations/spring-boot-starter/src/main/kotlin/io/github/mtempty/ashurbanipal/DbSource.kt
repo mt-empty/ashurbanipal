@@ -44,6 +44,14 @@ internal fun quoteIdent(ident: String): String = "\"" + ident.replace("\"", "\"\
 internal fun requireExact(allowed: List<String>, name: String, kind: NotAllowedKind): String =
     allowed.find { it == name } ?: throw NotAllowedException("not allowed: ${kind.name.lowercase()} $name", kind)
 
+/** The requested schema, or the connection's default when none is requested, checked against the allow-list (`spec/protocol.md` §5). */
+internal fun pickSchema(schemas: List<String>, requested: String?, defaultSchema: () -> String?): String {
+    val resolved = requested
+        ?: defaultSchema()
+        ?: throw NotAllowedException("no schema given, and this connection has no default schema", NotAllowedKind.SCHEMA)
+    return requireExact(schemas, resolved, NotAllowedKind.SCHEMA)
+}
+
 // `@JsonInclude(NON_NULL)` per optional field, not mapper-wide: a mapper-wide
 // NON_NULL setting would also strip null *row cell* values (Map<String,
 // String?> entries) elsewhere, which spec/protocol.md §5.4.3 requires to stay
@@ -101,38 +109,35 @@ data class ReferencedByEntry(
 )
 
 /**
- * Merges single-pair [ReferencedByEntry] rows into one entry per
- * (schema, table, constraint). Relies on the caller's catalog ORDER BY
- * putting a constraint's columns adjacent — a run-length merge, not a full
- * group-by. Each source maps its own row shape (and applies any allow-list
- * filter) before calling this.
+ * Merges each item into the run before it while `sameRun(previous, item)` holds;
+ * [merge] then folds the whole run into one entry per index or constraint.
+ * Relies on the caller's ORDER BY putting a run's rows adjacent.
  */
-internal fun groupReferencedBy(rows: List<ReferencedByEntry>): List<ReferencedByEntry> {
-    val out = ArrayList<ReferencedByEntry>()
-    // Accumulates into one mutable buffer per run instead of `copy`ing the
-    // whole immutable columns list on every additional pair (O(k) per
-    // constraint instead of O(k^2) for a k-column composite FK).
-    var pendingEntry: ReferencedByEntry? = null
-    var pendingColumns: MutableList<ColumnPair>? = null
-
-    fun flush() {
-        val entry = pendingEntry ?: return
-        out.add(entry.copy(columns = pendingColumns!!))
-    }
-
-    for (row in rows) {
-        val pending = pendingEntry
-        if (pending != null && pending.table == row.table && pending.schema == row.schema && pending.constraint == row.constraint) {
-            pendingColumns!!.addAll(row.columns)
-        } else {
-            flush()
-            pendingEntry = row
-            pendingColumns = row.columns.toMutableList()
+internal fun <T> mergeRuns(items: List<T>, sameRun: (T, T) -> Boolean, merge: (List<T>) -> T): List<T> {
+    val out = ArrayList<T>()
+    var run = ArrayList<T>()
+    for (item in items) {
+        if (run.isNotEmpty() && !sameRun(run.last(), item)) {
+            out.add(merge(run))
+            run = ArrayList()
         }
+        run.add(item)
     }
-    flush()
+    if (run.isNotEmpty()) out.add(merge(run))
     return out
 }
+
+/**
+ * Merges single-pair [ReferencedByEntry] rows into one entry per
+ * (schema, table, constraint). Each source maps its own row shape (and
+ * applies any allow-list filter) before calling this.
+ */
+internal fun groupReferencedBy(rows: List<ReferencedByEntry>): List<ReferencedByEntry> =
+    mergeRuns(
+        rows,
+        { a, b -> a.table == b.table && a.schema == b.schema && a.constraint == b.constraint },
+        { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+    )
 
 /** One index of a table (`spec/protocol.md` §5.10); `columns` are the key columns in index order, an expression entry being its expression text. */
 data class IndexInfo(

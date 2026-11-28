@@ -150,6 +150,11 @@ export interface DbSource {
   queryJoin(schema: string | undefined, spec: JoinSpec, opts: JoinOpts, timeoutMs: number): Promise<JoinData>;
 }
 
+/** Double-quotes a name by doubling embedded `"`; callers pass only names already matched against the live catalog (spec/protocol.md §6). */
+export function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
 export function findExact(haystack: string[], needle: string): string | undefined {
   return haystack.find((s) => s === needle);
 }
@@ -159,6 +164,19 @@ export function requireExact(allowed: string[], name: string, kind: "schema" | "
   const real = findExact(allowed, name);
   if (real === undefined) throw new NotAllowedError(`${kind} "${name}"`, kind);
   return real;
+}
+
+/** The requested schema, or the connection's default when none is requested, checked against the allow-list (`spec/protocol.md` §5). */
+export async function pickSchema(
+  schemas: string[],
+  requested: string | undefined,
+  defaultSchema: () => Promise<string | null>,
+): Promise<string> {
+  const resolved = requested ?? (await defaultSchema());
+  if (resolved === null) {
+    throw new NotAllowedError("no schema given, and this connection has no default schema", "schema");
+  }
+  return requireExact(schemas, resolved, "schema");
 }
 
 /** Sets a column's key and references; a PK column keeps its FK reference. */
@@ -184,22 +202,34 @@ export function schemaListing(schemas: string[], defaultSchema: string | null): 
   return { schemas, default: listed ?? null };
 }
 
-// Merges single-pair ReferencedByEntry rows into one entry per
-// (schema, table, constraint). Relies on the caller's catalog ORDER BY
-// putting a constraint's columns adjacent — a run-length merge, not a full
-// group-by. Each backend maps its own row shape (and applies any
-// allow-list filter) before calling this.
-export function groupReferencedBy(rows: ReferencedByEntry[]): ReferencedByEntry[] {
-  const out: ReferencedByEntry[] = [];
-  for (const row of rows) {
+// Merges each item into the one before it while sameRun holds, turning one
+// catalog row per column into one entry per index or constraint. Relies on
+// the caller's ORDER BY putting a run's rows adjacent.
+export function mergeRuns<T>(items: T[], sameRun: (a: T, b: T) => boolean, merge: (last: T, item: T) => void): T[] {
+  const out: T[] = [];
+  for (const item of items) {
     const last = out[out.length - 1];
-    if (last && last.table === row.table && last.schema === row.schema && last.constraint === row.constraint) {
-      last.columns.push(...row.columns);
-    } else {
-      out.push(row);
-    }
+    if (last !== undefined && sameRun(last, item)) merge(last, item);
+    else out.push(item);
   }
   return out;
+}
+
+export const sameName = (a: { name: string }, b: { name: string }): boolean => a.name === b.name;
+
+export function concatColumns<C>(last: { columns: C[] }, item: { columns: C[] }): void {
+  last.columns.push(...item.columns);
+}
+
+// Merges single-pair ReferencedByEntry rows into one entry per
+// (schema, table, constraint). Each backend maps its own row shape (and
+// applies any allow-list filter) before calling this.
+export function groupReferencedBy(rows: ReferencedByEntry[]): ReferencedByEntry[] {
+  return mergeRuns(
+    rows,
+    (a, b) => a.table === b.table && a.schema === b.schema && a.constraint === b.constraint,
+    concatColumns,
+  );
 }
 
 // Every SELECTed column is already cast to a text representation in the

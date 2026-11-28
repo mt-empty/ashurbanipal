@@ -370,26 +370,42 @@ OP_SQL: dict[str, str] = {
 }
 
 
+def merge_runs[T](items: list[T], same_run: Callable[[T, T], bool], merge: Callable[[T, T], None]) -> list[T]:
+    """Merges each item into the one before it while `same_run` holds, turning
+    one catalog row per column into one entry per index or constraint. Relies
+    on the caller's ORDER BY putting a run's rows adjacent."""
+    out: list[T] = []
+    for item in items:
+        if out and same_run(out[-1], item):
+            merge(out[-1], item)
+        else:
+            out.append(item)
+    return out
+
+
+class _Run(Protocol):
+    name: str
+    columns: list[Any]
+
+
+def same_name(a: _Run, b: _Run) -> bool:
+    return a.name == b.name
+
+
+def concat_columns(last: _Run, item: _Run) -> None:
+    last.columns.extend(item.columns)
+
+
 def group_referenced_by(rows: list[ReferencedBy]) -> list[ReferencedBy]:
     """Merges single-pair ReferencedBy rows into one entry per
-    (schema, table, constraint). Relies on the caller's catalog ORDER BY
-    putting a constraint's columns adjacent — a run-length merge, not a
-    full group-by. Each backend maps its own row shape (and applies any
-    allow-list filter) before calling this.
+    (schema, table, constraint). Each backend maps its own row shape (and
+    applies any allow-list filter) before calling this.
     """
-    out: list[ReferencedBy] = []
-    for row in rows:
-        last = out[-1] if out else None
-        if (
-            last is not None
-            and last.table == row.table
-            and last.schema == row.schema
-            and last.constraint == row.constraint
-        ):
-            last.columns.extend(row.columns)
-        else:
-            out.append(row)
-    return out
+    return merge_runs(
+        rows,
+        lambda a, b: a.table == b.table and a.schema == b.schema and a.constraint == b.constraint,
+        lambda last, row: last.columns.extend(row.columns),
+    )
 
 
 def quote_ident(ident: str) -> str:

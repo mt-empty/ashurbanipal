@@ -114,12 +114,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     private fun resolveSchema(requested: String?): String = resolveSchemaAmong(listAllowedSchemas(), requested)
 
     /** [resolveSchema] against a schema list already fetched in this transaction. */
-    private fun resolveSchemaAmong(schemas: List<String>, requested: String?): String {
-        val resolved = requested
-            ?: defaultSchema()
-            ?: throw NotAllowedException("no schema requested and this connection has no default schema", NotAllowedKind.SCHEMA)
-        return requireExact(schemas, resolved, NotAllowedKind.SCHEMA)
-    }
+    private fun resolveSchemaAmong(schemas: List<String>, requested: String?): String =
+        pickSchema(schemas, requested, ::defaultSchema)
 
     override fun listTables(schema: String?): List<TableInfo> = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
@@ -176,15 +172,15 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         ).firstOrNull() ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
     }
 
-    private fun allowedColumns(schema: String, table: String): List<String> =
-        jdbcTemplate.queryForList(
-            "select column_name from information_schema.columns " +
-                "where table_schema = ? and table_name = ? " +
-                "order by ordinal_position",
-            String::class.java,
+    /** The `data_type` of [column], which must exactly match a readable column of [table]. */
+    private fun columnType(schema: String, table: String, column: String): String =
+        jdbcTemplate.query(
+            "select column_name, data_type from information_schema.columns where table_schema = ? and table_name = ?",
+            RowMapper { rs, _ -> rs.getString(1) to rs.getString(2) },
             schema,
             table,
-        ).filterNotNull()
+        ).firstOrNull { it.first == column }?.second
+            ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
 
     /**
      * Reads `pg_constraint`, which has no privilege filter, so a role that doesn't own the table still
@@ -409,7 +405,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     private fun commonValuesInTransaction(schema: String?, table: String, column: String): List<CommonValueEntry> {
         val realSchema = resolveSchema(schema)
         val oid = readableTableOid(realSchema, table)
-        val realColumn = requireExact(allowedColumns(realSchema, table), column, NotAllowedKind.COLUMN)
+        val dataType = columnType(realSchema, table, column)
 
         // most_common_vals is anyarray; ::text::text[] reads it uniformly, and
         // NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance parent
@@ -424,18 +420,9 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
             RowMapper { rs, _ -> rs.getString(1) to rs.getFloat(2) },
             realSchema,
             table,
-            realColumn,
+            column,
             oid,
         )
-
-        val dataType = jdbcTemplate.query(
-            "select data_type from information_schema.columns " +
-                "where table_schema = ? and table_name = ? and column_name = ?",
-            RowMapper { rs, _ -> rs.getString(1) },
-            realSchema,
-            table,
-            realColumn,
-        ).firstOrNull()
 
         // boolean's array-literal text form is "t"/"f", not "true"/"false" —
         // normalize to match rowToJson's rendering.
@@ -534,15 +521,13 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
             },
             oid,
         )
-        val indexes = ArrayList<IndexInfo>()
-        for ((head, unique, column) in indexRows) {
-            val last = indexes.lastOrNull()
-            if (last != null && last.name == head[0]) {
-                indexes[indexes.size - 1] = last.copy(columns = last.columns + column)
-            } else {
-                indexes.add(IndexInfo(name = head[0]!!, columns = listOf(column), unique = unique, method = head[1]!!, predicate = head[2]))
-            }
-        }
+        val indexes = mergeRuns(
+            indexRows.map { (head, unique, column) ->
+                IndexInfo(name = head[0]!!, columns = listOf(column), unique = unique, method = head[1]!!, predicate = head[2])
+            },
+            { a, b -> a.name == b.name },
+            { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+        )
 
         // PK and UNIQUE need only conkey.
         val keyRows = jdbcTemplate.query(
@@ -556,19 +541,15 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
             oid,
         )
         var primaryKey: ConstraintPk? = null
-        val unique = ArrayList<ConstraintUnique>()
+        val uniqueRows = ArrayList<ConstraintUnique>()
         for ((kind, name, column) in keyRows) {
             if (kind == "p") {
                 primaryKey = ConstraintPk(name = name, columns = (primaryKey?.columns ?: emptyList()) + column)
             } else {
-                val last = unique.lastOrNull()
-                if (last != null && last.name == name) {
-                    unique[unique.size - 1] = last.copy(columns = last.columns + column)
-                } else {
-                    unique.add(ConstraintUnique(name, listOf(column)))
-                }
+                uniqueRows.add(ConstraintUnique(name, listOf(column)))
             }
         }
+        val unique = mergeRuns(uniqueRows, { a, b -> a.name == b.name }, { run -> run.first().copy(columns = run.flatMap { it.columns }) })
 
         // FK pairs conkey with confkey; the referenced table is confrelid.
         val fkRows = jdbcTemplate.query(
@@ -588,25 +569,20 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
             RowMapper { rs, _ -> (1..7).map { rs.getString(it) } },
             oid,
         )
-        val foreignKeys = ArrayList<ConstraintFk>()
-        for (r in fkRows) {
-            val pair = ColumnPair(r[3]!!, r[4]!!)
-            val last = foreignKeys.lastOrNull()
-            if (last != null && last.name == r[0]) {
-                foreignKeys[foreignKeys.size - 1] = last.copy(columns = last.columns + pair)
-            } else {
-                foreignKeys.add(
-                    ConstraintFk(
-                        name = r[0]!!,
-                        table = r[2]!!,
-                        schema = r[1]!!.takeIf { it != realSchema },
-                        columns = listOf(pair),
-                        onDelete = fkAction(r[5]!!),
-                        onUpdate = fkAction(r[6]!!),
-                    ),
+        val foreignKeys = mergeRuns(
+            fkRows.map { r ->
+                ConstraintFk(
+                    name = r[0]!!,
+                    table = r[2]!!,
+                    schema = r[1]!!.takeIf { it != realSchema },
+                    columns = listOf(ColumnPair(r[3]!!, r[4]!!)),
+                    onDelete = fkAction(r[5]!!),
+                    onUpdate = fkAction(r[6]!!),
                 )
-            }
-        }
+            },
+            { a, b -> a.name == b.name },
+            { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+        )
 
         val check = jdbcTemplate.query(
             "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) " +

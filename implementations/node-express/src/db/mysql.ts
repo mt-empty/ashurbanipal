@@ -32,16 +32,20 @@ import {
   type CommonValueEntry,
   type CountEntry,
   cellToJson,
+  concatColumns,
   type DbSource,
   emptyStructure,
   findExact,
   groupReferencedBy,
+  mergeRuns,
+  pickSchema,
   type QueryOpts,
   type ReferencedByEntry,
   requireExact,
   rowToJson,
   type SchemaListing,
   type Structure,
+  sameName,
   schemaListing,
   type TableData,
   type TableInfo,
@@ -247,17 +251,7 @@ export class MySqlSource implements DbSource {
     requested: string | undefined,
     timeoutMs: number,
   ): Promise<string> {
-    let resolved: string;
-    if (requested !== undefined) {
-      resolved = requested;
-    } else {
-      const defaultDatabase = await this.defaultSchemaInTx(conn, variant, timeoutMs);
-      if (defaultDatabase === null) {
-        throw new NotAllowedError("no schema requested and this connection has no default database", "schema");
-      }
-      resolved = defaultDatabase;
-    }
-    return requireExact(schemas, resolved, "schema");
+    return pickSchema(schemas, requested, () => this.defaultSchemaInTx(conn, variant, timeoutMs));
   }
 
   private async allowedTablesInTx(
@@ -651,20 +645,13 @@ export class MySqlSource implements DbSource {
         ),
         [realSchema, table],
       );
-      for (const r of indexRows) {
-        const name = r.index_name as string;
-        const last = out.indexes[out.indexes.length - 1];
-        if (last && last.name === name) {
-          last.columns.push((r.key_part as string | null) ?? "");
-          continue;
-        }
-        out.indexes.push({
-          name,
-          columns: [(r.key_part as string | null) ?? ""],
-          unique: Number(r.non_unique) === 0,
-          method: (r.index_type as string).toLowerCase(),
-        });
-      }
+      const indexes = indexRows.map((r) => ({
+        name: r.index_name as string,
+        columns: [(r.key_part as string | null) ?? ""],
+        unique: Number(r.non_unique) === 0,
+        method: (r.index_type as string).toLowerCase(),
+      }));
+      out.indexes = mergeRuns(indexes, sameName, concatColumns);
 
       const keyRows = await queryRows(
         conn,
@@ -693,10 +680,9 @@ export class MySqlSource implements DbSource {
           out.constraints.primary_key.columns.push(column);
           continue;
         }
-        const last = out.constraints.unique[out.constraints.unique.length - 1];
-        if (last && last.name === name) last.columns.push(column);
-        else out.constraints.unique.push({ name, columns: [column] });
+        out.constraints.unique.push({ name, columns: [column] });
       }
+      out.constraints.unique = mergeRuns(out.constraints.unique, sameName, concatColumns);
 
       // Read key_column_usage for the referenced table, not
       // referential_constraints, which MariaDB nulls for a role lacking
@@ -721,23 +707,15 @@ export class MySqlSource implements DbSource {
         ),
         [realSchema, table],
       );
-      for (const r of fkRows) {
-        const name = r.constraint_name as string;
-        const pair = { from: r.column_name as string, to: r.ref_column as string };
-        const last = out.constraints.foreign_keys[out.constraints.foreign_keys.length - 1];
-        if (last && last.name === name) {
-          last.columns.push(pair);
-          continue;
-        }
-        out.constraints.foreign_keys.push({
-          name,
-          table: r.ref_table as string,
-          ...(r.ref_schema === realSchema ? {} : { schema: r.ref_schema as string }),
-          columns: [pair],
-          on_delete: (r.delete_rule as string).toUpperCase(),
-          on_update: (r.update_rule as string).toUpperCase(),
-        });
-      }
+      const foreignKeys = fkRows.map((r) => ({
+        name: r.constraint_name as string,
+        table: r.ref_table as string,
+        ...(r.ref_schema === realSchema ? {} : { schema: r.ref_schema as string }),
+        columns: [{ from: r.column_name as string, to: r.ref_column as string }],
+        on_delete: (r.delete_rule as string).toUpperCase(),
+        on_update: (r.update_rule as string).toUpperCase(),
+      }));
+      out.constraints.foreign_keys = mergeRuns(foreignKeys, sameName, concatColumns);
 
       // MySQL before 8.0.16 has no check_constraints view: report [].
       const hasChecks = await queryRows(

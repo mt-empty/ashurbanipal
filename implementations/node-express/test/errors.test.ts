@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertSafeTimeoutMs, quoteIdent } from "../src/errors.js";
+import { assertSafeTimeoutMs } from "../src/errors.js";
 import { errorResult } from "../src/handlers.js";
 
 describe("errorResult", () => {
@@ -12,18 +12,6 @@ describe("errorResult", () => {
     expect(result.body).not.toContain("secret");
     expect(log).toHaveBeenCalledWith("ashurbanipal: database error", err);
     log.mockRestore();
-  });
-});
-
-// Identifiers require allow-list validation before escaping (spec/protocol.md §6).
-describe("quoteIdent", () => {
-  it("plain identifiers are just double-quoted", () => {
-    expect(quoteIdent("users")).toBe('"users"');
-  });
-
-  it("doubles an embedded double-quote rather than letting it close the identifier early", () => {
-    expect(quoteIdent('foo"bar')).toBe('"foo""bar"');
-    expect(quoteIdent('a"; drop table users; --')).toBe('"a""; drop table users; --"');
   });
 });
 

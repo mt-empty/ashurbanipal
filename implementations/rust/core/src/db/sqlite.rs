@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 use sqlx::SqlitePool;
 
 use super::{
-    column_key, group_referenced_by, quote_ident, row_to_json, ColumnInfo, ColumnPair, ColumnRef,
-    ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident,
-    IndexInfo, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData,
-    TableInfo, CATALOG_TIMEOUT_SECS,
+    column_key, group_referenced_by, merge_runs, quote_ident, row_to_json, ColumnInfo, ColumnPair,
+    ColumnRef, ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource,
+    Engine, Ident, IndexInfo, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
+    TableData, TableInfo, CATALOG_TIMEOUT_SECS,
 };
 use crate::join::{
     self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
@@ -592,41 +592,39 @@ impl DbSource for SqliteSource {
                 .filter_map(|(name, sql)| sql.map(|s| (name, s)))
                 .collect();
 
-            let mut indexes: Vec<IndexInfo> = Vec::new();
-            let mut unique_origin: Vec<String> = Vec::new();
-            for (name, unique, origin, partial, column) in index_rows {
-                let column = column.unwrap_or_else(|| "<expression>".to_string());
-                match indexes.last_mut() {
-                    Some(last) if last.name == name => last.columns.push(column),
-                    _ => {
-                        if origin == "u" {
-                            unique_origin.push(name.clone());
-                        }
-                        let predicate = if partial != 0 {
-                            sql_of
-                                .get(&name)
-                                .and_then(|sql| partial_index_predicate(sql))
-                        } else {
-                            None
-                        };
-                        indexes.push(IndexInfo {
+            // Each index with whether a UNIQUE constraint created it and whether it is partial.
+            let merged = merge_runs(
+                index_rows
+                    .into_iter()
+                    .map(|(name, unique, origin, partial, column)| {
+                        let index = IndexInfo {
                             name,
-                            columns: vec![column],
+                            columns: vec![column.unwrap_or_else(|| "<expression>".to_string())],
                             unique: unique != 0,
                             method: "btree".to_string(),
-                            predicate,
-                        });
-                    }
+                            predicate: None,
+                        };
+                        (index, origin == "u", partial != 0)
+                    }),
+                |a, b| a.0.name == b.0.name,
+                |a, b| a.0.columns.extend(b.0.columns),
+            );
+            let mut unique = Vec::new();
+            let mut indexes = Vec::new();
+            for (mut index, from_constraint, partial) in merged {
+                if partial {
+                    index.predicate = sql_of
+                        .get(&index.name)
+                        .and_then(|sql| partial_index_predicate(sql));
                 }
+                if from_constraint {
+                    unique.push(ConstraintUnique {
+                        name: index.name.clone(),
+                        columns: index.columns.clone(),
+                    });
+                }
+                indexes.push(index);
             }
-
-            let unique = unique_origin
-                .into_iter()
-                .filter_map(|name| {
-                    let columns = indexes.iter().find(|i| i.name == name)?.columns.clone();
-                    Some(ConstraintUnique { name, columns })
-                })
-                .collect();
 
             let pk_columns = sqlx::query_scalar::<_, String>(
                 "select name from pragma_table_info(?) where pk > 0 order by pk",
@@ -653,22 +651,22 @@ impl DbSource for SqliteSource {
             .bind(table)
             .fetch_all(&mut *conn)
             .await?;
-            let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
-            let mut last_id: Option<i64> = None;
-            for (id, ref_table, from, to, on_delete, on_update) in fk_rows {
-                match foreign_keys.last_mut() {
-                    Some(last) if last_id == Some(id) => last.columns.push(ColumnPair { from, to }),
-                    _ => foreign_keys.push(ConstraintFk {
-                        name: format!("fk_{id}"),
-                        table: ref_table,
-                        schema: None,
-                        columns: vec![ColumnPair { from, to }],
-                        on_delete: on_delete.to_ascii_uppercase(),
-                        on_update: on_update.to_ascii_uppercase(),
-                    }),
-                }
-                last_id = Some(id);
-            }
+            let foreign_keys = merge_runs(
+                fk_rows
+                    .into_iter()
+                    .map(
+                        |(id, ref_table, from, to, on_delete, on_update)| ConstraintFk {
+                            name: format!("fk_{id}"),
+                            table: ref_table,
+                            schema: None,
+                            columns: vec![ColumnPair { from, to }],
+                            on_delete: on_delete.to_ascii_uppercase(),
+                            on_update: on_update.to_ascii_uppercase(),
+                        },
+                    ),
+                |a, b| a.name == b.name,
+                |a, b| a.columns.extend(b.columns),
+            );
 
             Ok(Structure {
                 indexes,

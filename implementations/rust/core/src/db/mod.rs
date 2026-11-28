@@ -556,28 +556,35 @@ pub(crate) fn op_sql(op: FilterOp) -> &'static str {
     }
 }
 
-/// Merges single-`ColumnPair` `ReferencedBy` rows into one entry per
-/// `(schema, table, constraint)`. Relies on the caller's catalog `ORDER BY`
-/// putting a constraint's columns adjacent — a run-length merge, not a
-/// full group-by. Each backend maps its own row shape (and applies any
-/// allow-list filter) before calling this.
-pub(crate) fn group_referenced_by(
-    rows: impl IntoIterator<Item = ReferencedBy>,
-) -> Vec<ReferencedBy> {
-    let mut out: Vec<ReferencedBy> = Vec::new();
-    for row in rows {
+/// Merges each item into the one before it while `same_run` holds, turning
+/// one catalog row per column into one entry per index or constraint. Relies
+/// on the caller's `ORDER BY` putting a run's rows adjacent.
+pub(crate) fn merge_runs<T>(
+    items: impl IntoIterator<Item = T>,
+    same_run: impl Fn(&T, &T) -> bool,
+    merge: impl Fn(&mut T, T),
+) -> Vec<T> {
+    let mut out: Vec<T> = Vec::new();
+    for item in items {
         match out.last_mut() {
-            Some(last)
-                if last.table == row.table
-                    && last.schema == row.schema
-                    && last.constraint == row.constraint =>
-            {
-                last.columns.extend(row.columns);
-            }
-            _ => out.push(row),
+            Some(last) if same_run(last, &item) => merge(last, item),
+            _ => out.push(item),
         }
     }
     out
+}
+
+/// Merges single-`ColumnPair` `ReferencedBy` rows into one entry per
+/// `(schema, table, constraint)`. Each backend maps its own row shape (and
+/// applies any allow-list filter) before calling this.
+pub(crate) fn group_referenced_by(
+    rows: impl IntoIterator<Item = ReferencedBy>,
+) -> Vec<ReferencedBy> {
+    merge_runs(
+        rows,
+        |a, b| a.table == b.table && a.schema == b.schema && a.constraint == b.constraint,
+        |a, b| a.columns.extend(b.columns),
+    )
 }
 
 #[cfg(test)]

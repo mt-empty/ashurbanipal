@@ -1,5 +1,5 @@
 import type { Database } from "sqlite3";
-import { NotAllowedError, quoteIdent } from "../errors.js";
+import { NotAllowedError } from "../errors.js";
 import {
   BadJoinError,
   buildJoinSelect,
@@ -31,16 +31,21 @@ import {
   type CommonValueEntry,
   type CountEntry,
   cellToJson,
+  concatColumns,
   type DbSource,
   emptyStructure,
   findExact,
   groupReferencedBy,
+  type IndexInfo,
+  mergeRuns,
   type QueryOpts,
+  quoteIdent,
   type ReferencedByEntry,
   requireExact,
   rowToJson,
   type SchemaListing,
   type Structure,
+  sameName,
   schemaListing,
   type TableData,
   type TableInfo,
@@ -464,27 +469,20 @@ export class SqliteSource implements DbSource {
       ),
     );
     const sqlOf = new Map(sqlRows.map((r) => [r.name, r.sql]));
-    const partial = new Set<string>();
-    const uniqueOrigin: string[] = [];
-    for (const r of indexRows) {
-      const col = r.col ?? "<expression>";
-      const last = out.indexes[out.indexes.length - 1];
-      if (last && last.name === r.name) {
-        last.columns.push(col);
-        continue;
-      }
-      if (r.origin === "u") uniqueOrigin.push(r.name);
-      if (r.partial !== 0) partial.add(r.name);
-      out.indexes.push({ name: r.name, columns: [col], unique: r.unique !== 0, method: "btree" });
-    }
+    const partial = new Set(indexRows.filter((r) => r.partial !== 0).map((r) => r.name));
+    const uniqueOrigin = new Set(indexRows.filter((r) => r.origin === "u").map((r) => r.name));
+    const indexes = indexRows.map((r) => ({
+      name: r.name,
+      columns: [r.col ?? "<expression>"],
+      unique: r.unique !== 0,
+      method: "btree",
+    }));
+    out.indexes = mergeRuns<IndexInfo>(indexes, sameName, concatColumns);
     for (const idx of out.indexes) {
       const text = partial.has(idx.name) ? sqlOf.get(idx.name) : undefined;
       const predicate = text ? partialIndexPredicate(text) : undefined;
       if (predicate !== undefined) idx.predicate = predicate;
-    }
-    for (const name of uniqueOrigin) {
-      const idx = out.indexes.find((i) => i.name === name);
-      if (idx) out.constraints.unique.push({ name, columns: idx.columns });
+      if (uniqueOrigin.has(idx.name)) out.constraints.unique.push({ name: idx.name, columns: idx.columns });
     }
 
     const pk = await bounded(this.db, timeoutMs, () =>
@@ -505,23 +503,14 @@ export class SqliteSource implements DbSource {
         [table],
       ),
     );
-    let lastId: number | undefined;
-    for (const r of fkRows) {
-      const pair = { from: r.from, to: r.to };
-      const last = out.constraints.foreign_keys[out.constraints.foreign_keys.length - 1];
-      if (last && lastId === r.id) {
-        last.columns.push(pair);
-        continue;
-      }
-      lastId = r.id;
-      out.constraints.foreign_keys.push({
-        name: `fk_${r.id}`,
-        table: r.table,
-        columns: [pair],
-        on_delete: r.on_delete.toUpperCase(),
-        on_update: r.on_update.toUpperCase(),
-      });
-    }
+    const foreignKeys = fkRows.map((r) => ({
+      name: `fk_${r.id}`,
+      table: r.table,
+      columns: [{ from: r.from, to: r.to }],
+      on_delete: r.on_delete.toUpperCase(),
+      on_update: r.on_update.toUpperCase(),
+    }));
+    out.constraints.foreign_keys = mergeRuns(foreignKeys, sameName, concatColumns);
     return out;
   }
 }

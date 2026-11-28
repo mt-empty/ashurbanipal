@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError, quoteIdent } from "../errors.js";
+import { assertSafeTimeoutMs, mapSelectDenied, NotAllowedError } from "../errors.js";
 import {
   buildJoinSelect,
   type ColMeta,
@@ -31,15 +31,20 @@ import {
   type CommonValueEntry,
   type CountEntry,
   cellToJson,
+  concatColumns,
   type DbSource,
   emptyStructure,
   groupReferencedBy,
+  mergeRuns,
+  pickSchema,
   type QueryOpts,
+  quoteIdent,
   type ReferencedByEntry,
   requireExact,
   rowToJson,
   type SchemaListing,
   type Structure,
+  sameName,
   schemaListing,
   type TableData,
   type TableInfo,
@@ -186,17 +191,7 @@ export class PostgresSource implements DbSource {
     schemas: string[],
     requested: string | undefined,
   ): Promise<string> {
-    let resolved: string;
-    if (requested !== undefined) {
-      resolved = requested;
-    } else {
-      const defaultSchema = await this.defaultSchema(client);
-      if (defaultSchema === null) {
-        throw new NotAllowedError("no schema requested and this connection has no default schema", "schema");
-      }
-      resolved = defaultSchema;
-    }
-    return requireExact(schemas, resolved, "schema");
+    return pickSchema(schemas, requested, () => this.defaultSchema(client));
   }
 
   // Resolves table to its OID iff it's a readable base table in schema —
@@ -228,14 +223,16 @@ export class PostgresSource implements DbSource {
     return rows[0].oid;
   }
 
-  private async allowedColumns(client: PoolClient, schema: string, table: string): Promise<string[]> {
-    const { rows } = await client.query<{ column_name: string }>(
-      `select column_name from information_schema.columns
-       where table_schema = $1 and table_name = $2
-       order by ordinal_position`,
+  // The data_type of column, which must exactly match a readable column of table.
+  private async columnType(client: PoolClient, schema: string, table: string, column: string): Promise<string> {
+    const { rows } = await client.query<{ column_name: string; data_type: string }>(
+      `select column_name, data_type from information_schema.columns
+       where table_schema = $1 and table_name = $2`,
       [schema, table],
     );
-    return rows.map((r) => r.column_name);
+    const match = rows.find((r) => r.column_name === column);
+    if (match === undefined) throw new NotAllowedError(`column "${column}"`, "column");
+    return match.data_type;
   }
 
   // pg_constraint has no privilege filter, so a role that doesn't own the
@@ -496,8 +493,7 @@ export class PostgresSource implements DbSource {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const oid = await this.readableTableOid(client, realSchema, table);
-      const columnNames = await this.allowedColumns(client, realSchema, table);
-      const realColumn = requireExact(columnNames, column, "column");
+      const dataType = await this.columnType(client, realSchema, table, column);
 
       // most_common_vals is anyarray; ::text::text[] reads it uniformly, and
       // NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance parent
@@ -509,15 +505,9 @@ export class PostgresSource implements DbSource {
          where schemaname = $1 and tablename = $2 and attname = $3
            and inherited = exists (select 1 from pg_inherits where inhparent = $4)
          order by t.freq desc`,
-        [realSchema, table, realColumn, oid],
+        [realSchema, table, column, oid],
       );
-
-      const { rows: typeRows } = await client.query<{ data_type: string }>(
-        `select data_type from information_schema.columns
-         where table_schema = $1 and table_name = $2 and column_name = $3`,
-        [realSchema, table, realColumn],
-      );
-      const isBoolean = typeRows.length > 0 && typeRows[0].data_type === "boolean";
+      const isBoolean = dataType === "boolean";
 
       // boolean's array-literal text form is "t"/"f", not "true"/"false" —
       // normalize to match queryTable's rendering.
@@ -619,20 +609,14 @@ export class PostgresSource implements DbSource {
          order by ic.relname, k.n`,
         [oid],
       );
-      for (const r of indexRows.rows) {
-        const last = out.indexes[out.indexes.length - 1];
-        if (last && last.name === r.relname) {
-          last.columns.push(r.col);
-          continue;
-        }
-        out.indexes.push({
-          name: r.relname,
-          columns: [r.col],
-          unique: r.indisunique,
-          method: r.amname,
-          ...(r.predicate === null ? {} : { predicate: r.predicate }),
-        });
-      }
+      const indexes = indexRows.rows.map((r) => ({
+        name: r.relname,
+        columns: [r.col],
+        unique: r.indisunique,
+        method: r.amname,
+        ...(r.predicate === null ? {} : { predicate: r.predicate }),
+      }));
+      out.indexes = mergeRuns(indexes, sameName, concatColumns);
 
       const keyRows = await client.query<{ contype: string; conname: string; attname: string }>(
         `select con.contype::text, con.conname::text, a.attname::text
@@ -649,10 +633,9 @@ export class PostgresSource implements DbSource {
           out.constraints.primary_key.columns.push(r.attname);
           continue;
         }
-        const last = out.constraints.unique[out.constraints.unique.length - 1];
-        if (last && last.name === r.conname) last.columns.push(r.attname);
-        else out.constraints.unique.push({ name: r.conname, columns: [r.attname] });
+        out.constraints.unique.push({ name: r.conname, columns: [r.attname] });
       }
+      out.constraints.unique = mergeRuns(out.constraints.unique, sameName, concatColumns);
 
       const fkRows = await client.query<{
         conname: string;
@@ -678,21 +661,15 @@ export class PostgresSource implements DbSource {
          order by con.conname, k.n`,
         [oid],
       );
-      for (const r of fkRows.rows) {
-        const last = out.constraints.foreign_keys[out.constraints.foreign_keys.length - 1];
-        if (last && last.name === r.conname) {
-          last.columns.push({ from: r.from_col, to: r.to_col });
-          continue;
-        }
-        out.constraints.foreign_keys.push({
-          name: r.conname,
-          table: r.relname,
-          ...(r.nspname === realSchema ? {} : { schema: r.nspname }),
-          columns: [{ from: r.from_col, to: r.to_col }],
-          on_delete: fkAction(r.confdeltype),
-          on_update: fkAction(r.confupdtype),
-        });
-      }
+      const foreignKeys = fkRows.rows.map((r) => ({
+        name: r.conname,
+        table: r.relname,
+        ...(r.nspname === realSchema ? {} : { schema: r.nspname }),
+        columns: [{ from: r.from_col, to: r.to_col }],
+        on_delete: fkAction(r.confdeltype),
+        on_update: fkAction(r.confupdtype),
+      }));
+      out.constraints.foreign_keys = mergeRuns(foreignKeys, sameName, concatColumns);
 
       const checkRows = await client.query<{ conname: string; def: string }>(
         `select con.conname::text, pg_get_expr(con.conbin, con.conrelid) as def

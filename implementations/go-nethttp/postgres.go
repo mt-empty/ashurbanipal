@@ -193,11 +193,31 @@ func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schem
 	return oid, nil
 }
 
-func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
-	return queryStrings(ctx, db, c.timeout,
-		`select column_name from information_schema.columns
-		 where table_schema = $1 and table_name = $2
-		 order by ordinal_position`, schema, table)
+// columnType returns the data_type of column, which must exactly match a
+// readable column of table.
+func (c *PostgresSource) columnType(ctx context.Context, db queryer, schema, table, column string) (string, error) {
+	ctx, cancel := c.bounded(ctx)
+	defer cancel()
+	rows, err := db.QueryContext(ctx,
+		`select column_name, data_type from information_schema.columns
+		 where table_schema = $1 and table_name = $2`, schema, table)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, dataType string
+		if err := rows.Scan(&name, &dataType); err != nil {
+			return "", err
+		}
+		if name == column {
+			return dataType, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return "", &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
 }
 
 // pgApproxRowsSQL is pg_class c's row estimate, summed over an inheritance
@@ -713,11 +733,7 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	if err != nil {
 		return nil, err
 	}
-	columnNames, err := c.allowedColumns(ctx, tx, realSchema, table)
-	if err != nil {
-		return nil, err
-	}
-	realColumn, err := requireExact(columnNames, column, NotAllowedColumn)
+	dataType, err := c.columnType(ctx, tx, realSchema, table, column)
 	if err != nil {
 		return nil, err
 	}
@@ -734,7 +750,7 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 		      lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
 		 where schemaname = $1 and tablename = $2 and attname = $3
 		   and inherited = exists (select 1 from pg_inherits where inhparent = $4)
-		 order by t.freq desc`, realSchema, table, realColumn, oid)
+		 order by t.freq desc`, realSchema, table, column, oid)
 	if err != nil {
 		return nil, err
 	}
@@ -753,18 +769,9 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	}
 	rows.Close()
 
-	var dataType sql.NullString
-	err = tx.QueryRowContext(ctx,
-		`select data_type from information_schema.columns
-		 where table_schema = $1 and table_name = $2 and column_name = $3`,
-		realSchema, table, realColumn).Scan(&dataType)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-
 	// boolean's array-literal text form is "t"/"f", not "true"/"false" —
 	// normalize to match QueryTable's rendering.
-	if dataType.Valid && dataType.String == "boolean" {
+	if dataType == "boolean" {
 		for i, e := range entries {
 			switch e.Value {
 			case "t":
@@ -927,10 +934,6 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 			rows.Close()
 			return Structure{}, err
 		}
-		if n := len(out.Indexes); n > 0 && out.Indexes[n-1].Name == name {
-			out.Indexes[n-1].Columns = append(out.Indexes[n-1].Columns, column)
-			continue
-		}
 		out.Indexes = append(out.Indexes, IndexInfo{
 			Name: name, Columns: []string{column}, Unique: unique, Method: method,
 			Predicate: predicate.String,
@@ -941,6 +944,7 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Indexes = mergeRuns(out.Indexes, sameIndex, mergeIndex)
 
 	// PK and UNIQUE need only conkey.
 	rows, err = tx.QueryContext(qctx,
@@ -966,10 +970,6 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 			out.Constraints.PrimaryKey.Columns = append(out.Constraints.PrimaryKey.Columns, column)
 			continue
 		}
-		if n := len(out.Constraints.Unique); n > 0 && out.Constraints.Unique[n-1].Name == name {
-			out.Constraints.Unique[n-1].Columns = append(out.Constraints.Unique[n-1].Columns, column)
-			continue
-		}
 		out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: name, Columns: []string{column}})
 	}
 	err = rows.Err()
@@ -977,6 +977,7 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Constraints.Unique = mergeRuns(out.Constraints.Unique, sameUnique, mergeUnique)
 
 	// FK pairs conkey with confkey; the referenced table comes from confrelid.
 	rows, err = tx.QueryContext(qctx,
@@ -1002,10 +1003,6 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 			rows.Close()
 			return Structure{}, err
 		}
-		if n := len(out.Constraints.ForeignKeys); n > 0 && out.Constraints.ForeignKeys[n-1].Name == name {
-			out.Constraints.ForeignKeys[n-1].Columns = append(out.Constraints.ForeignKeys[n-1].Columns, ColumnPair{From: from, To: to})
-			continue
-		}
 		fk := ConstraintFK{
 			Name: name, Table: refTable,
 			Columns:  []ColumnPair{{From: from, To: to}},
@@ -1021,6 +1018,7 @@ func (c *PostgresSource) Structure(ctx context.Context, schema *string, table st
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Constraints.ForeignKeys = mergeRuns(out.Constraints.ForeignKeys, sameFK, mergeFK)
 
 	rows, err = tx.QueryContext(qctx,
 		`select con.conname::text, pg_get_expr(con.conbin, con.conrelid)

@@ -1,15 +1,4 @@
 /**
- * Escapes an identifier for splicing into SQL text by doubling embedded
- * `"` (the standard Postgres quoted-identifier escape). Callers must only
- * pass a value already exact-matched against a live schema-catalog lookup
- * (spec/protocol.md §6); this function does no validation itself, it only
- * makes an already-validated name syntactically safe to splice.
- */
-export function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
-/**
  * Whether `err` is the engine stopping a slow statement (spec/protocol.md
  * §6): Postgres SQLSTATE 57014, MySQL 3024, MariaDB 1969, or the SQLite
  * interrupt the bounded() timer fires. Answered as 500 `query_timeout`.

@@ -4,10 +4,11 @@ use std::collections::{HashMap, HashSet};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::{
-    column_key, filter_value_error, group_referenced_by, no_default_schema, quote_ident,
-    row_to_json, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk, ConstraintPk,
-    ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo, NotAllowedKind,
-    QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo, CATALOG_TIMEOUT_SECS,
+    column_key, filter_value_error, group_referenced_by, merge_runs, no_default_schema,
+    quote_ident, row_to_json, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk,
+    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo,
+    NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo,
+    CATALOG_TIMEOUT_SECS,
 };
 use crate::filter::ValueForm;
 use crate::join::{
@@ -277,20 +278,18 @@ impl PgPoolSource {
         .fetch_all(&mut **tx)
         .await?;
 
-        let mut out: Vec<IndexInfo> = Vec::new();
-        for (name, method, unique, predicate, column) in rows {
-            match out.last_mut() {
-                Some(last) if last.name == name => last.columns.push(column),
-                _ => out.push(IndexInfo {
+        Ok(merge_runs(
+            rows.into_iter()
+                .map(|(name, method, unique, predicate, column)| IndexInfo {
                     name,
                     columns: vec![column],
                     unique,
                     method,
                     predicate,
                 }),
-            }
-        }
-        Ok(out)
+            |a, b| a.name == b.name,
+            |a, b| a.columns.extend(b.columns),
+        ))
     }
 
     /// One query per `contype`: PK/UNIQUE need only `conkey`, FK pairs
@@ -324,7 +323,7 @@ impl PgPoolSource {
         .fetch_all(&mut **tx)
         .await?;
         let mut primary_key: Option<ConstraintPk> = None;
-        let mut unique: Vec<ConstraintUnique> = Vec::new();
+        let mut unique_rows: Vec<ConstraintUnique> = Vec::new();
         for (kind, name, column) in key_rows {
             if kind == "p" {
                 match primary_key.as_mut() {
@@ -337,15 +336,17 @@ impl PgPoolSource {
                     }
                 }
             } else {
-                match unique.last_mut() {
-                    Some(last) if last.name == name => last.columns.push(column),
-                    _ => unique.push(ConstraintUnique {
-                        name,
-                        columns: vec![column],
-                    }),
-                }
+                unique_rows.push(ConstraintUnique {
+                    name,
+                    columns: vec![column],
+                });
             }
         }
+        let unique = merge_runs(
+            unique_rows,
+            |a, b| a.name == b.name,
+            |a, b| a.columns.extend(b.columns),
+        );
 
         // A FK to a partitioned table is cloned onto the same table once per referenced
         // partition; the `not exists` drops those, but keeps a partition child's inherited FKs.
@@ -368,20 +369,22 @@ impl PgPoolSource {
             .bind(table_oid)
             .fetch_all(&mut **tx)
             .await?;
-        let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
-        for (name, ref_schema, ref_table, from, to, del, upd) in fk_rows {
-            match foreign_keys.last_mut() {
-                Some(last) if last.name == name => last.columns.push(ColumnPair { from, to }),
-                _ => foreign_keys.push(ConstraintFk {
-                    name,
-                    table: ref_table,
-                    schema: (ref_schema != schema).then_some(ref_schema),
-                    columns: vec![ColumnPair { from, to }],
-                    on_delete: fk_action(&del),
-                    on_update: fk_action(&upd),
-                }),
-            }
-        }
+        let foreign_keys = merge_runs(
+            fk_rows
+                .into_iter()
+                .map(
+                    |(name, ref_schema, ref_table, from, to, del, upd)| ConstraintFk {
+                        name,
+                        table: ref_table,
+                        schema: (ref_schema != schema).then_some(ref_schema),
+                        columns: vec![ColumnPair { from, to }],
+                        on_delete: fk_action(&del),
+                        on_update: fk_action(&upd),
+                    },
+                ),
+            |a, b| a.name == b.name,
+            |a, b| a.columns.extend(b.columns),
+        );
 
         let check = sqlx::query_as::<_, (String, String)>(
             "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) \
@@ -407,14 +410,15 @@ impl PgPoolSource {
         })
     }
 
-    async fn allowed_columns_in_tx(
+    /// Each readable column's name and `data_type`, in table order.
+    async fn column_types_in_tx(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         schema: &str,
         table: &str,
-    ) -> Result<Vec<String>, DbError> {
-        let rows = sqlx::query_scalar::<_, String>(
-            "select column_name from information_schema.columns \
+    ) -> Result<Vec<(String, String)>, DbError> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "select column_name, data_type from information_schema.columns \
              where table_schema = $1 and table_name = $2 \
              order by ordinal_position",
         )
@@ -812,16 +816,14 @@ impl DbSource for PgPoolSource {
             .await?
             .oid;
         let table = table.to_string();
-        let columns = self
-            .allowed_columns_in_tx(&mut tx, schema.as_str(), &table)
-            .await?;
-        let column = columns
-            .iter()
-            .find(|c| c.as_str() == column)
+        let (column, data_type) = self
+            .column_types_in_tx(&mut tx, schema.as_str(), &table)
+            .await?
+            .into_iter()
+            .find(|(name, _)| name == column)
             .ok_or_else(|| {
                 DbError::not_allowed(NotAllowedKind::Column, format!("column {column:?}"))
-            })?
-            .clone();
+            })?;
 
         // most_common_vals is anyarray; ::text::text[] reads it uniformly, and
         // NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance
@@ -840,20 +842,10 @@ impl DbSource for PgPoolSource {
         .bind(oid)
         .fetch_all(&mut *tx)
         .await?;
-
-        let data_type = sqlx::query_scalar::<_, String>(
-            "select data_type from information_schema.columns \
-             where table_schema = $1 and table_name = $2 and column_name = $3",
-        )
-        .bind(schema.as_str())
-        .bind(&table)
-        .bind(&column)
-        .fetch_optional(&mut *tx)
-        .await?;
         tx.commit().await?;
         // boolean's array-literal text form is "t"/"f", not "true"/"false" —
         // normalize to match row_to_json's rendering.
-        let rows = if data_type.as_deref() == Some("boolean") {
+        let rows = if data_type == "boolean" {
             rows.into_iter()
                 .map(|(val, freq)| {
                     let val = match val.as_str() {
