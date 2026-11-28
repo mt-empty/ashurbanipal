@@ -1,4 +1,4 @@
-import { $, copyText, el } from "../core/dom.js";
+import { $, copyText, el, viewTransition } from "../core/dom.js";
 import { qualifiedTable, state, tableInView, viewKey } from "../core/state.js";
 import type { Column, ConstraintFk, JoinDef, Row, TableRef } from "../core/types.js";
 import { compositeLabel, refTarget } from "../lib/column-key.js";
@@ -237,5 +237,5 @@ export function openRecordView(columns: Column[], rows: Row[], index: number, de
   };
   show(index);
   const open = () => dialog().showModal();
-  document.startViewTransition ? document.startViewTransition(open) : open();
+  void viewTransition(open);
 }

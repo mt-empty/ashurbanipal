@@ -1,5 +1,5 @@
 import { ApiError, api, clearPrefetched, prefetch } from "../core/api.js";
-import { $, clearError, reportError, setStatus } from "../core/dom.js";
+import { $, clearError, reportError, setStatus, viewTransition } from "../core/dom.js";
 import { type LoadReason, markTiming } from "../core/perf-marks.js";
 import {
   commitRequest,
@@ -331,13 +331,9 @@ async function runLoad({
   // updated. Holding aria-busy across the callback closes that window;
   // waitForIdle's own animation-poll only proves a transition isn't
   // *currently* running, not that one has already happened.
-  if (document.startViewTransition) {
-    setTableBusy(true);
-    await document.startViewTransition(renderTable).updateCallbackDone;
-    setTableBusy(false);
-  } else {
-    renderTable();
-  }
+  setTableBusy(true);
+  await viewTransition(renderTable);
+  setTableBusy(false);
   // The await above yields; a table switch during the transition supersedes
   // this load, and its pager/#status must not overwrite the newer one's.
   if (superseded()) return;

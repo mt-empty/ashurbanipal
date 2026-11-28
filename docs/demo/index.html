@@ -138,6 +138,7 @@
       let escaped = false;
       i++;
       while (i < text.length && text[i] !== '"') {
+        if (text[i] < " ") throw new ScanError();
         if (text[i] === "\\") escaped = true;
         i += text[i] === "\\" ? 2 : 1;
       }
@@ -1782,6 +1783,16 @@ function populateSelect(select, values, selected) {
   );
   select.value = selected;
 }
+function viewTransition(update2) {
+  if (!document.startViewTransition) {
+    update2();
+    return Promise.resolve();
+  }
+  const transition = document.startViewTransition(update2);
+  transition.ready.catch(() => {
+  });
+  return transition.updateCallbackDone;
+}
 function flashIcon(el2, glyph) {
   if (el2.dataset.rest === void 0) el2.dataset.rest = el2.textContent ?? "";
   const rest = el2.dataset.rest ?? "";
@@ -2362,11 +2373,11 @@ function tryParseFilterDsl(input2, aliases) {
 }
 var quoted = (value) => `'${value.replace(/'/g, "''")}'`;
 function quoteFilterValue(value) {
-  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
+  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value) && !/^NULL$/i.test(value)) return value;
   return quoted(value);
 }
 function quoteListItem(value) {
-  return /[,()]/.test(value) || /^NULL$/i.test(value) ? quoted(value) : quoteFilterValue(value);
+  return /[,()]/.test(value) ? quoted(value) : quoteFilterValue(value);
 }
 function filterClause(column, op, value) {
   return value === void 0 ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
@@ -6646,6 +6657,7 @@ function scanJson(text) {
     let escaped = false;
     i++;
     while (i < text.length && text[i] !== '"') {
+      if (text[i] < " ") throw new ScanError();
       if (text[i] === "\\") escaped = true;
       i += text[i] === "\\" ? 2 : 1;
     }
@@ -7995,7 +8007,7 @@ function openRecordView(columns, rows, index, def) {
   };
   show(index);
   const open2 = () => dialog2().showModal();
-  document.startViewTransition ? document.startViewTransition(open2) : open2();
+  void viewTransition(open2);
 }
 
 // src/features/grid.ts
@@ -8569,13 +8581,9 @@ async function runLoad({
     syncGridLock();
     restoreTableFocus(focusCapture);
   };
-  if (document.startViewTransition) {
-    setTableBusy(true);
-    await document.startViewTransition(renderTable).updateCallbackDone;
-    setTableBusy(false);
-  } else {
-    renderTable();
-  }
+  setTableBusy(true);
+  await viewTransition(renderTable);
+  setTableBusy(false);
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);

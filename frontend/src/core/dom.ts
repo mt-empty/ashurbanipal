@@ -54,6 +54,19 @@ export function populateSelect(select: HTMLSelectElement, values: string[], sele
   select.value = selected;
 }
 
+// Runs `update` inside a view transition where the browser has them; resolves once it has run.
+// A transition the next one interrupts is skipped and its `ready` rejects with an AbortError,
+// though `update` still runs, so that rejection is expected and dropped.
+export function viewTransition(update: () => void): Promise<void> {
+  if (!document.startViewTransition) {
+    update();
+    return Promise.resolve();
+  }
+  const transition = document.startViewTransition(update);
+  transition.ready.catch(() => {});
+  return transition.updateCallbackDone;
+}
+
 // Flashes `glyph` on `el`, then restores whatever glyph was resting there.
 // The resting value is recorded on dataset.rest the first time only, so a
 // re-click mid-flash restores the real glyph rather than the transient one.
