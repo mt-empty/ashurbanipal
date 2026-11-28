@@ -204,6 +204,67 @@ def test_query_table_rejects_partitioned_table_same_as_referenced_by_does(source
         source.query_table(schema, "events", QueryOpts(limit=10, offset=0, timeout_secs=5))
 
 
+def test_inheritance_parent_describes_its_childrens_rows_too(source) -> None:
+    # A plain select on a table with inheritance children returns their rows
+    # too, so its row estimate, keys and common values must describe those
+    # rows. Three levels: tickets (30 rows: open/pending/closed),
+    # tickets_archive (70: archived/closed) and tickets_purged (20: purged).
+    # Ids repeat across them, so the parent's primary key does not hold.
+    # Autovacuum is off so each table's statistics change only when the test
+    # analyzes it.
+    schema = "ashb_test_flask_inheritance_parent"
+    opts = QueryOpts(limit=500, offset=0, timeout_secs=5)
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn, conn.cursor() as cur:
+
+        def run(sql: str) -> None:
+            for stmt in sql.replace("$s", schema).split(";"):
+                if stmt.strip():
+                    cur.execute(stmt)
+
+        run(
+            "drop schema if exists $s cascade; create schema $s;"
+            "create table $s.tickets (id int primary key, status text not null) with (autovacuum_enabled = false);"
+            "create table $s.tickets_archive (id int not null, status text not null)"
+            "    with (autovacuum_enabled = false);"
+            "create table $s.tickets_purged () inherits ($s.tickets_archive) with (autovacuum_enabled = false);"
+            "create table $s.lone (id int primary key);"
+            "insert into $s.tickets"
+            "    select g, (array['open','pending','closed'])[g % 3 + 1] from generate_series(1, 30) g;"
+            "insert into $s.tickets_archive"
+            "    select g, (array['archived','closed'])[g % 2 + 1] from generate_series(1, 70) g;"
+            "insert into $s.tickets_purged select g, 'purged' from generate_series(1, 20) g"
+        )
+        try:
+            # The parent is analyzed while it has no children, so it has only
+            # its own statistics row; then the archive (and its child) is attached.
+            run("analyze $s.tickets; alter table $s.tickets_archive inherit $s.tickets")
+            assert source.query_table(schema, "tickets", opts).total_approx == 30, (
+                "unestimated children add nothing"
+            )
+            assert dict(source.table_counts(schema))["tickets_archive"] == -1, (
+                "no table in its tree has an estimate"
+            )
+            assert source.common_values(schema, "tickets", "status") == [], "no with-children statistics row yet"
+
+            run("analyze $s.tickets; analyze $s.tickets_archive; analyze $s.tickets_purged")
+            data = source.query_table(schema, "tickets", opts)
+            assert len(data.rows) == 120, "all three levels' rows"
+            assert data.total_approx == 120, "the estimate sums every descendant"
+            id_col = next(c for c in data.columns if c.name == "id")
+            assert id_col.key is None, "the parent's primary key does not hold over its children's rows"
+            assert source.query_table(schema, "lone", opts).columns[0].key == KeyKind.PK
+
+            counts = dict(source.table_counts(schema))
+            assert (counts["tickets"], counts["tickets_archive"], counts["tickets_purged"]) == (120, 90, 20)
+
+            parent = dict(source.common_values(schema, "tickets", "status"))
+            assert len(parent) == 5, f"every level's values; got {parent!r}"
+            assert parent["closed"] == pytest.approx(0.375, abs=0.001)
+            assert len(source.common_values(schema, "tickets_purged", "status")) == 1
+        finally:
+            cur.execute(f"drop schema if exists {schema} cascade")
+
+
 def test_structure_rejects_partitioned_parent_and_child_reports_its_own_copies(source) -> None:
     schema = "ashb_test_flask_structure_partitions"
     with _partitioned_schema(schema):

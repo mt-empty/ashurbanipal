@@ -31,13 +31,13 @@ run = "cargo test --lib --features mysql"
 dir = "implementations/rust"
 
 ["rust:integration-test"]
-description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning --test structure_partitioning --test nul_byte_identifiers --test join_postgres --test read_only_transaction: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
+description = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning --test structure_partitioning --test nul_byte_identifiers --test join_postgres --test read_only_transaction --test inheritance_parent: axum's own Postgres-backed integration tests (needs DATABASE_URL)"
 # Separate from rust:test (--lib) for the same reason that task excludes
 # the conformance target: these open their own DB pools and would add
 # concurrent connection pressure if run alongside conformance:test.
 # The *_mysql.rs tests need the mysql feature + MYSQL_TEST_URL; they run in
 # rust:integration-test-mysql instead.
-run = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning --test structure_partitioning --test nul_byte_identifiers --test join_postgres --test read_only_transaction"
+run = "cargo test --test schema_isolation --test multi_source --test table_listing_privileges --test referenced_by_partitioning --test structure_partitioning --test nul_byte_identifiers --test join_postgres --test read_only_transaction --test inheritance_parent"
 dir = "implementations/rust/axum"
 
 ["rust:integration-test-actix"]
