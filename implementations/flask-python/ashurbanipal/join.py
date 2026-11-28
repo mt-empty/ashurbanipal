@@ -13,7 +13,20 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard, assert_never
 
-from .db import OP_SQL, BadJoin, BadParam, ColumnInfo, ColumnRef, DbError, KeyKind, NotAllowed, NotAllowedKind
+from .db import (
+    OP_SQL,
+    BadJoin,
+    BadParam,
+    ColumnInfo,
+    ColumnRef,
+    DbError,
+    KeyKind,
+    NotAllowed,
+    NotAllowedKind,
+    concat_columns,
+    merge_runs,
+    same_name,
+)
 from .db import FilterParseError as _FilterParseError
 from .filter import (
     PATTERN_OPS,
@@ -316,14 +329,10 @@ def tie_break_keys(columns: Sequence[ColMeta], keys: Sequence[UniqueKey]) -> lis
 def group_unique_keys(parts: Iterable[tuple[str, bool, str | None, bool]]) -> list[UniqueKey]:
     """Folds `(index, primary, column, usable)` parts, ordered by index and then key
     position, into keys, dropping a key with any unusable part."""
-    keys: list[tuple[UniqueKey, bool]] = []
-    for index, primary, column, usable in parts:
-        if not keys or keys[-1][0].name != index:
-            keys.append((UniqueKey(index, primary, []), True))
-        key, ok = keys[-1]
-        key.columns.append(column or "")
-        keys[-1] = (key, ok and usable)
-    return [k for k, ok in keys if ok]
+    parts = list(parts)
+    unusable = {index for index, _, _, usable in parts if not usable}
+    keys = [UniqueKey(index, primary, [column or ""]) for index, primary, column, _ in parts]
+    return [k for k in merge_runs(keys, same_name, concat_columns) if k.name not in unusable]
 
 
 def order_by_clause(sort: Any, keys: Sequence[Any], descending: bool, render: Callable[[Any], str]) -> str:

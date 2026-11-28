@@ -288,13 +288,14 @@ fun tieBreakKeys(columns: List<ColMeta>, keys: List<UniqueKey>): List<Int> =
 data class KeyPart(val index: String, val primary: Boolean, val column: String?, val usable: Boolean)
 
 /** Folds [parts], ordered by index and then key position, into keys, dropping a key with an unusable part. */
-fun groupUniqueKeys(parts: List<KeyPart>): List<UniqueKey> =
-    parts
-        .fold(mutableListOf<MutableList<KeyPart>>()) { groups, p ->
-            if (groups.lastOrNull()?.first()?.index == p.index) groups.last().add(p) else groups.add(mutableListOf(p))
-            groups
-        }.filter { g -> g.all { it.usable } }
-        .map { g -> UniqueKey(g.first().index, g.first().primary, g.map { it.column ?: "" }) }
+fun groupUniqueKeys(parts: List<KeyPart>): List<UniqueKey> {
+    val unusable = parts.filterNot { it.usable }.mapTo(HashSet()) { it.index }
+    return mergeRuns(
+        parts.map { UniqueKey(it.index, it.primary, listOf(it.column ?: "")) },
+        { a, b -> a.name == b.name },
+        { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+    ).filter { it.name !in unusable }
+}
 
 /**
  * A single-table query's order by, every column qualified by the table name so

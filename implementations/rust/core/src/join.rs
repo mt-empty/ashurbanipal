@@ -369,25 +369,23 @@ pub struct KeyPart {
 /// Folds parts, ordered by index and then key position, into keys, dropping
 /// a key with any unusable part.
 pub fn group_unique_keys(parts: impl IntoIterator<Item = KeyPart>) -> Vec<UniqueKey> {
-    let mut keys: Vec<(UniqueKey, bool)> = Vec::new();
-    for p in parts {
-        if keys.last().is_none_or(|(k, _)| k.name != p.index) {
-            keys.push((
-                UniqueKey {
-                    name: p.index,
-                    primary: p.primary,
-                    columns: Vec::new(),
-                },
-                true,
-            ));
-        }
-        let (key, usable) = keys.last_mut().expect("pushed above");
-        key.columns.push(p.column.unwrap_or_default());
-        *usable &= p.usable;
-    }
+    let mut unusable = HashSet::new();
+    let keys = crate::db::merge_runs(
+        parts.into_iter().map(|p| {
+            if !p.usable {
+                unusable.insert(p.index.clone());
+            }
+            UniqueKey {
+                name: p.index,
+                primary: p.primary,
+                columns: vec![p.column.unwrap_or_default()],
+            }
+        }),
+        |a, b| a.name == b.name,
+        |a, b| a.columns.extend(b.columns),
+    );
     keys.into_iter()
-        .filter(|(_, u)| *u)
-        .map(|(k, _)| k)
+        .filter(|k| !unusable.contains(&k.name))
         .collect()
 }
 
