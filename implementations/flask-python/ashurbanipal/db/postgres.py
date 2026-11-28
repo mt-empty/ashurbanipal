@@ -63,10 +63,13 @@ from . import (
     TableInfo,
     Unsortable,
     column_key,
+    concat_columns,
     group_referenced_by,
+    merge_runs,
     one_row,
     pick_schema,
     quote_ident,
+    same_name,
     wrap_driver_errors,
 )
 
@@ -267,14 +270,17 @@ class PgSource(DbSource):
         oid: int = row[0]
         return oid
 
-    def _allowed_columns(self, cur: psycopg.Cursor, schema: str, table: str) -> list[str]:
+    def _column_type(self, cur: psycopg.Cursor, schema: str, table: str, column: str) -> str:
+        """The data_type of `column`, which must exactly match a readable column of `table`."""
         cur.execute(
-            "select column_name from information_schema.columns "
-            "where table_schema = %s and table_name = %s "
-            "order by ordinal_position",
+            "select column_name, data_type from information_schema.columns "
+            "where table_schema = %s and table_name = %s",
             (schema, table),
         )
-        return [row[0] for row in cur.fetchall()]
+        for name, data_type in cur.fetchall():
+            if name == column:
+                return str(data_type)
+        raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
 
     def _key_metadata(self, cur: psycopg.Cursor, schema: str, oid: int) -> tuple[set[str], dict[str, ColumnRef]]:
         """Read pg_constraint, which has no privilege filter, so a role that
@@ -495,9 +501,7 @@ class PgSource(DbSource):
         with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved_schema = self._resolve_schema(cur, schema)
             oid = self._readable_table_oid(cur, resolved_schema, table)
-            columns = self._allowed_columns(cur, resolved_schema, table)
-            if column not in columns:
-                raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
+            data_type = self._column_type(cur, resolved_schema, table, column)
 
             # most_common_vals is anyarray; ::text::text[] reads it
             # uniformly, and NULL (no ANALYZE stats yet) unnests to zero rows.
@@ -513,14 +517,6 @@ class PgSource(DbSource):
                 (resolved_schema, table, column, oid),
             )
             rows = list(cur.fetchall())
-
-            cur.execute(
-                "select data_type from information_schema.columns "
-                "where table_schema = %s and table_name = %s and column_name = %s",
-                (resolved_schema, table, column),
-            )
-            data_type_row = cur.fetchone()
-            data_type = data_type_row[0] if data_type_row else None
 
         # boolean's array-literal text form is "t"/"f", not "true"/"false" —
         # normalize to match query_table's rendering.
@@ -605,13 +601,11 @@ class PgSource(DbSource):
                 "order by ic.relname, k.n",
                 (oid,),
             )
-            for name, method, unique, predicate, column in cur.fetchall():
-                if out.indexes and out.indexes[-1].name == name:
-                    out.indexes[-1].columns.append(column)
-                else:
-                    out.indexes.append(
-                        IndexInfo(name=name, columns=[column], unique=unique, method=method, predicate=predicate)
-                    )
+            indexes = [
+                IndexInfo(name=name, columns=[column], unique=unique, method=method, predicate=predicate)
+                for name, method, unique, predicate, column in cur.fetchall()
+            ]
+            out.indexes = merge_runs(indexes, same_name, concat_columns)
 
             # PK and UNIQUE need only conkey.
             cur.execute(
@@ -628,10 +622,9 @@ class PgSource(DbSource):
                     if out.constraints.primary_key is None:
                         out.constraints.primary_key = ConstraintPk(name=name, columns=[])
                     out.constraints.primary_key.columns.append(column)
-                elif out.constraints.unique and out.constraints.unique[-1].name == name:
-                    out.constraints.unique[-1].columns.append(column)
                 else:
                     out.constraints.unique.append(ConstraintUnique(name=name, columns=[column]))
+            out.constraints.unique = merge_runs(out.constraints.unique, same_name, concat_columns)
 
             # FK pairs conkey with confkey; the referenced table is confrelid.
             cur.execute(
@@ -651,22 +644,18 @@ class PgSource(DbSource):
                 "order by con.conname, k.n",
                 (oid,),
             )
-            for name, ref_schema, ref_table, from_col, to_col, del_code, upd_code in cur.fetchall():
-                pair = ColumnPair(from_=from_col, to=to_col)
-                fks = out.constraints.foreign_keys
-                if fks and fks[-1].name == name:
-                    fks[-1].columns.append(pair)
-                else:
-                    fks.append(
-                        ConstraintFk(
-                            name=name,
-                            table=ref_table,
-                            schema=ref_schema if ref_schema != resolved_schema else None,
-                            columns=[pair],
-                            on_delete=_FK_ACTIONS.get(del_code, "NO ACTION"),
-                            on_update=_FK_ACTIONS.get(upd_code, "NO ACTION"),
-                        )
-                    )
+            fks = [
+                ConstraintFk(
+                    name=name,
+                    table=ref_table,
+                    schema=ref_schema if ref_schema != resolved_schema else None,
+                    columns=[ColumnPair(from_=from_col, to=to_col)],
+                    on_delete=_FK_ACTIONS.get(del_code, "NO ACTION"),
+                    on_update=_FK_ACTIONS.get(upd_code, "NO ACTION"),
+                )
+                for name, ref_schema, ref_table, from_col, to_col, del_code, upd_code in cur.fetchall()
+            ]
+            out.constraints.foreign_keys = merge_runs(fks, same_name, concat_columns)
 
             cur.execute(
                 "select con.conname::text, pg_get_expr(con.conbin, con.conrelid) "

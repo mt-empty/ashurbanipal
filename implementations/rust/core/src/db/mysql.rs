@@ -5,8 +5,8 @@ use std::sync::{Arc, OnceLock};
 use sqlx::{MySql, MySqlPool, Transaction};
 
 use super::{
-    column_key, filter_value_error, group_referenced_by, no_default_schema, row_to_json,
-    ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk, ConstraintPk,
+    column_key, filter_value_error, group_referenced_by, merge_runs, no_default_schema,
+    row_to_json, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk, ConstraintPk,
     ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo, NotAllowedKind,
     QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo, CATALOG_TIMEOUT_SECS,
 };
@@ -835,20 +835,19 @@ impl DbSource for MySqlSource {
         .bind(table)
         .fetch_all(&mut *tx)
         .await?;
-        let mut indexes: Vec<IndexInfo> = Vec::new();
-        for (name, non_unique, method, column) in index_rows {
-            let column = column.unwrap_or_default();
-            match indexes.last_mut() {
-                Some(last) if last.name == name => last.columns.push(column),
-                _ => indexes.push(IndexInfo {
+        let indexes = merge_runs(
+            index_rows
+                .into_iter()
+                .map(|(name, non_unique, method, column)| IndexInfo {
                     name,
-                    columns: vec![column],
+                    columns: vec![column.unwrap_or_default()],
                     unique: non_unique == 0,
                     method: method.to_ascii_lowercase(),
                     predicate: None,
                 }),
-            }
-        }
+            |a, b| a.name == b.name,
+            |a, b| a.columns.extend(b.columns),
+        );
 
         let key_rows =
             sqlx::query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(timed_select(
@@ -870,7 +869,7 @@ impl DbSource for MySqlSource {
             .fetch_all(&mut *tx)
             .await?;
         let mut primary_key: Option<ConstraintPk> = None;
-        let mut unique: Vec<ConstraintUnique> = Vec::new();
+        let mut unique_rows: Vec<ConstraintUnique> = Vec::new();
         for (kind, name, column) in key_rows {
             if kind == "PRIMARY KEY" {
                 match primary_key.as_mut() {
@@ -883,15 +882,17 @@ impl DbSource for MySqlSource {
                     }
                 }
             } else {
-                match unique.last_mut() {
-                    Some(last) if last.name == name => last.columns.push(column),
-                    _ => unique.push(ConstraintUnique {
-                        name,
-                        columns: vec![column],
-                    }),
-                }
+                unique_rows.push(ConstraintUnique {
+                    name,
+                    columns: vec![column],
+                });
             }
         }
+        let unique = merge_runs(
+            unique_rows,
+            |a, b| a.name == b.name,
+            |a, b| a.columns.extend(b.columns),
+        );
 
         // Read `key_column_usage` for the referenced table, not
         // `referential_constraints`, which MariaDB nulls for a role lacking
@@ -916,20 +917,20 @@ impl DbSource for MySqlSource {
         .bind(table)
         .fetch_all(&mut *tx)
         .await?;
-        let mut foreign_keys: Vec<ConstraintFk> = Vec::new();
-        for (name, ref_schema, ref_table, from, to, on_delete, on_update) in fk_rows {
-            match foreign_keys.last_mut() {
-                Some(last) if last.name == name => last.columns.push(ColumnPair { from, to }),
-                _ => foreign_keys.push(ConstraintFk {
+        let foreign_keys = merge_runs(
+            fk_rows.into_iter().map(
+                |(name, ref_schema, ref_table, from, to, on_delete, on_update)| ConstraintFk {
                     name,
                     table: ref_table,
                     schema: (ref_schema != schema.as_str()).then_some(ref_schema),
                     columns: vec![ColumnPair { from, to }],
                     on_delete: on_delete.to_ascii_uppercase(),
                     on_update: on_update.to_ascii_uppercase(),
-                }),
-            }
-        }
+                },
+            ),
+            |a, b| a.name == b.name,
+            |a, b| a.columns.extend(b.columns),
+        );
 
         // MySQL before 8.0.16 has no `check_constraints` view: report `[]`.
         let has_checks = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(timed_select(

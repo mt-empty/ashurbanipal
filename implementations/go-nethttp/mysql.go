@@ -882,10 +882,6 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 			rows.Close()
 			return Structure{}, err
 		}
-		if n := len(out.Indexes); n > 0 && out.Indexes[n-1].Name == name {
-			out.Indexes[n-1].Columns = append(out.Indexes[n-1].Columns, column.String)
-			continue
-		}
 		out.Indexes = append(out.Indexes, IndexInfo{
 			Name: name, Columns: []string{column.String}, Unique: nonUnique == 0,
 			Method: strings.ToLower(method),
@@ -896,6 +892,7 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Indexes = mergeRuns(out.Indexes, sameIndex, mergeIndex)
 
 	rows, err = tx.QueryContext(qctx, timedSelect(variant, c.timeoutSec,
 		`tc.constraint_type, tc.constraint_name, kcu.column_name
@@ -925,10 +922,6 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 			out.Constraints.PrimaryKey.Columns = append(out.Constraints.PrimaryKey.Columns, column)
 			continue
 		}
-		if n := len(out.Constraints.Unique); n > 0 && out.Constraints.Unique[n-1].Name == name {
-			out.Constraints.Unique[n-1].Columns = append(out.Constraints.Unique[n-1].Columns, column)
-			continue
-		}
 		out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: name, Columns: []string{column}})
 	}
 	err = rows.Err()
@@ -936,6 +929,7 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Constraints.Unique = mergeRuns(out.Constraints.Unique, sameUnique, mergeUnique)
 
 	// Read key_column_usage for the referenced table, not
 	// referential_constraints, which MariaDB nulls for a role lacking
@@ -960,10 +954,6 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 			rows.Close()
 			return Structure{}, err
 		}
-		if n := len(out.Constraints.ForeignKeys); n > 0 && out.Constraints.ForeignKeys[n-1].Name == name {
-			out.Constraints.ForeignKeys[n-1].Columns = append(out.Constraints.ForeignKeys[n-1].Columns, ColumnPair{From: from, To: to})
-			continue
-		}
 		fk := ConstraintFK{
 			Name: name, Table: refTable,
 			Columns:  []ColumnPair{{From: from, To: to}},
@@ -979,6 +969,7 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Constraints.ForeignKeys = mergeRuns(out.Constraints.ForeignKeys, sameFK, mergeFK)
 
 	// MySQL before 8.0.16 has no check_constraints view: report [].
 	var hasChecks int64

@@ -170,12 +170,8 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
         resolveSchemaAmong(variant, listAllowedSchemas(variant), requested)
 
     /** [resolveSchema] against a schema list already fetched in this transaction. */
-    private fun resolveSchemaAmong(variant: Variant, schemas: List<String>, requested: String?): String {
-        val resolved = requested
-            ?: defaultSchema(variant)
-            ?: throw NotAllowedException("no schema requested and this connection has no default database", NotAllowedKind.SCHEMA)
-        return requireExact(schemas, resolved, NotAllowedKind.SCHEMA)
-    }
+    private fun resolveSchemaAmong(variant: Variant, schemas: List<String>, requested: String?): String =
+        pickSchema(schemas, requested) { defaultSchema(variant) }
 
     private fun allowedTables(variant: Variant, schema: String): List<String> =
         query(
@@ -527,16 +523,11 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
             ),
             listOf(realSchema, table),
         ) { rs -> listOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)) }
-        val indexes = ArrayList<IndexInfo>()
-        for (r in indexRows) {
-            val column = r[3] ?: ""
-            val last = indexes.lastOrNull()
-            if (last != null && last.name == r[0]) {
-                indexes[indexes.size - 1] = last.copy(columns = last.columns + column)
-            } else {
-                indexes.add(IndexInfo(r[0]!!, listOf(column), unique = r[1] == "0", method = r[2]!!.lowercase()))
-            }
-        }
+        val indexes = mergeRuns(
+            indexRows.map { r -> IndexInfo(r[0]!!, listOf(r[3] ?: ""), unique = r[1] == "0", method = r[2]!!.lowercase()) },
+            { a, b -> a.name == b.name },
+            { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+        )
 
         val keyRows = query(
             dataSource,
@@ -557,19 +548,15 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
             listOf(realSchema, table),
         ) { rs -> Triple(rs.getString(1), rs.getString(2), rs.getString(3)) }
         var primaryKey: ConstraintPk? = null
-        val unique = ArrayList<ConstraintUnique>()
+        val uniqueRows = ArrayList<ConstraintUnique>()
         for ((kind, name, column) in keyRows) {
             if (kind == "PRIMARY KEY") {
                 primaryKey = ConstraintPk(name = name, columns = (primaryKey?.columns ?: emptyList()) + column)
             } else {
-                val last = unique.lastOrNull()
-                if (last != null && last.name == name) {
-                    unique[unique.size - 1] = last.copy(columns = last.columns + column)
-                } else {
-                    unique.add(ConstraintUnique(name, listOf(column)))
-                }
+                uniqueRows.add(ConstraintUnique(name, listOf(column)))
             }
         }
+        val unique = mergeRuns(uniqueRows, { a, b -> a.name == b.name }, { run -> run.first().copy(columns = run.flatMap { it.columns }) })
 
         // Read key_column_usage for the referenced table, not
         // referential_constraints, which MariaDB nulls for a role lacking
@@ -592,25 +579,20 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
             ),
             listOf(realSchema, table),
         ) { rs -> (1..7).map { rs.getString(it) } }
-        val foreignKeys = ArrayList<ConstraintFk>()
-        for (r in fkRows) {
-            val pair = ColumnPair(r[3]!!, r[4]!!)
-            val last = foreignKeys.lastOrNull()
-            if (last != null && last.name == r[0]) {
-                foreignKeys[foreignKeys.size - 1] = last.copy(columns = last.columns + pair)
-            } else {
-                foreignKeys.add(
-                    ConstraintFk(
-                        name = r[0]!!,
-                        table = r[2]!!,
-                        schema = r[1]!!.takeIf { it != realSchema },
-                        columns = listOf(pair),
-                        onDelete = r[5]!!.uppercase(),
-                        onUpdate = r[6]!!.uppercase(),
-                    ),
+        val foreignKeys = mergeRuns(
+            fkRows.map { r ->
+                ConstraintFk(
+                    name = r[0]!!,
+                    table = r[2]!!,
+                    schema = r[1]!!.takeIf { it != realSchema },
+                    columns = listOf(ColumnPair(r[3]!!, r[4]!!)),
+                    onDelete = r[5]!!.uppercase(),
+                    onUpdate = r[6]!!.uppercase(),
                 )
-            }
-        }
+            },
+            { a, b -> a.name == b.name },
+            { run -> run.first().copy(columns = run.flatMap { it.columns }) },
+        )
 
         // MySQL before 8.0.16 has no check_constraints view: report [].
         val hasChecks = query(

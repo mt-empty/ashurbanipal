@@ -4,20 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 )
-
-// quoteIdent escapes an identifier for splicing into SQL text by doubling
-// embedded `"` (the standard Postgres quoted-identifier escape), not
-// fmt's %q: %q applies Go string-literal escaping (backslash-escapes an
-// embedded `"`), but Postgres's scheme diverges on that exact input.
-// Callers must only pass a value already exact-matched against a live
-// schema-catalog lookup (spec/protocol.md §6); this function does no
-// validation of its own, it only makes an already-validated name
-// syntactically safe to splice.
-func quoteIdent(s string) string {
-	return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
-}
 
 // timeoutDetectors are registered by each engine's file for the driver
 // errors that mean the engine itself stopped a slow statement (Postgres

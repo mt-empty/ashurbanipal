@@ -60,9 +60,12 @@ from . import (
     TableData,
     TableInfo,
     column_key,
+    concat_columns,
     group_referenced_by,
+    merge_runs,
     one_row,
     pick_schema,
+    same_name,
     wrap_driver_errors,
 )
 
@@ -623,16 +626,13 @@ class MySqlSource(DbSource):
                     ),
                     (resolved_schema, table),
                 )
-                for name, non_unique, method, column in cur.fetchall():
-                    column = column or ""
-                    if out.indexes and out.indexes[-1].name == name:
-                        out.indexes[-1].columns.append(column)
-                    else:
-                        out.indexes.append(
-                            IndexInfo(
-                                name=name, columns=[column], unique=int(non_unique) == 0, method=method.lower()
-                            )
-                        )
+                indexes = [
+                    IndexInfo(
+                        name=name, columns=[column or ""], unique=int(non_unique) == 0, method=method.lower()
+                    )
+                    for name, non_unique, method, column in cur.fetchall()
+                ]
+                out.indexes = merge_runs(indexes, same_name, concat_columns)
 
                 cur.execute(
                     _timed_select(
@@ -656,10 +656,9 @@ class MySqlSource(DbSource):
                         if out.constraints.primary_key is None:
                             out.constraints.primary_key = ConstraintPk(name=name, columns=[])
                         out.constraints.primary_key.columns.append(column)
-                    elif out.constraints.unique and out.constraints.unique[-1].name == name:
-                        out.constraints.unique[-1].columns.append(column)
                     else:
                         out.constraints.unique.append(ConstraintUnique(name=name, columns=[column]))
+                out.constraints.unique = merge_runs(out.constraints.unique, same_name, concat_columns)
 
                 # Read key_column_usage for the referenced table, not
                 # referential_constraints, which MariaDB nulls for a role
@@ -681,22 +680,18 @@ class MySqlSource(DbSource):
                     ),
                     (resolved_schema, table),
                 )
-                for name, ref_schema, ref_table, from_col, to_col, delete_rule, update_rule in cur.fetchall():
-                    pair = ColumnPair(from_=from_col, to=to_col)
-                    fks = out.constraints.foreign_keys
-                    if fks and fks[-1].name == name:
-                        fks[-1].columns.append(pair)
-                    else:
-                        fks.append(
-                            ConstraintFk(
-                                name=name,
-                                table=ref_table,
-                                schema=ref_schema if ref_schema != resolved_schema else None,
-                                columns=[pair],
-                                on_delete=delete_rule.upper(),
-                                on_update=update_rule.upper(),
-                            )
-                        )
+                fks = [
+                    ConstraintFk(
+                        name=name,
+                        table=ref_table,
+                        schema=ref_schema if ref_schema != resolved_schema else None,
+                        columns=[ColumnPair(from_=from_col, to=to_col)],
+                        on_delete=delete_rule.upper(),
+                        on_update=update_rule.upper(),
+                    )
+                    for name, ref_schema, ref_table, from_col, to_col, delete_rule, update_rule in cur.fetchall()
+                ]
+                out.constraints.foreign_keys = merge_runs(fks, same_name, concat_columns)
 
                 # MySQL before 8.0.16 has no check_constraints view: report [].
                 cur.execute(

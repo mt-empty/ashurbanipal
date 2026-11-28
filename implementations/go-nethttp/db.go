@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -251,6 +252,12 @@ func requireExact(allowed []string, name string, kind NotAllowedKind) (string, e
 	return "", &NotAllowedError{Kind: kind, What: fmt.Sprintf("%s %q", noun, name)}
 }
 
+// quoteIdent double-quotes a name by doubling embedded `"`; callers pass only
+// names already matched against the live catalog (spec/protocol.md §6).
+func quoteIdent(s string) string {
+	return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+}
+
 func findExact(haystack []string, needle string) (string, bool) {
 	for _, s := range haystack {
 		if s == needle {
@@ -328,25 +335,41 @@ func scanLabeledRows(rows rowScanner, labels []string) ([]map[string]*string, er
 	return out, nil
 }
 
-// groupReferencedBy merges single-pair ReferencedByEntry rows into one
-// entry per (schema, table, constraint). It relies on the caller's catalog
-// ORDER BY putting a constraint's columns adjacent — a run-length merge,
-// not a full group-by. Each backend maps its own row shape (and applies
-// any allow-list filter) before calling this. The result is always
-// non-nil (empty, never null on the wire), so callers need no guard.
-func groupReferencedBy(rows []ReferencedByEntry) []ReferencedByEntry {
-	out := make([]ReferencedByEntry, 0, len(rows))
-	for _, row := range rows {
-		if n := len(out); n > 0 &&
-			out[n-1].Table == row.Table &&
-			out[n-1].Schema == row.Schema &&
-			out[n-1].Constraint == row.Constraint {
-			out[n-1].Columns = append(out[n-1].Columns, row.Columns...)
+// mergeRuns merges each item into the one before it while sameRun holds,
+// turning one catalog row per column into one entry per index or
+// constraint. It relies on the caller's ORDER BY putting a run's rows
+// adjacent. The result is always non-nil (empty, never null on the wire).
+func mergeRuns[T any](items []T, sameRun func(a, b T) bool, merge func(last *T, item T)) []T {
+	out := make([]T, 0, len(items))
+	for _, item := range items {
+		if n := len(out); n > 0 && sameRun(out[n-1], item) {
+			merge(&out[n-1], item)
 			continue
 		}
-		out = append(out, row)
+		out = append(out, item)
 	}
 	return out
+}
+
+// The name-keyed runs every engine's Structure merges.
+func sameIndex(a, b IndexInfo) bool           { return a.Name == b.Name }
+func mergeIndex(last *IndexInfo, b IndexInfo) { last.Columns = append(last.Columns, b.Columns...) }
+func sameUnique(a, b ConstraintUnique) bool   { return a.Name == b.Name }
+func mergeUnique(last *ConstraintUnique, b ConstraintUnique) {
+	last.Columns = append(last.Columns, b.Columns...)
+}
+func sameFK(a, b ConstraintFK) bool              { return a.Name == b.Name }
+func mergeFK(last *ConstraintFK, b ConstraintFK) { last.Columns = append(last.Columns, b.Columns...) }
+
+// groupReferencedBy merges single-pair ReferencedByEntry rows into one
+// entry per (schema, table, constraint). Each backend maps its own row
+// shape (and applies any allow-list filter) before calling this.
+func groupReferencedBy(rows []ReferencedByEntry) []ReferencedByEntry {
+	return mergeRuns(rows,
+		func(a, b ReferencedByEntry) bool {
+			return a.Table == b.Table && a.Schema == b.Schema && a.Constraint == b.Constraint
+		},
+		func(last *ReferencedByEntry, b ReferencedByEntry) { last.Columns = append(last.Columns, b.Columns...) })
 }
 
 // queryStrings runs a bounded query whose rows are one text column.

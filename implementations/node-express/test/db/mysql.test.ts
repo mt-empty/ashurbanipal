@@ -109,7 +109,7 @@ function runSuiteFor(label: string, envVar: "MYSQL_TEST_URL" | "MARIADB_TEST_URL
       const noDefaultDbPool = mysql.createPool(url.toString());
       try {
         const source = new MySqlSource(noDefaultDbPool);
-        await expect(source.listTables(undefined, 5000)).rejects.toThrow(/no default database/);
+        await expect(source.listTables(undefined, 5000)).rejects.toThrow(/no default schema/);
         expect((await source.listSchemas(5000)).default).toBeNull();
       } finally {
         await noDefaultDbPool.end();

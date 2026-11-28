@@ -684,7 +684,7 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 		return Structure{}, err
 	}
 	partial := map[string]bool{}
-	var uniqueOrigin []string
+	uniqueOrigin := map[string]bool{}
 	for rows.Next() {
 		var name, origin string
 		var unique, isPartial int64
@@ -697,16 +697,8 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 		if !column.Valid {
 			col = "<expression>"
 		}
-		if n := len(out.Indexes); n > 0 && out.Indexes[n-1].Name == name {
-			out.Indexes[n-1].Columns = append(out.Indexes[n-1].Columns, col)
-			continue
-		}
-		if origin == "u" {
-			uniqueOrigin = append(uniqueOrigin, name)
-		}
-		if isPartial != 0 {
-			partial[name] = true
-		}
+		uniqueOrigin[name] = origin == "u"
+		partial[name] = isPartial != 0
 		out.Indexes = append(out.Indexes, IndexInfo{
 			Name: name, Columns: []string{col}, Unique: unique != 0, Method: "btree",
 		})
@@ -716,6 +708,7 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 	if err != nil {
 		return Structure{}, err
 	}
+	out.Indexes = mergeRuns(out.Indexes, sameIndex, mergeIndex)
 
 	rows, err = conn.QueryContext(qctx,
 		`select name, sql from sqlite_master where type = 'index' and tbl_name = ?`, table)
@@ -746,12 +739,8 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 				idx.Predicate = p
 			}
 		}
-	}
-	for _, name := range uniqueOrigin {
-		for _, idx := range out.Indexes {
-			if idx.Name == name {
-				out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: name, Columns: idx.Columns})
-			}
+		if uniqueOrigin[idx.Name] {
+			out.Constraints.Unique = append(out.Constraints.Unique, ConstraintUnique{Name: idx.Name, Columns: idx.Columns})
 		}
 	}
 
@@ -776,18 +765,12 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 		return Structure{}, err
 	}
 	defer rows.Close()
-	lastID := int64(-1)
 	for rows.Next() {
 		var id int64
 		var refTable, from, to, del, upd string
 		if err := rows.Scan(&id, &refTable, &from, &to, &del, &upd); err != nil {
 			return Structure{}, err
 		}
-		if n := len(out.Constraints.ForeignKeys); n > 0 && lastID == id {
-			out.Constraints.ForeignKeys[n-1].Columns = append(out.Constraints.ForeignKeys[n-1].Columns, ColumnPair{From: from, To: to})
-			continue
-		}
-		lastID = id
 		out.Constraints.ForeignKeys = append(out.Constraints.ForeignKeys, ConstraintFK{
 			Name: fmt.Sprintf("fk_%d", id), Table: refTable,
 			Columns:  []ColumnPair{{From: from, To: to}},
@@ -797,5 +780,6 @@ func (c *SQLiteSource) Structure(ctx context.Context, schema *string, table stri
 	if err := rows.Err(); err != nil {
 		return Structure{}, err
 	}
+	out.Constraints.ForeignKeys = mergeRuns(out.Constraints.ForeignKeys, sameFK, mergeFK)
 	return out, nil
 }
