@@ -63,13 +63,14 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]
 requires = ["hatchling<1.34"]
 build-backend = "hatchling.build"
 
+# The gitignored frontend copy must reach the sdist too: `uv build` builds
+# the wheel from the sdist, so a wheel-only entry ships a wheel without it.
+# tools/check-flask-dist.sh guards this.
+[tool.hatch.build]
+artifacts = ["ashurbanipal/frontend/dbviewer.html"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["ashurbanipal"]
-# Force-included despite being gitignored (generated fresh from
-# ../../frontend/dbviewer.html by tools/sync-ports-frontend.sh, never
-# committed) - hatchling's default packaging follows .gitignore like
-# Cargo/npm, so without this the wheel silently ships without the file.
-artifacts = ["ashurbanipal/frontend/dbviewer.html"]
 
 # CHANGELOG.md sits next to pyproject.toml, outside the ashurbanipal/ package
 # dir, so the wheel doesn't pick it up by default — map it in explicitly. The

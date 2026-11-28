@@ -118,3 +118,6 @@ jobs:
       - name: Test
         working-directory: implementations/flask-python
         run: uv run pytest -q
+
+      - name: Build + import the wheel
+        run: tools/check-flask-dist.sh
