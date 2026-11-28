@@ -1,0 +1,17 @@
+{
+  "name": "ashurbanipal-bombadil",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Bombadil exploratory runs against frontend/dbviewer.html. Dev-only tooling — see docs/e2e-testing-guidelines.md.",
+  "type": "module",
+  "scripts": {
+    "explore": "node run.mjs",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@antithesishq/bombadil": "0.8.0",
+    "@biomejs/biome": "^2.6.8",
+    "typescript": "^7.0.2"
+  }
+}

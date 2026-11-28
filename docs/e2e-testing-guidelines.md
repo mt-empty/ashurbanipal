@@ -129,3 +129,29 @@ Chromium with JS coverage (the `E2E_COVERAGE` switch in
 maps the page's V8 coverage back to `frontend/src` through a source map that
 `coverage/build-map.mjs` builds beside the page, never into it. It is a
 review aid, not a gate: a line that ran is not a line a test checked.
+
+## 7. Explore with Bombadil on demand
+
+`mise run frontend:explore` lets [Bombadil](https://antithesishq.github.io/bombadil/browser/1-introduction.html)
+click, type, filter, reload and go back and forward through the viewer for
+`BOMBADIL_TIME` (default 10m). It runs against the Node demo on the Postgres seed
+and checks the properties in `tools/bombadil/lib/properties.ts` on every state.
+It finds what no spec scripted, such as a race between two quick clicks, but it is
+random, so it is not a regression gate. `frontend-explore.yml` runs it nightly
+and on demand and keeps the trace for 14 days.
+
+- **Read the result.** The run prints each failed property once, with the state
+  it first failed in, and writes `tools/bombadil/results/summary.txt` and
+  `run.bin`. `node_modules/.bin/bombadil browser inspect results/run.bin` (from
+  `tools/bombadil`) shows every state with its screenshot.
+- **Replay.** `BOMBADIL_REPRODUCE=<trace> mise run frontend:explore` replays a
+  trace. A long trace often diverges, because the page's timing differs from run
+  to run. Shorten the case by hand instead.
+- **Act on a finding.** A real bug gets a Playwright spec that reproduces it, then
+  a fix. Until the fix lands, the property skips exactly that case under a
+  `// Known gap:` comment. A property that flags designed behaviour is the
+  property's bug: narrow it, and say in its comment which code makes the
+  behaviour designed.
+- **Keep the properties honest.** Bombadil acts about every 30 ms and never
+  waits for the page. A property about "after X" must check the first settled
+  state after X (see `reloadKeepsTheView`), not a state some time later.

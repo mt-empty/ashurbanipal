@@ -19,6 +19,8 @@ tools/e2e-tests/playwright-report/
 tools/e2e-tests/coverage-results/
 tools/e2e-tests/perf-results/
 tools/e2e-tests/playwright/.cache/
+tools/bombadil/node_modules/
+tools/bombadil/results/
 .pnpm-store/
 /conformance-report.json
 /.venv-schemathesis/
