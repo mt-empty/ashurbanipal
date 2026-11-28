@@ -50,9 +50,11 @@ export interface Tokenized {
 }
 
 const SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
-// A column, optionally qualified by a table alias (bare or "quoted"). A trailing
-// `alias.` with no name yet is still one token, so it can be completed.
-const IDENT = /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")\.[A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*/y;
+// A column, optionally qualified by a table alias, each part bare or "quoted". A quote
+// still open runs to the end of the text, and a trailing `alias.` with no name yet is
+// still one token, so either can be completed while it is typed.
+const IDENT =
+  /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")*")\.(?:"(?:[^"]|"")*"?|[A-Za-z0-9_]*)|[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")*"?/y;
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 // A path step: a bare key, digits (an index), or a 'quoted' key, closed or not.
 const STEP = /[A-Za-z_][A-Za-z0-9_]*|[0-9]+|'(?:[^']|'')*'?/y;

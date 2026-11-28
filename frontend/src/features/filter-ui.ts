@@ -18,7 +18,7 @@ import { type Completion, completionAt, expectsValue, optionsFor, stepOf } from 
 import { truncateType } from "../lib/join-types.js";
 import { type Doc, keysAt, valuesAt } from "../lib/json-doc.js";
 import { refKey, tableParams } from "../lib/table-ref.js";
-import { columnKey, columnNamed } from "./join-view.js";
+import { columnKey, columnNamed, filterColumn } from "./join-view.js";
 import { docsOf, numberFilterable, pathColumnProblem } from "./json-path.js";
 import { createSuggestList, type Suggestion } from "./suggest-list.js";
 import { keyDescriptionOf, tableMeta } from "./table-meta.js";
@@ -304,7 +304,7 @@ function updateFilterSuggestions(): void {
       ctx,
       columns.map((c) => ({
         label: columnKey(c),
-        insert: columnKey(c),
+        insert: filterColumn(c),
         note: truncateType(c.type),
         key: keyDescriptionOf(c, meta),
       })),

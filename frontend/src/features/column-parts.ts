@@ -2,7 +2,7 @@ import { copyText, el } from "../core/dom.js";
 import { columnTable } from "../core/state.js";
 import type { Column, Row, TableRef } from "../core/types.js";
 import { fkTarget, type KeyDescription, refTarget } from "../lib/column-key.js";
-import { filterClause, filterClauses, filterTooLong } from "../lib/filter-dsl.js";
+import { columnText, filterClause, filterClauses, filterTooLong } from "../lib/filter-dsl.js";
 import { near } from "../lib/table-ref.js";
 import type { TableMeta } from "./table-meta.js";
 
@@ -43,7 +43,7 @@ export function fkLink(col: Column, raw: string, row: Row, meta: TableMeta | und
   const owner = columnTable(col);
   if (owner === null) return null;
   if (ref) {
-    const clause = filterClause(ref.column, "=", raw);
+    const clause = filterClause(columnText(ref.column), "=", raw);
     if (filterTooLong(clause)) return null;
     return { title: `go to ${refTarget(ref)} = ${raw}`, target: near(owner, ref.schema, ref.table), clause };
   }

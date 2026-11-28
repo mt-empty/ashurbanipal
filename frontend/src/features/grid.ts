@@ -27,7 +27,15 @@ import { columnMinWidth } from "./column-widths.js";
 import { applyFilter, commonValueSource, commonValuesButton } from "./filter-ui.js";
 import { markGridDrawn } from "./grid-lock.js";
 import { switchToLeftJoin } from "./join-dialog.js";
-import { buildBands, buildEmptyJoin, columnKey, displayName, refreshBands, tableGroups } from "./join-view.js";
+import {
+  buildBands,
+  buildEmptyJoin,
+  columnKey,
+  displayName,
+  filterColumn,
+  refreshBands,
+  tableGroups,
+} from "./join-view.js";
 import { caseOnlyHint, matchSpans } from "./json-path.js";
 import { jsonLeafActions, jsonTreeOf, openRecordView } from "./record-view.js";
 import { openReferencedByPopover } from "./referenced-by.js";
@@ -109,7 +117,7 @@ export function renderHeader(columns: Column[]): void {
       const sourceMeta = tableMeta(source.table);
       const pkAlone = col.join === undefined ? singlePk : sourceMeta === undefined;
       const unique = (col.key === "pk" && pkAlone) || sourceMeta?.uniqueColumns.has(source.column);
-      if (!unique) head.appendChild(commonValuesButton(source.table, source.column, columnKey(col)));
+      if (!unique) head.appendChild(commonValuesButton(source.table, source.column, filterColumn(col)));
     }
     th.append(head, typeChip(col));
     tr.appendChild(th);
@@ -154,7 +162,7 @@ function showCellPop(e: MouseEvent, text: string, col: Column): void {
         $("cell-pop").hidePopover();
         run();
       };
-      $("cell-json").replaceChildren(jsonTreeOf(col, text, jsonLeafActions(col, columnKey(col), close)));
+      $("cell-json").replaceChildren(jsonTreeOf(col, text, jsonLeafActions(col, filterColumn(col), close)));
     } catch (err) {
       isJson = false;
       warnBadJsonCell(col, err);
@@ -216,7 +224,7 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext, changed
     td.appendChild(span);
     // Nothing to copy or expand for a null cell, but "filter by this
     // value" is still meaningful (IS NULL).
-    const clause = filterClause(columnKey(col), "IS NULL");
+    const clause = filterClause(filterColumn(col), "IS NULL");
     const actions = el("span", "cell-actions");
     actions.appendChild(
       eqButton(true, (e) => {
@@ -235,7 +243,7 @@ function buildCell(col: Column, row: Row, { hidden, meta }: CellContext, changed
     e.stopPropagation();
     copyText(raw, btn);
   };
-  const eq = eqClause(columnKey(col), raw);
+  const eq = eqClause(filterColumn(col), raw);
   if (eq === null) filterBtn.remove();
   else {
     filterBtn.onclick = (e) => {

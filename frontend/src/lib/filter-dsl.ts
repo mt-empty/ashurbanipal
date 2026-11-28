@@ -120,14 +120,14 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
     }
     return input.slice(start, pos);
   };
-  // A doubled "" decodes to a single literal ".
-  const parseQuotedQualifier = (): string => {
+  // A table alias or a column name in double quotes; a doubled "" decodes to a single literal ".
+  const parseQuotedName = (): string => {
     const start = pos;
     pos += 1; // opening quote
     let name = "";
     for (;;) {
       const c = peek();
-      if (c === null) throw err("unterminated quoted table alias", start);
+      if (c === null) throw err("unterminated quoted name", start);
       if (c === '"') {
         pos += 1;
         if (peek() === '"') {
@@ -139,18 +139,17 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
         pos += c.length;
       }
     }
-    if (name === "") throw err("empty table alias", start);
+    if (name === "") throw err("a quoted name can't be empty", start);
     return name;
   };
+  const parseNamePart = (): string => (peek() === '"' ? parseQuotedName() : parseName());
   const parseColumnName = (): ColumnRef => {
     const start = pos;
-    const quoted = aliases !== undefined && peek() === '"';
-    const first = quoted ? parseQuotedQualifier() : parseName();
-    if (!quoted && peek() !== ".") return { column: first, ...(aliases ? { join: 0 } : {}) };
+    const first = parseNamePart();
+    if (peek() !== ".") return { column: first, ...(aliases ? { join: 0 } : {}) };
     if (!aliases) throw err("qualified column names are only allowed in a join view; a JSON key takes ->", start);
-    if (peek() !== ".") throw err("expected . after the table alias", pos);
     pos += 1;
-    const column = parseName();
+    const column = parseNamePart();
     if (peek() === ".") throw err("a column takes one table alias only", pos);
     const join = aliases.indexOf(first);
     if (join < 0) throw err(`unknown table alias ${first}`, start);
@@ -393,8 +392,9 @@ export function quoteListItem(value: string): string {
   return /[,()]/.test(value) ? quoted(value) : quoteFilterValue(value);
 }
 
-// value is omitted for a valueless predicate (IS NULL). quoteFilterValue
-// guarantees the clause parses like a hand-typed one.
+// `column` is already as the box writes it (columnText, or the join view's
+// filterColumn); value is omitted for a valueless predicate (IS NULL).
+// quoteFilterValue guarantees the clause parses like a hand-typed one.
 export function filterClause(column: string, op: FilterOp, value?: string): string {
   return value === undefined ? `${column} ${op}` : `${column} ${op} ${quoteFilterValue(value)}`;
 }
@@ -434,9 +434,14 @@ export function pathEqClause(column: string, path: readonly PathStep[], raw: str
   return lhs === null ? null : eqClause(lhs, raw);
 }
 
-// AND of `column = value`: the composite-key drill-in from referenced-by.
+// A column name as the box writes it: bare when it reads back as that name, else in double quotes.
+export function columnText(name: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !/^NOT$/i.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+}
+
+// AND of `column = value` over raw column names: the composite-key drill-in from referenced-by.
 export function filterClauses(pairs: { column: string; value: string }[]): string {
-  return pairs.map((p) => filterClause(p.column, "=", p.value)).join(" AND ");
+  return pairs.map((p) => filterClause(columnText(p.column), "=", p.value)).join(" AND ");
 }
 
 // Where parseFilterDsl rejects `input`, as a string index; null when it parses.

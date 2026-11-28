@@ -746,6 +746,85 @@
       ]
     },
     {
+      "name": "V50",
+      "input": "\"first name\" = x",
+      "expect": [
+        {
+          "column": "first name",
+          "op": "=",
+          "value": "x"
+        }
+      ]
+    },
+    {
+      "name": "V51",
+      "input": "\"a\"\"b\" = 1",
+      "expect": [
+        {
+          "column": "a\"b",
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "V52",
+      "input": "\"not\" = 1",
+      "expect": [
+        {
+          "column": "not",
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "V53",
+      "input": "\"unit-price\"->k = 1",
+      "expect": [
+        {
+          "column": "unit-price",
+          "path": [
+            "k"
+          ],
+          "op": "=",
+          "value": "1"
+        }
+      ]
+    },
+    {
+      "name": "V54",
+      "input": "\"o\".\"unit price\" = 1",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "unit price",
+          "op": "=",
+          "value": "1",
+          "join": 0
+        }
+      ]
+    },
+    {
+      "name": "V55",
+      "input": "\"unit price\" = 1",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "unit price",
+          "op": "=",
+          "value": "1",
+          "join": 0
+        }
+      ]
+    },
+    {
       "name": "R1",
       "input": "",
       "expect_error": {
@@ -1076,6 +1155,34 @@
       "input": "doc->-1 = x",
       "expect_error": {
         "position": 5
+      }
+    },
+    {
+      "name": "R52",
+      "input": "\"\" = 1",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R53",
+      "input": "\"open = 1",
+      "expect_error": {
+        "position": 0
+      }
+    },
+    {
+      "name": "R54",
+      "input": "\"a\" .b = 1",
+      "expect_error": {
+        "position": 4
+      }
+    },
+    {
+      "name": "R55",
+      "input": "\"a\".b = 1",
+      "expect_error": {
+        "position": 0
       }
     },
     {

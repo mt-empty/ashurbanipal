@@ -1,6 +1,7 @@
 import { $, el } from "../core/dom.js";
 import { columnsInView, joinInView, state } from "../core/state.js";
 import type { Column, JoinDef } from "../core/types.js";
+import { columnText, tryParseFilterDsl } from "../lib/filter-dsl.js";
 import { labelSchemas, tableLabel } from "../lib/join-def.js";
 import { effectiveName, quoteJoinName } from "../lib/join-dsl.js";
 
@@ -14,11 +15,19 @@ export function columnKey(col: Column, def: JoinDef | undefined = joinInView()?.
   return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
 
-// The shown column a filter names. In a join view a plain name is the start
-// table's column (spec/filter-dsl.md).
+// The column as the filter box writes it: columnKey with each part bare or "quoted" so it reads back.
+export function filterColumn(col: Column, def: JoinDef | undefined = joinInView()?.def): string {
+  if (!def || col.join === undefined || col.column === undefined) return columnText(col.name);
+  return `${filterQualifier(effectiveName(def.tables[col.join]))}.${columnText(col.column)}`;
+}
+
+// The shown column a filter names, however the box spells it: read through the parser, so a
+// quoted or bare name, with or without its alias, is the same column. In a join view a plain
+// name is the start table's column (spec/filter-dsl.md).
 export function columnNamed(name: string | null): Column | undefined {
   if (name === null) return undefined;
-  return columnsInView()?.find((c) => columnKey(c) === name || (c.join === 0 && c.column === name));
+  const [c] = tryParseFilterDsl(`${name} IS NULL`, joinInView()?.def.tables.map(effectiveName)) ?? [];
+  return c === undefined ? undefined : conditionColumn(c);
 }
 
 // Whether a parsed condition (column plus its join position) names this column.

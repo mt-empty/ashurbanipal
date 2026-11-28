@@ -9,7 +9,7 @@ import { recordJson } from "../lib/json-text.js";
 import { foldDoc, type LeafActions, renderJsonTree } from "../lib/json-tree.js";
 import { copyButton, eqButton, fkLink, keyIcon, typeChip } from "./column-parts.js";
 import { applyFilter } from "./filter-ui.js";
-import { columnKey, displayName, tableGroups } from "./join-view.js";
+import { columnKey, displayName, filterColumn, tableGroups } from "./join-view.js";
 import { matchedPath, numberFilterable } from "./json-path.js";
 import { renderReferencedBy } from "./referenced-by.js";
 import { keyDescriptionOf, type TableMeta, tableMeta } from "./table-meta.js";
@@ -82,7 +82,7 @@ function fieldValue(col: Column, raw: string, row: Row, { def, meta, act }: Reco
     try {
       // Parse and render share one catch: a malformed tree build degrades
       // to plain text the same as unparseable JSON.
-      dd.appendChild(jsonTreeOf(col, raw, jsonLeafActions(col, columnKey(col, def), act)));
+      dd.appendChild(jsonTreeOf(col, raw, jsonLeafActions(col, filterColumn(col, def), act)));
       dd.classList.add("json-tree");
     } catch (e) {
       warnBadJsonCell(col, e);
@@ -118,7 +118,7 @@ function fieldActions(col: Column, raw: string | null, { def, act }: RecordConte
   const acts = el("span", "record-acts");
   // A json object or array with members filters from its tree's leaves; any other value keeps the field's own =.
   const fromTree = raw != null && col.class === "json" && /^\s*[[{]\s*[^\s\]}]/.test(raw);
-  const eq = fromTree ? null : eqClause(columnKey(col, def), raw);
+  const eq = fromTree ? null : eqClause(filterColumn(col, def), raw);
   if (eq !== null)
     acts.appendChild(
       eqButton(

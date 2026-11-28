@@ -1,10 +1,10 @@
 import { ApiError } from "../core/api.js";
 import { getAppliedFilterAst, lastRowsForView } from "../core/state.js";
 import type { Column, FilterCondition, FilterOp, PathStep, ViewData } from "../core/types.js";
-import { pathText } from "../lib/filter-dsl.js";
+import { columnText, pathText } from "../lib/filter-dsl.js";
 import { truncateType } from "../lib/join-types.js";
 import { compareText, type Doc, nodeAt, scanJson, spanAt, valuesAt } from "../lib/json-doc.js";
-import { columnKey, conditionColumn, conditionNames } from "./join-view.js";
+import { columnKey, conditionColumn, conditionNames, filterColumn } from "./join-view.js";
 
 // ---- JSON path filters: what the page says and marks around a
 // condition with a `path`. Everything here reads the rows already loaded; none
@@ -40,7 +40,7 @@ export function docsOf(data: ViewData, col: Column): Doc[] {
 
 function filterName(c: FilterCondition): string {
   const col = conditionColumn(c);
-  const column = col ? columnKey(col) : c.column;
+  const column = col ? filterColumn(col) : columnText(c.column);
   return (c.path && pathText(column, c.path)) ?? column;
 }
 

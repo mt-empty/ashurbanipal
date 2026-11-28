@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  columnText,
   eqClause,
   filterTooLong,
   parseFilterDsl,
@@ -74,6 +75,32 @@ test("quoteListItem output round-trips through an IN list unchanged", () => {
     const parsed = parseFilterDsl(`col IN (${quoteListItem(v)}, z)`);
     assert.deepEqual(parsed[0].value, [v, "z"]);
   }
+});
+
+// Click-to-filter, FK navigation and the referenced-by drill-in write columns with columnText.
+test("columnText writes any column name so the parser reads back that column", () => {
+  const names = [
+    "status",
+    "first name",
+    'a"b',
+    "not",
+    "NOT",
+    "Not",
+    "and",
+    "1x",
+    "é",
+    "unit-price",
+    "a.b",
+    "x->y",
+    " ",
+  ];
+  for (const name of names) {
+    const clause = `${columnText(name)} = 1`;
+    assert.deepEqual(parseFilterDsl(clause), [{ column: name, op: "=", value: "1" }], clause);
+  }
+  assert.equal(columnText("status"), "status");
+  assert.equal(columnText("not"), '"not"');
+  assert.equal(columnText('a"b'), '"a""b"');
 });
 
 test("a join alias spelled like a filter keyword parses once quoted", () => {

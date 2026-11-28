@@ -1657,13 +1657,13 @@ function parseFilterDsl(input2, aliases) {
     }
     return input2.slice(start, pos);
   };
-  const parseQuotedQualifier = () => {
+  const parseQuotedName = () => {
     const start = pos;
     pos += 1;
     let name = "";
     for (; ; ) {
       const c = peek();
-      if (c === null) throw err("unterminated quoted table alias", start);
+      if (c === null) throw err("unterminated quoted name", start);
       if (c === '"') {
         pos += 1;
         if (peek() === '"') {
@@ -1675,18 +1675,17 @@ function parseFilterDsl(input2, aliases) {
         pos += c.length;
       }
     }
-    if (name === "") throw err("empty table alias", start);
+    if (name === "") throw err("a quoted name can't be empty", start);
     return name;
   };
+  const parseNamePart = () => peek() === '"' ? parseQuotedName() : parseName();
   const parseColumnName = () => {
     const start = pos;
-    const quoted2 = aliases !== void 0 && peek() === '"';
-    const first = quoted2 ? parseQuotedQualifier() : parseName();
-    if (!quoted2 && peek() !== ".") return { column: first, ...aliases ? { join: 0 } : {} };
+    const first = parseNamePart();
+    if (peek() !== ".") return { column: first, ...aliases ? { join: 0 } : {} };
     if (!aliases) throw err("qualified column names are only allowed in a join view; a JSON key takes ->", start);
-    if (peek() !== ".") throw err("expected . after the table alias", pos);
     pos += 1;
-    const column = parseName();
+    const column = parseNamePart();
     if (peek() === ".") throw err("a column takes one table alias only", pos);
     const join = aliases.indexOf(first);
     if (join < 0) throw err(`unknown table alias ${first}`, start);
@@ -1929,8 +1928,11 @@ function pathEqClause(column, path, raw) {
   const lhs = pathText(column, path);
   return lhs === null ? null : eqClause(lhs, raw);
 }
+function columnText(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !/^NOT$/i.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+}
 function filterClauses(pairs) {
-  return pairs.map((p) => filterClause(p.column, "=", p.value)).join(" AND ");
+  return pairs.map((p) => filterClause(columnText(p.column), "=", p.value)).join(" AND ");
 }
 function filterDslErrorAt(input2, aliases) {
   try {
@@ -3529,7 +3531,7 @@ function expectsValue(expect) {
   return expect === "value" || expect === "listItem" || expect === "lowBound";
 }
 var SYMBOLS = [">=", "<=", "!=", ">", "<", "="];
-var IDENT = /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")\.[A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*/y;
+var IDENT = /(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")*")\.(?:"(?:[^"]|"")*"?|[A-Za-z0-9_]*)|[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")*"?/y;
 var WORD_CHAR = /[\p{L}\p{N}_]/u;
 var STEP = /[A-Za-z_][A-Za-z0-9_]*|[0-9]+|'(?:[^']|'')*'?/y;
 function stepOf(text) {
@@ -3726,9 +3728,14 @@ function columnKey(col, def = joinInView()?.def) {
   if (!def || col.join === void 0 || col.column === void 0) return col.name;
   return `${filterQualifier(effectiveName(def.tables[col.join]))}.${col.column}`;
 }
+function filterColumn(col, def = joinInView()?.def) {
+  if (!def || col.join === void 0 || col.column === void 0) return columnText(col.name);
+  return `${filterQualifier(effectiveName(def.tables[col.join]))}.${columnText(col.column)}`;
+}
 function columnNamed(name) {
   if (name === null) return void 0;
-  return columnsInView()?.find((c) => columnKey(c) === name || c.join === 0 && c.column === name);
+  const [c] = tryParseFilterDsl(`${name} IS NULL`, joinInView()?.def.tables.map(effectiveName)) ?? [];
+  return c === void 0 ? void 0 : conditionColumn(c);
 }
 function conditionNames(c, col) {
   return c.join === void 0 ? col.join === void 0 && col.name === c.column : col.join === c.join && col.column === c.column;
@@ -5476,7 +5483,7 @@ function fkLink(col, raw, row2, meta) {
   const owner = columnTable(col);
   if (owner === null) return null;
   if (ref) {
-    const clause2 = filterClause(ref.column, "=", raw);
+    const clause2 = filterClause(columnText(ref.column), "=", raw);
     if (filterTooLong(clause2)) return null;
     return { title: `go to ${refTarget(ref)} = ${raw}`, target: near(owner, ref.schema, ref.table), clause: clause2 };
   }
@@ -6357,7 +6364,7 @@ function docsOf(data, col) {
 }
 function filterName(c) {
   const col = conditionColumn(c);
-  const column = col ? columnKey(col) : c.column;
+  const column = col ? filterColumn(col) : columnText(c.column);
   return (c.path && pathText(column, c.path)) ?? column;
 }
 function pathColumnProblem(ast) {
@@ -6775,7 +6782,7 @@ function updateFilterSuggestions() {
       ctx,
       columns.map((c) => ({
         label: columnKey(c),
-        insert: columnKey(c),
+        insert: filterColumn(c),
         note: truncateType(c.type),
         key: keyDescriptionOf(c, meta)
       }))
@@ -7394,7 +7401,7 @@ function fieldValue(col, raw, row2, { def, meta, act }) {
   const dd = el("dd");
   if (rendersAsJson(col, raw)) {
     try {
-      dd.appendChild(jsonTreeOf(col, raw, jsonLeafActions(col, columnKey(col, def), act)));
+      dd.appendChild(jsonTreeOf(col, raw, jsonLeafActions(col, filterColumn(col, def), act)));
       dd.classList.add("json-tree");
     } catch (e) {
       warnBadJsonCell(col, e);
@@ -7426,7 +7433,7 @@ function nullValue() {
 function fieldActions(col, raw, { def, act }) {
   const acts = el("span", "record-acts");
   const fromTree = raw != null && col.class === "json" && /^\s*[[{]\s*[^\s\]}]/.test(raw);
-  const eq = fromTree ? null : eqClause(columnKey(col, def), raw);
+  const eq = fromTree ? null : eqClause(filterColumn(col, def), raw);
   if (eq !== null)
     acts.appendChild(
       eqButton(
@@ -7585,7 +7592,7 @@ function renderHeader(columns) {
       const sourceMeta = tableMeta(source.table);
       const pkAlone = col.join === void 0 ? singlePk : sourceMeta === void 0;
       const unique = col.key === "pk" && pkAlone || sourceMeta?.uniqueColumns.has(source.column);
-      if (!unique) head.appendChild(commonValuesButton(source.table, source.column, columnKey(col)));
+      if (!unique) head.appendChild(commonValuesButton(source.table, source.column, filterColumn(col)));
     }
     th.append(head, typeChip(col));
     tr.appendChild(th);
@@ -7623,7 +7630,7 @@ function showCellPop(e, text, col) {
         $("cell-pop").hidePopover();
         run();
       };
-      $("cell-json").replaceChildren(jsonTreeOf(col, text, jsonLeafActions(col, columnKey(col), close)));
+      $("cell-json").replaceChildren(jsonTreeOf(col, text, jsonLeafActions(col, filterColumn(col), close)));
     } catch (err) {
       isJson = false;
       warnBadJsonCell(col, err);
@@ -7665,7 +7672,7 @@ function buildCell(col, row2, { hidden, meta }, changed = false) {
     const span = el("span", "cell-text cell-null", "\u2205");
     span.title = "null";
     td.appendChild(span);
-    const clause = filterClause(columnKey(col), "IS NULL");
+    const clause = filterClause(filterColumn(col), "IS NULL");
     const actions = el("span", "cell-actions");
     actions.appendChild(
       eqButton(true, (e) => {
@@ -7684,7 +7691,7 @@ function buildCell(col, row2, { hidden, meta }, changed = false) {
     e.stopPropagation();
     copyText(raw, btn);
   };
-  const eq = eqClause(columnKey(col), raw);
+  const eq = eqClause(filterColumn(col), raw);
   if (eq === null) filterBtn.remove();
   else {
     filterBtn.onclick = (e) => {

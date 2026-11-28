@@ -59,10 +59,12 @@ simple_condition
 list        = "(" , ows , item , { ows , "," , ows , item } , ows , ")" ;
 item        = quoted | list_bare ;
 list_bare   = { any-char-except-ws-quote-comma-parens }- ;
-column      = [ qualifier , "." ] , name , { path_step } ;  (* qualifier only in a join view, §3 *)
+column      = [ qualifier , "." ] , colname , { path_step } ;  (* qualifier only in a join view, §3 *)
+colname     = name | quoted_name ;
 path_step   = ( "->>" | "->" ) , ( name | digits | quoted ) ;  (* at most 8; no whitespace *)
 digits      = digit , { digit } ;                  (* an array index, 0 to 2147483647 *)
-qualifier   = name | '"' , { any-char-except-quote | '""' } , '"' ;   (* quoted: at least one char *)
+qualifier   = name | quoted_name ;
+quoted_name = '"' , { any-char-except-quote | '""' } , '"' ;   (* at least one char *)
 name        = ( letter | "_" ) , { letter | digit | "_" } ;
 operator    = "=" | "!=" | ">=" | "<=" | ">" | "<" | "LIKE" | "ILIKE" ;
 value       = quoted | bare ;
@@ -77,6 +79,12 @@ Notes:
 - **Keywords** (`AND`, `OR`, `IS`, `NOT`, `NULL`, `LIKE`, `ILIKE`, `IN`,
   `BETWEEN`) are case-insensitive. Column names are matched case-sensitively against the
   schema allow-list.
+- **Quoted names** (`"first name" = x`, `"a""b" = 1`) write a column or a
+  join alias that is not a bare `name`: any characters, `""` for a literal
+  `"`, at least one character. A quoted column works in any view and may
+  carry a path (`"unit-price"->k`); as for a bare one, no whitespace may sit
+  between it and its `.` or its arrows. In a join view a quoted name with no
+  `.` after it is a column of the start table, like a bare one.
 - **Qualified columns** (`alias.column`) are accepted only in a join view
   (§3). No whitespace is allowed around the `.`, and only one qualifier is
   allowed (`a.b.c` is a parse error). Outside a join view a `.` in a column
@@ -254,6 +262,12 @@ fixtures, not this table.)
 | V47 | `doc->a->b->c->d->e->f->g->h = 1` | 8 steps, the most allowed |
 | V48 | `doc->n IN (9, 10) AND NOT doc->n BETWEEN 1 AND 2 OR doc->status IS NULL` | a path with IN, NOT BETWEEN and IS NULL |
 | V49 | `doc->'$'->'.'->'['->'*'->'ü' = x` | characters a JSON path language would read are plain keys once quoted |
+| V50 | `"first name" = x` | a quoted column: `(first name, =, "x")` |
+| V51 | `"a""b" = 1` | `""` is a literal quote: `(a"b, =, "1")` |
+| V52 | `"not" = 1` | a keyword quoted is a column: `(not, =, "1")` |
+| V53 | `"unit-price"->k = 1` | a quoted column with a path: `(unit-price, ["k"], =, "1")` |
+| V54 | `"o"."unit price" = 1` with aliases `[o, u]` | quoted alias and column: `(join 0, unit price, =, "1")` |
+| V55 | `"unit price" = 1` with aliases `[o, u]` | a quoted name with no `.` is a column of position 0 |
 
 ### Rejected (parse errors)
 
@@ -310,6 +324,10 @@ fixtures, not this table.)
 | R49 | `doc->2147483648 = x` | an index past 2147483647 |
 | R50 | `doc->= x` | an arrow with no step |
 | R51 | `doc->-1 = x` | an index can't be negative |
+| R52 | `"" = 1` | empty quoted name |
+| R53 | `"open = 1` | unterminated quoted name |
+| R54 | `"a" .b = 1` | no whitespace before the `.` |
+| R55 | `"a".b = 1` | a qualified column outside a join view, quoted or not |
 
 ### Adversarial (must parse *or* reject safely — never reach SQL text)
 
@@ -344,7 +362,8 @@ navigation, the referenced-by drill-in, and the common-values dropdown.
 They build text through `quoteFilterValue()`, `filterClause()`,
 `eqClause()`, `filterClauses()`, `pathText()` and `pathEqClause()` in
 `frontend/src/lib/filter-dsl.ts`,
-which implement §2's quoting notes — bare when safe, single-quoted with
+which implement §2's quoting notes — a column bare when it is a `name`
+other than `NOT`, double-quoted otherwise; a value bare when safe, single-quoted with
 `''`-escaping otherwise, exact-match `AND`/`OR`/`NOT` forced to quote, and
 `NULL` too, since a list item or a `BETWEEN` bound refuses it bare.
 They emit only `column = value` and, for a null cell, `column IS NULL`;
