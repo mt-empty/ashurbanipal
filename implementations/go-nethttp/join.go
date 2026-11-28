@@ -449,20 +449,18 @@ type keyPart struct {
 // groupUniqueKeys folds parts, ordered by index and then key position, into
 // keys, dropping a key with any unusable part.
 func groupUniqueKeys(parts []keyPart) []uniqueKey {
-	var keys []uniqueKey
-	var usable []bool
-	for _, p := range parts {
-		if len(keys) == 0 || keys[len(keys)-1].name != p.index {
-			keys = append(keys, uniqueKey{name: p.index, primary: p.primary})
-			usable = append(usable, true)
-		}
-		last := len(keys) - 1
-		keys[last].columns = append(keys[last].columns, p.column)
-		usable[last] = usable[last] && p.usable
+	unusable := map[string]bool{}
+	keys := make([]uniqueKey, len(parts))
+	for i, p := range parts {
+		unusable[p.index] = unusable[p.index] || !p.usable
+		keys[i] = uniqueKey{name: p.index, primary: p.primary, columns: []string{p.column}}
 	}
+	keys = mergeRuns(keys,
+		func(a, b uniqueKey) bool { return a.name == b.name },
+		func(last *uniqueKey, b uniqueKey) { last.columns = append(last.columns, b.columns...) })
 	out := keys[:0]
-	for i, k := range keys {
-		if usable[i] {
+	for _, k := range keys {
+		if !unusable[k.name] {
 			out = append(out, k)
 		}
 	}

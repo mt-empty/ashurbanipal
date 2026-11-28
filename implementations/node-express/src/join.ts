@@ -1,4 +1,12 @@
-import type { ColumnClassName, ColumnInfo, ColumnRef, KeyKind } from "./db/types.js";
+import {
+  type ColumnClassName,
+  type ColumnInfo,
+  type ColumnRef,
+  concatColumns,
+  type KeyKind,
+  mergeRuns,
+  sameName,
+} from "./db/types.js";
 import { FilterError, NotAllowedError } from "./errors.js";
 import {
   type Condition,
@@ -324,17 +332,9 @@ export interface KeyPart {
 
 /** Folds parts, ordered by index and then key position, into keys, dropping a key with an unusable part. */
 export function groupUniqueKeys(parts: KeyPart[]): UniqueKey[] {
-  const keys: (UniqueKey & { usable: boolean })[] = [];
-  for (const p of parts) {
-    let last = keys[keys.length - 1];
-    if (!last || last.name !== p.index) {
-      last = { name: p.index, primary: p.primary, columns: [], usable: true };
-      keys.push(last);
-    }
-    last.columns.push(p.column);
-    last.usable &&= p.usable;
-  }
-  return keys.filter((k) => k.usable).map(({ name, primary, columns }) => ({ name, primary, columns }));
+  const unusable = new Set(parts.filter((p) => !p.usable).map((p) => p.index));
+  const keys = parts.map((p) => ({ name: p.index, primary: p.primary, columns: [p.column] }));
+  return mergeRuns(keys, sameName, concatColumns).filter((k) => !unusable.has(k.name));
 }
 
 /**
