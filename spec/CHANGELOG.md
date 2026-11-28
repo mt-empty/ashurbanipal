@@ -167,3 +167,13 @@ listed host gets the same responses as before, so v1 stands.
 the host answers any other request, and that `{mount}` MUST NOT be the root
 path. No port served a working root mount in every case, and no response
 to a viewer request changes, so v1 stands.
+
+A Postgres table with inheritance children returns their rows from §5.4, as
+a plain `select` does, so its other answers now describe those rows too:
+§5.3's `approx_rows` and §5.4.4's `total_approx` sum the estimates of the
+table and its descendants, §5.4.1 reports no `key: "pk"` on it and §5.4
+gives it no tie-break key (Postgres enforces neither key across the
+children), and §5.5 reads its with-children statistics, returning no values
+when there are none. Before, each of these described the parent's own rows
+only. Changing what an existing route returns is not additive, so this
+lands under §7's alpha exception, with every port changed together.

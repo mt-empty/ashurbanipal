@@ -221,8 +221,9 @@ paths:
             unsortable_column. The table's tie-break key (its primary
             key, else its shortest NOT NULL unique index) follows, so
             paging never repeats or skips a row; with no sort, rows come
-            in that key's order, ascending. A table with neither has no
-            tie-break (protocol §5.4).
+            in that key's order, ascending. A table with neither, or a
+            Postgres table with inheritance children, has no tie-break
+            (protocol §5.4).
           schema:
             type: string
           examples:
@@ -724,7 +725,8 @@ components:
           enum: [pk, fk]
           description: >
             Omitted for non-key columns and for members of composite
-            foreign keys (composite FKs are omitted entirely).
+            foreign keys (composite FKs are omitted entirely). A Postgres
+            table with inheritance children reports no pk.
         references:
           type: object
           description: >
@@ -772,8 +774,9 @@ components:
           type: integer
           format: int64
           description: >
-            Whole-table pg_class.reltuples estimate; unaffected by
-            filter; may be stale or -1 before first ANALYZE.
+            Whole-table pg_class.reltuples estimate, summed over any
+            inheritance children; unaffected by filter; may be stale or
+            -1 before first ANALYZE.
 
     CountsResponse:
       type: object
@@ -790,7 +793,9 @@ components:
               approx_rows:
                 type: integer
                 format: int64
-                description: May be stale or -1 before first ANALYZE.
+                description: >
+                  Summed over any inheritance children; may be stale or -1
+                  before first ANALYZE.
 
     CommonValuesResponse:
       type: object
@@ -811,7 +816,9 @@ components:
               freq:
                 type: number
                 format: float
-                description: Fraction of rows, in (0, 1].
+                description: >
+                  Fraction of the rows the data route returns for the table,
+                  in (0, 1].
 
     ReferencedByResponse:
       type: object

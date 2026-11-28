@@ -200,10 +200,20 @@ func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema,
 		 order by ordinal_position`, schema, table)
 }
 
+// pgApproxRowsSQL is pg_class c's row estimate, summed over an inheritance
+// parent's descendants (docs/adapter-decisions.md, inheritance parents).
+const pgApproxRowsSQL = `case when c.relhassubclass then (
+   with recursive tree(oid) as (
+     select c.oid union select i.inhrelid from pg_inherits i join tree on i.inhparent = tree.oid)
+   select case when bool_and(d.reltuples < 0) then -1 else sum(greatest(d.reltuples, 0)) end
+     from tree join pg_class d on d.oid = tree.oid)
+ else c.reltuples end::bigint`
+
 // pgKeyMetadataSQL reads pg_constraint, which has no privilege filter, so a
 // role that doesn't own the table still sees its keys. Composite foreign keys,
 // and ones whose target the role can't open, are left out
-// (`spec/protocol.md` §5.4.1).
+// (`spec/protocol.md` §5.4.1). An inheritance parent reports no primary key
+// (docs/adapter-decisions.md, inheritance parents).
 const pgKeyMetadataSQL = `select con.contype = 'p', a.attname, rn.nspname, rc.relname, ra.attname
  from pg_constraint con
  cross join lateral unnest(con.conkey) k(attnum)
@@ -212,7 +222,7 @@ const pgKeyMetadataSQL = `select con.contype = 'p', a.attname, rn.nspname, rc.re
  left join pg_namespace rn on rn.oid = rc.relnamespace
  left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1]
  where con.conrelid = $1
-   and (con.contype = 'p'
+   and ((con.contype = 'p' and not exists (select 1 from pg_inherits where inhparent = con.conrelid))
         or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r'
             and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))`
 
@@ -324,7 +334,8 @@ func (c *PostgresSource) tableMeta(ctx context.Context, tx queryer, schema, tabl
 // ties: plain key columns (INCLUDE columns left out), not partial, all NOT
 // NULL, and each in its column's own collation, so the key is unique under
 // the order by. pg_index has no privilege filter, unlike information_schema, so a
-// role with only SELECT still sees the key.
+// role with only SELECT still sees the key. None for an inheritance parent
+// (docs/adapter-decisions.md, inheritance parents).
 func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([]uniqueKey, error) {
 	rows, err := tx.QueryContext(ctx,
 		`select c.relname, i.indisprimary, a.attname, a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation
@@ -334,6 +345,7 @@ func (c *PostgresSource) uniqueKeys(ctx context.Context, tx queryer, oid int) ([
 		 join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
 		 where i.indrelid = $1 and i.indisunique and i.indisvalid
 		   and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts
+		   and not exists (select 1 from pg_inherits where inhparent = i.indrelid)
 		 order by c.relname, k.n`, oid)
 	if err != nil {
 		return nil, err
@@ -525,7 +537,7 @@ func (c *PostgresSource) TableCounts(ctx context.Context, schema *string) ([]Cou
 	// Same has_table_privilege filter as ListTables, so the count column
 	// never names a table the table list won't show.
 	rows, err := tx.QueryContext(ctx,
-		`select c.relname::text, c.reltuples::bigint
+		`select c.relname::text, `+pgApproxRowsSQL+`
 		 from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
 		 where n.nspname = $1 and c.relkind = 'r'
@@ -671,7 +683,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 
 	var totalApprox int64
 	err = tx.QueryRowContext(queryCtx,
-		`select reltuples::bigint from pg_class c
+		`select `+pgApproxRowsSQL+` from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
 		 where n.nspname = $1 and c.relname = $2`, realSchema, table).Scan(&totalApprox)
 	if err != nil {
@@ -697,7 +709,8 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 		return nil, err
 	}
 
-	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
+	oid, err := c.readableTableOID(ctx, tx, realSchema, table)
+	if err != nil {
 		return nil, err
 	}
 	columnNames, err := c.allowedColumns(ctx, tx, realSchema, table)
@@ -712,14 +725,16 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	ctx, cancel := c.bounded(ctx)
 	defer cancel()
 
-	// most_common_vals is anyarray; ::text::text[] reads it uniformly.
-	// NULL (no ANALYZE stats yet) unnests to zero rows, not an error.
+	// most_common_vals is anyarray; ::text::text[] reads it uniformly, and
+	// NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance parent
+	// reads only its inherited row (docs/adapter-decisions.md, inheritance parents).
 	rows, err := tx.QueryContext(ctx,
 		`select t.val, t.freq
 		 from pg_stats,
 		      lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
 		 where schemaname = $1 and tablename = $2 and attname = $3
-		 order by t.freq desc`, realSchema, table, realColumn)
+		   and inherited = exists (select 1 from pg_inherits where inhparent = $4)
+		 order by t.freq desc`, realSchema, table, realColumn, oid)
 	if err != nil {
 		return nil, err
 	}

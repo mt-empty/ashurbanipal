@@ -58,6 +58,30 @@ const DIALECT: Dialect = Dialect {
     json_path,
 };
 
+/// `pg_class c`'s row estimate, summed over an inheritance parent's
+/// descendants (docs/adapter-decisions.md, inheritance parents).
+macro_rules! approx_rows_sql {
+    () => {
+        "case when c.relhassubclass then ( \
+           with recursive tree(oid) as ( \
+             select c.oid union select i.inhrelid from pg_inherits i join tree on i.inhparent = tree.oid) \
+           select case when bool_and(d.reltuples < 0) then -1 else sum(greatest(d.reltuples, 0)) end \
+             from tree join pg_class d on d.oid = tree.oid) \
+         else c.reltuples end::bigint"
+    };
+}
+
+/// True when the table `oid` (an SQL expression) has inheritance children.
+macro_rules! has_children_sql {
+    ($oid:literal) => {
+        concat!(
+            "exists (select 1 from pg_inherits where inhparent = ",
+            $oid,
+            ")"
+        )
+    };
+}
+
 /// The typed filter comparison for an `information_schema.columns.data_type`
 /// (`spec/protocol.md` §5.4.2); the cast target matches the column's own type
 /// so `real` compares as `real`.
@@ -495,9 +519,11 @@ impl PgPoolSource {
         schema: &str,
         table: i32,
     ) -> Result<(HashSet<String>, HashMap<String, ColumnRef>), DbError> {
+        // An inheritance parent reports no primary key (docs/adapter-decisions.md, inheritance parents).
         let rows =
             sqlx::query_as::<_, (bool, String, Option<String>, Option<String>, Option<String>)>(
-                "select con.contype = 'p', a.attname, rn.nspname, rc.relname, ra.attname \
+                concat!(
+                    "select con.contype = 'p', a.attname, rn.nspname, rc.relname, ra.attname \
              from pg_constraint con \
              cross join lateral unnest(con.conkey) k(attnum) \
              join pg_attribute a on a.attrelid = con.conrelid and a.attnum = k.attnum \
@@ -505,9 +531,12 @@ impl PgPoolSource {
              left join pg_namespace rn on rn.oid = rc.relnamespace \
              left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1] \
              where con.conrelid = $1 \
-               and (con.contype = 'p' \
+               and ((con.contype = 'p' and not ",
+                    has_children_sql!("con.conrelid"),
+                    ") \
                     or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r' \
-                        and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))",
+                        and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))"
+                ),
             )
             .bind(table)
             .fetch_all(&mut **tx)
@@ -613,14 +642,15 @@ impl DbSource for PgPoolSource {
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
         // Same `has_table_privilege` filter as `list_tables`, so the count
         // column never names a table the table list won't show.
-        let rows = sqlx::query_as::<_, (String, i64)>(
-            "select c.relname::text, c.reltuples::bigint \
-             from pg_class c \
+        let rows = sqlx::query_as::<_, (String, i64)>(concat!(
+            "select c.relname::text, ",
+            approx_rows_sql!(),
+            " from pg_class c \
              join pg_namespace n on n.oid = c.relnamespace \
              where n.nspname = $1 and c.relkind = 'r' \
                and has_table_privilege(c.oid, 'SELECT') \
-             order by c.relname",
-        )
+             order by c.relname"
+        ))
         .bind(schema.as_str())
         .fetch_all(&mut *tx)
         .await?;
@@ -685,11 +715,14 @@ impl DbSource for PgPoolSource {
         let pg_rows = query.fetch_all(&mut *tx).await.map_err(|e| {
             map_select_denied(e, found.name.as_str(), opts.sort.as_deref(), filtered)
         })?;
-        let total_approx =
-            sqlx::query_scalar::<_, i64>("select reltuples::bigint from pg_class where oid = $1")
-                .bind(found.oid)
-                .fetch_one(&mut *tx)
-                .await?;
+        let total_approx = sqlx::query_scalar::<_, i64>(concat!(
+            "select ",
+            approx_rows_sql!(),
+            " from pg_class c where c.oid = $1"
+        ))
+        .bind(found.oid)
+        .fetch_one(&mut *tx)
+        .await?;
         tx.commit().await?;
 
         let rows = pg_rows
@@ -774,8 +807,10 @@ impl DbSource for PgPoolSource {
     ) -> Result<Vec<(String, f32)>, DbError> {
         let mut tx = self.bounded_tx(CATALOG_TIMEOUT_SECS).await?;
         let schema = self.resolve_schema_in_tx(&mut tx, schema).await?;
-        self.readable_table_oid_in_tx(&mut tx, schema.as_str(), table)
-            .await?;
+        let oid = self
+            .readable_table_oid_in_tx(&mut tx, schema.as_str(), table)
+            .await?
+            .oid;
         let table = table.to_string();
         let columns = self
             .allowed_columns_in_tx(&mut tx, schema.as_str(), &table)
@@ -788,19 +823,21 @@ impl DbSource for PgPoolSource {
             })?
             .clone();
 
-        // most_common_vals is anyarray; ::text::text[] reads it uniformly
-        // without fighting Rust-side type inference. NULL (no ANALYZE stats
-        // yet) unnests to zero rows, not an error.
-        let rows = sqlx::query_as::<_, (String, f32)>(
+        // most_common_vals is anyarray; ::text::text[] reads it uniformly, and
+        // NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance
+        // parent reads only its `inherited` row (docs/adapter-decisions.md, inheritance parents).
+        let rows = sqlx::query_as::<_, (String, f32)>(concat!(
             "select t.val, t.freq \
              from pg_stats, \
                   lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) \
-             where schemaname = $1 and tablename = $2 and attname = $3 \
-             order by t.freq desc",
-        )
+             where schemaname = $1 and tablename = $2 and attname = $3 and inherited = ",
+            has_children_sql!("$4"),
+            " order by t.freq desc"
+        ))
         .bind(schema.as_str())
         .bind(&table)
         .bind(&column)
+        .bind(oid)
         .fetch_all(&mut *tx)
         .await?;
 
@@ -919,12 +956,13 @@ impl DbSource for PgPoolSource {
 /// columns (`INCLUDE` columns left out), not partial, all NOT NULL, and each
 /// in its column's own collation, so the key is unique under the order by.
 /// `pg_index` has no privilege filter, unlike `information_schema`, so a role
-/// with only `SELECT` still sees the key.
+/// with only `SELECT` still sees the key. None for an inheritance parent
+/// (docs/adapter-decisions.md, inheritance parents).
 async fn unique_keys_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     table: i32,
 ) -> Result<Vec<UniqueKey>, DbError> {
-    let rows = sqlx::query_as::<_, (String, bool, Vec<String>)>(
+    let rows = sqlx::query_as::<_, (String, bool, Vec<String>)>(concat!(
         "select c.relname::text, i.indisprimary, u.cols \
          from pg_index i \
          join pg_class c on c.oid = i.indexrelid \
@@ -936,8 +974,9 @@ async fn unique_keys_in_tx(
             where k.n <= i.indnkeyatts) u \
          where i.indrelid = $1 and i.indisunique and i.indisvalid \
            and i.indpred is null and i.indexprs is null \
-           and (i.indisprimary or u.usable)",
-    )
+           and (i.indisprimary or u.usable) and not ",
+        has_children_sql!("i.indrelid")
+    ))
     .bind(table)
     .fetch_all(&mut **tx)
     .await?;

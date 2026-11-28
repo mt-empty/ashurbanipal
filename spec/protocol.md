@@ -252,7 +252,10 @@ Response:
   estimate mechanism at all — clients MUST tolerate both. An engine with no
   such catalog MAY return `-1` unconditionally rather than pay a full-table
   scan to produce an exact count — see `docs/adapter-decisions.md` for the
-  per-backend choice.
+  per-backend choice. It counts every row §5.4 returns for the table, so a
+  Postgres table with inheritance children counts their rows too; a table in
+  that tree with no estimate yet adds nothing, and the figure is `-1` only
+  when no table in the tree has one.
 
 ### 5.4 `GET {mount}/api/tables/data`
 
@@ -295,7 +298,9 @@ Paginated, filtered, sorted rows for a single table.
      `NOT NULL`, each in its column's own collation, and which is not
      partial; a tie between such indexes is
      broken the same way on every request. A key with a column the role
-     cannot read is skipped.
+     cannot read is skipped. A Postgres table with inheritance children has
+     no tie-break key: its keys cover its own rows, not the children's rows
+     it also returns.
 
   Every key uses the `order` direction, which applies only when `sort` is
   given: with no `sort`, rows come in tie-break key order, ascending. A
@@ -356,7 +361,9 @@ per-engine source is in `spec/openapi.yaml`.
   table's primary key *and* a foreign key (the 1:1 "detail table" shape,
   e.g. `order_extra.order_id integer primary key references orders(id)`)
   reports `key: "pk"` — primary-key-ness wins the single-value field —
-  but see `references` below, which is populated regardless.
+  but see `references` below, which is populated regardless. A Postgres
+  table with inheritance children reports no `"pk"`, for the same reason it
+  has no tie-break key.
 - `references` — `{table, column}`, present whenever the column is a
   foreign key, independent of what `key` reports (so it MUST be present
   for `key: "fk"`, and MAY also be present alongside `key: "pk"` for a
@@ -607,7 +614,8 @@ Response:
   §6's timeout invariant like any other query.
 - A column with no statistics available (never analyzed, or all-unique)
   MUST yield an empty `values` list, not an error.
-- `freq` is the fraction of rows (0–1], most frequent first.
+- `freq` is the fraction of rows §5.4 returns for the table (0–1], most
+  frequent first.
 - `value` strings SHOULD match the §5.4.3 rendering of the same data
   (so a boolean read as `t`/`f` from the stats array's text form is
   normalized to `true`/`false`), so a value can round-trip

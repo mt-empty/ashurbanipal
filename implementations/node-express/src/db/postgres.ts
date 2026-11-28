@@ -123,6 +123,14 @@ export function pgColumnClass(dataType: string, udtSchema: string, udtName: stri
   }
 }
 
+/** `pg_class c`'s row estimate, summed over an inheritance parent's descendants (docs/adapter-decisions.md, inheritance parents). */
+const APPROX_ROWS_SQL = `case when c.relhassubclass then (
+     with recursive tree(oid) as (
+       select c.oid union select i.inhrelid from pg_inherits i join tree on i.inhparent = tree.oid)
+     select case when bool_and(d.reltuples < 0) then -1 else sum(greatest(d.reltuples, 0)) end
+       from tree join pg_class d on d.oid = tree.oid)
+   else c.reltuples end::bigint`;
+
 /** Postgres `DbSource`; `SET LOCAL` scopes query timeouts (`spec/protocol.md` §6). */
 export class PostgresSource implements DbSource {
   readonly engine = "postgres";
@@ -232,7 +240,8 @@ export class PostgresSource implements DbSource {
 
   // pg_constraint has no privilege filter, so a role that doesn't own the
   // table still sees its keys. Composite foreign keys, and ones whose target
-  // the role can't open, are left out (spec/protocol.md §5.4.1).
+  // the role can't open, are left out (spec/protocol.md §5.4.1). An
+  // inheritance parent reports no primary key (docs/adapter-decisions.md, inheritance parents).
   private async keyMetadata(
     client: PoolClient,
     schema: string,
@@ -255,7 +264,7 @@ export class PostgresSource implements DbSource {
        left join pg_namespace rn on rn.oid = rc.relnamespace
        left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1]
        where con.conrelid = $1
-         and (con.contype = 'p'
+         and ((con.contype = 'p' and not exists (select 1 from pg_inherits where inhparent = con.conrelid))
               or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r'
                   and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))`,
       [oid],
@@ -306,7 +315,7 @@ export class PostgresSource implements DbSource {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const { rows } = await client.query<{ relname: string; reltuples: string }>(
-        `select c.relname::text, c.reltuples::bigint::text as reltuples
+        `select c.relname::text, (${APPROX_ROWS_SQL})::text as reltuples
          from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = $1 and c.relkind = 'r'
@@ -375,7 +384,8 @@ export class PostgresSource implements DbSource {
   // columns (INCLUDE columns left out), not partial, all NOT NULL, and each in
   // its column's own collation, so the key is unique under the order by.
   // pg_index has no privilege filter, unlike information_schema, so a role
-  // with only SELECT still sees the key.
+  // with only SELECT still sees the key. None for an inheritance parent
+  // (docs/adapter-decisions.md, inheritance parents).
   private async uniqueKeys(client: PoolClient, oid: number): Promise<UniqueKey[]> {
     const { rows } = await client.query<{ index: string; primary: boolean; column: string; usable: boolean }>(
       `select c.relname as index, i.indisprimary as primary, a.attname as column,
@@ -386,6 +396,7 @@ export class PostgresSource implements DbSource {
        join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum
        where i.indrelid = $1 and i.indisunique and i.indisvalid
          and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts
+         and not exists (select 1 from pg_inherits where inhparent = i.indrelid)
        order by c.relname, k.n`,
       [oid],
     );
@@ -465,7 +476,7 @@ export class PostgresSource implements DbSource {
       const outRows = dataRows.map((row: Record<string, unknown>) => rowToJson(row, columnNames));
 
       const { rows: countRows } = await client.query<{ reltuples: string }>(
-        `select reltuples::bigint::text as reltuples from pg_class c
+        `select (${APPROX_ROWS_SQL})::text as reltuples from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = $1 and c.relname = $2`,
         [realSchema, table],
@@ -484,19 +495,21 @@ export class PostgresSource implements DbSource {
   ): Promise<CommonValueEntry[]> {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
-      await this.readableTableOid(client, realSchema, table);
+      const oid = await this.readableTableOid(client, realSchema, table);
       const columnNames = await this.allowedColumns(client, realSchema, table);
       const realColumn = requireExact(columnNames, column, "column");
 
-      // most_common_vals is anyarray; ::text::text[] reads it uniformly.
-      // NULL (no ANALYZE stats yet) unnests to zero rows, not an error.
+      // most_common_vals is anyarray; ::text::text[] reads it uniformly, and
+      // NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance parent
+      // reads only its inherited row (docs/adapter-decisions.md, inheritance parents).
       const { rows } = await client.query<{ val: string; freq: number }>(
         `select t.val, t.freq
          from pg_stats,
               lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
          where schemaname = $1 and tablename = $2 and attname = $3
+           and inherited = exists (select 1 from pg_inherits where inhparent = $4)
          order by t.freq desc`,
-        [realSchema, table, realColumn],
+        [realSchema, table, realColumn, oid],
       );
 
       const { rows: typeRows } = await client.query<{ data_type: string }>(

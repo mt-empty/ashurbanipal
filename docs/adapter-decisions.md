@@ -42,7 +42,7 @@ approximate — it is explicitly not a correctness-critical value.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
-| Postgres | `pg_class.reltuples` | Planner estimate; MAY be `-1` before the table's first ANALYZE/VACUUM. Never `COUNT(*)` — the whole point is avoiding a full scan on every table on every page load. |
+| Postgres | `pg_class.reltuples` | Planner estimate; MAY be `-1` before the table's first ANALYZE/VACUUM. Never `COUNT(*)` — the whole point is avoiding a full scan on every table on every page load. Summed over an inheritance parent's descendants; see [inheritance parents](#53--54--55--inheritance-parents-postgres). |
 | MySQL    | `information_schema.tables.table_rows` | InnoDB's own row-count estimate, refreshed by `ANALYZE TABLE` — the direct `reltuples` analog, so unlike SQLite, MySQL never needs the "no mechanism at all" `-1` sentinel. `table_rows` is `NULL` before InnoDB has gathered any statistics for a freshly created table; `mysql.rs::table_counts`/`query_table` map that to `-1`, the same "no estimate yet" case Postgres uses before ANALYZE/VACUUM. |
 | SQLite   | Always `-1` | SQLite has no `reltuples`-equivalent cardinality catalog. `implementations/rust/core/src/db/sqlite.rs::table_counts`/`query_table` used to fall back to an exact `COUNT(*)` (O(tables × rows) per `/api/table-counts` call, and a second `COUNT(*)` per page load for `total_approx`); that fallback was removed in favor of the protocol's own "no estimate" sentinel — deliberately disabled, not a stopgap. This also fixed a latent §5.4.4 nonconformance: the old `total_approx` count re-applied the request's filter `WHERE` clause, so a filtered page load returned a filtered count, not the whole-table figure the spec requires. The previously-suggested `PRAGMA` page-count estimate and caching are superseded by this decision, not still open. |
 
@@ -53,7 +53,7 @@ values for one column; an empty list is a valid answer, not an error.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
-| Postgres | `pg_stats.most_common_vals`/`most_common_freqs` | Pre-computed by ANALYZE; a column with no stats (never analyzed, or all-unique) yields an empty list. Never `SELECT DISTINCT` or any other data query. |
+| Postgres | `pg_stats.most_common_vals`/`most_common_freqs` | Pre-computed by ANALYZE; a column with no stats (never analyzed, or all-unique) yields an empty list. Never `SELECT DISTINCT` or any other data query. An inheritance parent reads its `inherited = true` row; see [inheritance parents](#53--54--55--inheritance-parents-postgres). |
 | MySQL    | Always empty `values` | No `pg_stats` analog exists. MySQL 8's `information_schema.column_statistics` histogram needs an explicit `ANALYZE TABLE ... UPDATE HISTOGRAM` to populate, has a structurally different shape (singleton/equi-height buckets, not a flat most-common-values array), and doesn't exist at all on MariaDB or MySQL 5.7. Rather than branch on histogram type/version, `mysql.rs::common_values` deliberately mirrors SQLite's choice: an unconditional empty list, the protocol's own "no statistics available" answer, not a live scan. Table/column names are still validated against the live allow-list first, so an unknown table/column is still rejected. |
 | SQLite   | Always empty `values` | No `pg_stats` analog exists. `sqlite.rs::common_values` used to compute frequencies from a bounded, capped live `GROUP BY ... LIMIT 20` aggregate; that was removed in favor of the protocol's own "no statistics available" answer — SQLite never maintains such statistics, so an unconditional empty list is the deliberate, permanent answer, not a stopgap. Table/column names are still validated against the live allow-list first, so an unknown table/column is still rejected before the (now-skipped) query would have run. The previously-suggested `sqlite_stat1`/`sqlite_stat4` reads and caching are superseded by this decision, not still open. |
 
@@ -291,7 +291,7 @@ privileges) is skipped.
 
 | Backend  | Candidate keys | Notes |
 |----------|----------------|-------|
-| Postgres | `pg_index` (`indisunique`, `indisvalid`, `indpred` and `indexprs` null), key columns from the first `indnkeyatts` of `indkey`, `NOT NULL` from `pg_attribute.attnotnull`, and each key column's `pg_index.indcollation` equal to its `pg_attribute.attcollation` | Not `information_schema.table_constraints`: it hides constraints from a role that holds only `SELECT` on the table, which would leave every read-only role with no key. `INCLUDE` columns are not key columns. A deferrable unique constraint still counts. |
+| Postgres | `pg_index` (`indisunique`, `indisvalid`, `indpred` and `indexprs` null), key columns from the first `indnkeyatts` of `indkey`, `NOT NULL` from `pg_attribute.attnotnull`, and each key column's `pg_index.indcollation` equal to its `pg_attribute.attcollation` | Not `information_schema.table_constraints`: it hides constraints from a role that holds only `SELECT` on the table, which would leave every read-only role with no key. `INCLUDE` columns are not key columns. A deferrable unique constraint still counts. An inheritance parent has no candidate keys; see [inheritance parents](#53--54--55--inheritance-parents-postgres). |
 | MySQL/MariaDB | `information_schema.statistics` with `non_unique = 0`, in `seq_in_index` order; the primary key is the index named `PRIMARY` | A functional key part (MySQL 8.0.13+) has no `column_name`, and a nullable key part has `nullable = 'YES'`; either rules the index out. A prefix key part (`sub_part`) still counts: a unique prefix makes the whole value unique. A `text`/`blob` sorts on its first `max_sort_length` bytes (1024 by default), so rows that differ only past that point MAY change places. InnoDB secondary indexes already end in the primary key, so `sort` plus the key can still use an index on the sort column. |
 | SQLite   | Primary key from `pragma_table_info.pk` (1-based position in the key), since an `INTEGER PRIMARY KEY` has no index row; unique indexes from `pragma_index_list` (`unique = 1`, `partial = 0`, `origin <> 'pk'`) and `pragma_index_xinfo` (`key = 1`), `NOT NULL` from `pragma_table_info.notnull` | An expression key part has no `pragma_table_info` row and rules the index out. SQLite lets a non-`INTEGER` primary-key column of a rowid table hold NULL, so rows that are NULL in the key MAY change places. A table with no key still has a `rowid`; it is not used, so the rule stays the same on every engine. Known gap: no pragma reports a column's declared collation, so an index with its own `COLLATE` (a `BINARY` index on a `NOCASE` column) is not ruled out, and rows the column's collation ties MAY change places, in a join too. |
 
@@ -300,6 +300,50 @@ unsorted rows MAY repeat or skip a row (`spec/protocol.md` §5.4). This is
 an accepted gap. The alternatives cost more than they save: ordering by
 every column sorts the whole table for each page, and Postgres `ctid` or
 SQLite `rowid` have no MySQL equivalent.
+
+## §5.3 / §5.4 / §5.5 — inheritance parents (Postgres)
+
+Protocol property: a table's row estimate, keys and common values describe
+the rows §5.4 returns for it (`spec/protocol.md` §5.3, §5.4, §5.5).
+
+A plain `select` on a Postgres table with `INHERITS` children returns their
+rows too, and every port reads a parent that way. The parent's catalog
+entries cover its own rows only, so each port corrects three of them:
+
+- **Row estimate:** `reltuples` summed over the parent and its descendants
+  (`pg_inherits`, followed recursively), looked up only when
+  `relhassubclass` is set. A table in the tree with no estimate yet (`-1`)
+  adds nothing, so the figure can be low until it is analyzed; the sum is
+  `-1` only when no table has one. Returning `-1` whenever any table lacks
+  an estimate would keep a parent at `-1` for as long as one child stays
+  empty and unanalyzed.
+- **Keys:** Postgres never enforces a parent's primary key or unique indexes
+  across its children, so a key value can repeat. A parent with children
+  reports no `key: "pk"` and has no tie-break key, so its paging has the
+  accepted gap described under [tie-break keys](#54--5113--tie-break-keys).
+  The structure route (§5.10) still lists its constraints. Its foreign keys
+  are still reported; a child's value with no target row only opens an
+  empty page.
+- **Common values:** `ANALYZE` on a parent stores an `inherited = true`
+  `pg_stats` row beside its own `inherited = false` row. While the parent
+  has children, only the `inherited = true` row is read; with none (the
+  parent was last analyzed before it had children), the answer is the
+  protocol's empty "no statistics" list, since the parent's own row would
+  give fractions of the wrong rows. Autovacuum analyzes a parent only when
+  its own rows change, so the row can also be stale.
+- **Viewer:** the structure route still reports the parent's primary key
+  and unique indexes, and the UI takes those as unique columns, so the
+  common-values button stays hidden on them. Without `key: "pk"`, a parent's
+  key cell opens the record dialog, not the referrers popover. Both are
+  accepted gaps; telling the UI that a key does not hold would need a new
+  protocol field.
+
+Reading only the parent's own rows (`from only`) would need none of these,
+but would hide rows. Postgres checks privileges only on the parent when it
+scans the children through it, so a role with `SELECT` on the parent alone
+can read child rows it can't open any other way. A foreign-table child is
+not listed at all (§5.2 / §5.3). A partitioned parent (`relkind = 'p'`) is
+not listed either, and MySQL, MariaDB and SQLite have no table inheritance.
 
 ## §5.4.1 — forward FK/PK column metadata (`key_metadata`)
 
@@ -311,7 +355,7 @@ has no way to express a multi-column `references` on one column.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
-| Postgres | `pg_constraint` (`contype` `p`/`f`), `unnest(conkey)` ⨝ `pg_attribute` for the key columns; a single-column FK's target from `confrelid` and `confkey[1]`; FKs gated by `relkind = 'r'`, `has_schema_privilege(…, 'USAGE')` and `has_table_privilege(…, 'SELECT')` on the target | Not `information_schema`: `table_constraints` lists a constraint only to a role that owns the table or holds a privilege other than `SELECT`, and `constraint_column_usage` only to the owner, so any non-owner role (the usual app role, with DML but no ownership) lost every `references`, and a SELECT-only role lost every `key` too. The gate drops an FK whose target the client couldn't open: not readable, in a schema §5.7 doesn't list, or a partitioned parent §5.2 doesn't list. §5.9 gates referrers the same way. |
+| Postgres | `pg_constraint` (`contype` `p`/`f`), `unnest(conkey)` ⨝ `pg_attribute` for the key columns; a single-column FK's target from `confrelid` and `confkey[1]`; FKs gated by `relkind = 'r'`, `has_schema_privilege(…, 'USAGE')` and `has_table_privilege(…, 'SELECT')` on the target | Not `information_schema`: `table_constraints` lists a constraint only to a role that owns the table or holds a privilege other than `SELECT`, and `constraint_column_usage` only to the owner, so any non-owner role (the usual app role, with DML but no ownership) lost every `references`, and a SELECT-only role lost every `key` too. The gate drops an FK whose target the client couldn't open: not readable, in a schema §5.7 doesn't list, or a partitioned parent §5.2 doesn't list. §5.9 gates referrers the same way. An inheritance parent reports no primary key; see [inheritance parents](#53--54--55--inheritance-parents-postgres). |
 | MySQL/MariaDB | `key_column_usage` alone: `constraint_name = 'PRIMARY'` is the primary key, a row with a `referenced_table_name` is an FK | Not joined to `table_constraints`: MariaDB shows that view (and `referential_constraints`) only to a role with a privilege beyond `SELECT`, while `key_column_usage` stays visible (verified on MariaDB 11.8; MySQL 8.4 shows all three). An FK to a table the role can't read is still reported: neither engine has a privilege predicate (see `## §5.2 / §5.3`), an accepted gap against §5.4.1's SHOULD. |
 | SQLite   | `pragma_foreign_key_list(table)`, left-joined to `pragma_table_info(fkl."table")` for a parent primary-key column lookup, keyed per FK row rather than once — see the §5.9 SQLite row for the shared mechanism | Same underlying bug as §5.9's SQLite row: `pragma_foreign_key_list.to` is NULL for `REFERENCES parent` DDL with no parenthesised parent-column list (a very common shorthand), and the fix is the same `pragma_table_info`/`COALESCE(..., 'rowid')` resolution. The one structural difference: §5.9 walks FKs *into* one fixed parent, so its `pragma_table_info` lookup is a single bound parameter; here, one table's own outgoing FKs can each reference a *different* parent, so the lookup is a lateral join keyed off each FK row's own `"table"` column instead. |
 

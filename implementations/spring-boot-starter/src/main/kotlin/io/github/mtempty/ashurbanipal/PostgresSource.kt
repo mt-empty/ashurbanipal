@@ -60,6 +60,15 @@ internal fun pgColumnClass(dataType: String, udtSchema: String, udtName: String,
         else -> ColumnClass.OTHER
     }
 
+/** `pg_class c`'s row estimate, summed over an inheritance parent's descendants (docs/adapter-decisions.md, inheritance parents). */
+private const val APPROX_ROWS_SQL =
+    "case when c.relhassubclass then ( " +
+        "  with recursive tree(oid) as ( " +
+        "    select c.oid union select i.inhrelid from pg_inherits i join tree on i.inhparent = tree.oid) " +
+        "  select case when bool_and(d.reltuples < 0) then -1 else sum(greatest(d.reltuples, 0)) end " +
+        "    from tree join pg_class d on d.oid = tree.oid) " +
+        "else c.reltuples end::bigint"
+
 /** Postgres [DbSource]; `statement_timeout` bounds catalog and data operations (`spec/protocol.md` §6). */
 class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     private val queryTimeoutSecs = effectiveQueryTimeoutSecs(queryTimeoutSecs)
@@ -129,7 +138,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     override fun tableCounts(schema: String?): List<CountEntry> = inReadOnlyTransaction {
         val realSchema = resolveSchema(schema)
         jdbcTemplate.query(
-            "select c.relname::text, c.reltuples::bigint " +
+            "select c.relname::text, $APPROX_ROWS_SQL " +
                 "from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
                 "where n.nspname = ? and c.relkind = 'r' " +
@@ -180,7 +189,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     /**
      * Reads `pg_constraint`, which has no privilege filter, so a role that doesn't own the table still
      * sees its keys. Composite foreign keys, and ones whose target the role can't open, are left out
-     * (`spec/protocol.md` §5.4.1).
+     * (`spec/protocol.md` §5.4.1). An inheritance parent reports no primary key (docs/adapter-decisions.md, inheritance parents).
      */
     private fun keyMetadata(schema: String, oid: Long): Pair<Set<String>, Map<String, ColumnRef>> {
         val pkColumns = mutableSetOf<String>()
@@ -195,7 +204,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 "left join pg_namespace rn on rn.oid = rc.relnamespace " +
                 "left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1] " +
                 "where con.conrelid = ? " +
-                "  and (con.contype = 'p' " +
+                "  and ((con.contype = 'p' " +
+                "        and not exists (select 1 from pg_inherits where inhparent = con.conrelid)) " +
                 "       or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r' " +
                 "           and has_schema_privilege(rc.relnamespace, 'USAGE') and has_table_privilege(rc.oid, 'SELECT')))",
             RowCallbackHandler { rs ->
@@ -283,7 +293,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
      * columns (INCLUDE columns left out), not partial, all NOT NULL, and each
      * in its column's own collation, so the key is unique under the order by.
      * pg_index has no privilege filter, unlike information_schema, so a role
-     * with only SELECT still sees the key.
+     * with only SELECT still sees the key. None for an inheritance parent
+     * (docs/adapter-decisions.md, inheritance parents).
      */
     private fun uniqueKeys(oid: Long): List<UniqueKey> = groupUniqueKeys(
         jdbcTemplate.query(
@@ -294,6 +305,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 "join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum " +
                 "where i.indrelid = ? and i.indisunique and i.indisvalid " +
                 "  and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts " +
+                "  and not exists (select 1 from pg_inherits where inhparent = i.indrelid) " +
                 "order by c.relname, k.n",
             RowMapper { rs, _ -> KeyPart(rs.getString(1), rs.getBoolean(2), rs.getString(3), rs.getBoolean(2) || rs.getBoolean(4)) },
             oid,
@@ -380,7 +392,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         }
 
         val totalApprox = jdbcTemplate.queryForObject(
-            "select reltuples::bigint from pg_class c " +
+            "select $APPROX_ROWS_SQL from pg_class c " +
                 "join pg_namespace n on n.oid = c.relnamespace " +
                 "where n.nspname = ? and c.relname = ?",
             Long::class.java,
@@ -396,21 +408,24 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
 
     private fun commonValuesInTransaction(schema: String?, table: String, column: String): List<CommonValueEntry> {
         val realSchema = resolveSchema(schema)
-        readableTableOid(realSchema, table)
+        val oid = readableTableOid(realSchema, table)
         val realColumn = requireExact(allowedColumns(realSchema, table), column, NotAllowedKind.COLUMN)
 
-        // most_common_vals is anyarray; ::text::text[] reads it uniformly.
-        // NULL (no ANALYZE stats yet) unnests to zero rows, not an error.
+        // most_common_vals is anyarray; ::text::text[] reads it uniformly, and
+        // NULL (no ANALYZE stats yet) unnests to zero rows. An inheritance parent
+        // reads only its inherited row (docs/adapter-decisions.md, inheritance parents).
         val rows = jdbcTemplate.query(
             "select t.val, t.freq " +
                 "from pg_stats, " +
                 "     lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) " +
                 "where schemaname = ? and tablename = ? and attname = ? " +
+                "  and inherited = exists (select 1 from pg_inherits where inhparent = ?) " +
                 "order by t.freq desc",
             RowMapper { rs, _ -> rs.getString(1) to rs.getFloat(2) },
             realSchema,
             table,
             realColumn,
+            oid,
         )
 
         val dataType = jdbcTemplate.query(

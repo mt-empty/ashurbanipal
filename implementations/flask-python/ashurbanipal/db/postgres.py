@@ -128,6 +128,17 @@ _JOIN_DIALECT = Dialect(
     json_path=_json_path,
 )
 
+# `pg_class c`'s row estimate, summed over an inheritance parent's descendants
+# (docs/adapter-decisions.md, inheritance parents).
+_APPROX_ROWS_SQL = (
+    "case when c.relhassubclass then ( "
+    "  with recursive tree(oid) as ( "
+    "    select c.oid union select i.inhrelid from pg_inherits i join tree on i.inhparent = tree.oid) "
+    "  select case when bool_and(d.reltuples < 0) then -1 else sum(greatest(d.reltuples, 0)) end "
+    "    from tree join pg_class d on d.oid = tree.oid) "
+    "else c.reltuples end::bigint"
+)
+
 
 def typed_compare(data_type: str) -> TypedCompare | None:
     """The typed filter comparison for an `information_schema.columns.data_type`
@@ -268,7 +279,8 @@ class PgSource(DbSource):
     def _key_metadata(self, cur: psycopg.Cursor, schema: str, oid: int) -> tuple[set[str], dict[str, ColumnRef]]:
         """Read pg_constraint, which has no privilege filter, so a role that
         doesn't own the table still sees its keys. Composite foreign keys, and
-        ones whose target the role can't open, are left out (`spec/protocol.md` §5.4.1)."""
+        ones whose target the role can't open, are left out (`spec/protocol.md` §5.4.1).
+        An inheritance parent reports no primary key (docs/adapter-decisions.md, inheritance parents)."""
         cur.execute(
             "select con.contype = 'p', a.attname::text, rn.nspname::text, rc.relname::text, ra.attname::text "
             "from pg_constraint con "
@@ -278,7 +290,8 @@ class PgSource(DbSource):
             "left join pg_namespace rn on rn.oid = rc.relnamespace "
             "left join pg_attribute ra on ra.attrelid = rc.oid and ra.attnum = con.confkey[1] "
             "where con.conrelid = %s "
-            "  and (con.contype = 'p' "
+            "  and ((con.contype = 'p' "
+            "        and not exists (select 1 from pg_inherits where inhparent = con.conrelid)) "
             "       or (con.contype = 'f' and cardinality(con.conkey) = 1 and rc.relkind = 'r' "
             "           and has_schema_privilege(rc.relnamespace, 'USAGE') "
             "           and has_table_privilege(rc.oid, 'SELECT')))",
@@ -322,7 +335,7 @@ class PgSource(DbSource):
         with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved = self._resolve_schema(cur, schema)
             cur.execute(
-                "select c.relname::text, c.reltuples::bigint "
+                f"select c.relname::text, {_APPROX_ROWS_SQL} "
                 "from pg_class c "
                 "join pg_namespace n on n.oid = c.relnamespace "
                 "where n.nspname = %s and c.relkind = 'r' "
@@ -369,7 +382,7 @@ class PgSource(DbSource):
             ]
 
             cur.execute(
-                "select reltuples::bigint from pg_class c "
+                f"select {_APPROX_ROWS_SQL} from pg_class c "
                 "join pg_namespace n on n.oid = c.relnamespace "
                 "where n.nspname = %s and c.relname = %s",
                 (resolved_schema, table),
@@ -431,7 +444,8 @@ class PgSource(DbSource):
         columns (INCLUDE columns left out), not partial, all NOT NULL, and each in
         its column's own collation, so the key is unique under the order by.
         pg_index has no privilege filter, unlike information_schema, so a role with
-        only SELECT still sees the key."""
+        only SELECT still sees the key. None for an inheritance parent
+        (docs/adapter-decisions.md, inheritance parents)."""
         cur.execute(
             "select c.relname, i.indisprimary, a.attname, "
             "a.attnotnull and i.indcollation[k.n::int - 1] = a.attcollation "
@@ -441,6 +455,7 @@ class PgSource(DbSource):
             "join pg_attribute a on a.attrelid = i.indrelid and a.attnum = k.attnum "
             "where i.indrelid = %s and i.indisunique and i.indisvalid "
             "  and i.indpred is null and i.indexprs is null and k.n <= i.indnkeyatts "
+            "  and not exists (select 1 from pg_inherits where inhparent = i.indrelid) "
             "order by c.relname, k.n",
             (oid,),
         )
@@ -479,21 +494,23 @@ class PgSource(DbSource):
     def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:
         with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved_schema = self._resolve_schema(cur, schema)
-            self._readable_table_oid(cur, resolved_schema, table)
+            oid = self._readable_table_oid(cur, resolved_schema, table)
             columns = self._allowed_columns(cur, resolved_schema, table)
             if column not in columns:
                 raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
 
             # most_common_vals is anyarray; ::text::text[] reads it
-            # uniformly. NULL (no ANALYZE stats yet) unnests to zero rows,
-            # not an error.
+            # uniformly, and NULL (no ANALYZE stats yet) unnests to zero rows.
+            # An inheritance parent reads only its inherited row
+            # (docs/adapter-decisions.md, inheritance parents).
             cur.execute(
                 "select t.val, t.freq "
                 "from pg_stats, "
                 "     lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq) "
                 "where schemaname = %s and tablename = %s and attname = %s "
+                "  and inherited = exists (select 1 from pg_inherits where inhparent = %s) "
                 "order by t.freq desc",
-                (resolved_schema, table, column),
+                (resolved_schema, table, column, oid),
             )
             rows = list(cur.fetchall())
 
