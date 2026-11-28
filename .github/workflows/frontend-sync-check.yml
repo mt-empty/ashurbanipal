@@ -25,6 +25,7 @@ on:
       - "tools/check-frontend-cycles.sh"
       - "tools/check-frontend-api-reference.sh"
       - "tools/e2e-tests/**"
+      - "tools/bombadil/**"
       - "spec/openapi.yaml"
       - ".github/workflows/frontend-sync-check.yml"
   pull_request:
@@ -50,6 +51,7 @@ on:
       - "tools/check-frontend-cycles.sh"
       - "tools/check-frontend-api-reference.sh"
       - "tools/e2e-tests/**"
+      - "tools/bombadil/**"
       - "spec/openapi.yaml"
       - ".github/workflows/frontend-sync-check.yml"
 
@@ -81,6 +83,7 @@ jobs:
       - run: mise run frontend:typecheck
       - run: mise run frontend:e2e-lint
       - run: mise run frontend:e2e-typecheck
+      - run: mise run frontend:explore-check
       - run: mise run frontend:test-unit
       - run: mise run frontend:build-check
       - run: mise run frontend:build-demo-check

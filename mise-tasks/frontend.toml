@@ -42,6 +42,24 @@ run = "pnpm run lint"
 dir = "tools/e2e-tests"
 depends = ["frontend:e2e-install"]
 
+["frontend:explore-install"]
+description = "pnpm install --frozen-lockfile for tools/bombadil"
+hide = true
+run = "pnpm install --frozen-lockfile"
+dir = "tools/bombadil"
+
+["frontend:explore-check"]
+description = "biome check + tsc --noEmit over tools/bombadil (the Bombadil spec and its runner)"
+run = ["pnpm run lint", "pnpm run typecheck"]
+dir = "tools/bombadil"
+depends = ["frontend:explore-install"]
+
+["frontend:explore"]
+description = "Bombadil exploration of the viewer on the seed db via the Node demo (BOMBADIL_TIME, default 10m); not in check or PR CI"
+run = "node run.mjs"
+dir = "tools/bombadil"
+depends = ["frontend:explore-install", "node:install", "frontend:build"]
+
 ["frontend:test-unit"]
 description = "node --test over frontend/test/ — pure-logic units (the DSL parser); no browser"
 run = "pnpm run test"

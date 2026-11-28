@@ -145,6 +145,7 @@ mise run frontend:test-e2e-quick         # rebuild + sync, then the whole suite 
 mise run frontend:test-e2e               # full three-browser suite against axum's vendored dbviewer.html
 mise run frontend:test-e2e-coverage      # Chromium e2e run with line/branch/function coverage per frontend/src file (HTML report)
 mise run frontend:perf                   # start-up timing experiment under simulated network/server delay (tools/e2e-tests/perf/README.md); not in CI
+mise run frontend:explore                # Bombadil random exploration of the viewer on the seed db (BOMBADIL_TIME, default 10m); not in check or PR CI
 ```
 
 The `rust:*` tasks `cd` into `implementations/rust` (the workspace root —

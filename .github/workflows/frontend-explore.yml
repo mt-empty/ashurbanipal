@@ -1,0 +1,68 @@
+name: frontend explore
+
+# Bombadil exploration of dbviewer.html on the Postgres seed: docs/e2e-testing-guidelines.md §7.
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      time_limit:
+        description: "Run length, e.g. 20m or 1h"
+        required: false
+        default: "20m"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgres://ashurbanipal:ashurbanipal@localhost:5432/ashurbanipal
+
+permissions:
+  contents: read
+
+jobs:
+  explore:
+    name: Bombadil exploration on the Postgres seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      db:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: ashurbanipal
+          POSTGRES_PASSWORD: ashurbanipal
+          POSTGRES_DB: ashurbanipal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Seed database
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f conformance/seed/seed.sql
+
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        with:
+          version: 2026.7.13
+          install: false
+
+      # run.mjs drives the runner's preinstalled google-chrome.
+      - run: mise run frontend:explore
+        env:
+          BOMBADIL_TIME: ${{ inputs.time_limit || '20m' }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bombadil-results
+          path: tools/bombadil/results/
+          retention-days: 14
