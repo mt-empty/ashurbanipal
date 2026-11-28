@@ -71,7 +71,7 @@ import { SqliteSource } from "ashurbanipal-node-express/dist/src/db/sqlite.js";
 const viewer = createRouter(config, [{ name: "primary", source: new SqliteSource(new sqlite3.Database("app.db")) }]);
 ```
 
-Column comments and common-value stats are empty on MySQL and SQLite.
+Column comments are empty on SQLite, and common-value stats are empty on MySQL and SQLite.
 
 ## More than one database
 

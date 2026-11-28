@@ -462,6 +462,8 @@ internal class JoinDialect(
     val ilike: String,
     /** The text at a validated path inside a JSON column expression, and the values it binds, in order. */
     val jsonPath: (String, List<Any>) -> Pair<String, List<String>>,
+    /** A `utf8mb4` text-class column compares as stored, so its own collation decides case; any other charset keeps the cast, since a value it cannot store would be a database error (spec/protocol.md §5.4.2). */
+    val textBare: Boolean = false,
 )
 
 /**
@@ -506,7 +508,7 @@ private fun filterSql(terms: List<FilterTerm>, d: JoinDialect): Pair<String, Lis
         fun ph(value: String) = typed?.castFor(value)?.let { d.castParam("?", it) } ?: "?"
         val lhs = when {
             t.path != null -> d.jsonPath(t.expr, t.path).let { (sql, pathValues) -> values.addAll(pathValues); sql }
-            typed != null -> t.expr
+            typed != null || (d.textBare && t.col.columnClass == ColumnClass.TEXT && t.col.collation?.startsWith("utf8mb4") == true) -> t.expr
             else -> d.castText(t.expr)
         }
         val inner = when (cond.op) {

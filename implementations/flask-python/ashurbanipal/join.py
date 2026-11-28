@@ -592,6 +592,10 @@ class Dialect:
     # The text at a checked path inside a JSON column expression, given the
     # placeholder, and the values it binds in placeholder order.
     json_path: Callable[[str, tuple[PathStep, ...], str], tuple[str, list[str]]]
+    # A utf8mb4 text-class column compares as stored, so its own collation
+    # decides case; any other charset keeps the cast, since a value it cannot
+    # store would be a database error (spec/protocol.md §5.4.2).
+    text_bare: bool = False
 
 
 def json_path_string(path: tuple[PathStep, ...]) -> str:
@@ -673,7 +677,10 @@ def _filter_sql(terms: list[tuple[Condition, str, ColMeta]], d: Dialect) -> tupl
             lhs, path_values = d.json_path(expr, cond.path, d.placeholder)
             values.extend(path_values)
         else:
-            lhs = expr if typed is not None else d.cast_text(expr)
+            bare = typed is not None or (
+                d.text_bare and col.column_class == TEXT and (col.collation or "").startswith("utf8mb4")
+            )
+            lhs = expr if bare else d.cast_text(expr)
         if isinstance(cond, NullCheck):
             inner = f"{lhs} {OP_SQL[cond.op]}"
         elif isinstance(cond, Comparison):

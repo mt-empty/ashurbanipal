@@ -70,7 +70,7 @@ ashurbanipal:
 
 Add the driver yourself, for example `com.mysql:mysql-connector-j`, `org.mariadb.jdbc:mariadb-java-client`, or `org.xerial:sqlite-jdbc`. The starter never guesses the backend from the driver on your classpath.
 
-Column comments and common-value stats are empty on MySQL and SQLite.
+Column comments are empty on SQLite, and common-value stats are empty on MySQL and SQLite.
 
 ## More than one database
 

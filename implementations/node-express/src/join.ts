@@ -542,6 +542,8 @@ export interface JoinDialect {
   /** `$n` placeholders (Postgres) instead of `?`. */
   numbered: boolean;
   ilike: IlikeStyle;
+  /** A `utf8mb4` text-class column compares as stored, so its own collation decides case; any other charset keeps the cast, since a value it cannot store would be a database error (spec/protocol.md §5.4.2). */
+  textBare: boolean;
   /** The text at a validated path inside a JSON column; `bind` records each value and returns its placeholder. */
   jsonPath(expr: string, path: PathStep[], bind: (value: string) => string): string;
 }
@@ -605,7 +607,8 @@ function filterSql(terms: FilterTerm[], d: JoinDialect): { clause: string; value
       const target = typed && castFor(typed, v);
       return target ? d.castParam(p, target) : p;
     };
-    const lhs = cond.path !== undefined ? d.jsonPath(expr, cond.path, bind) : typed ? expr : d.castText(expr);
+    const bare = typed || (d.textBare && col.class.kind === "text" && col.collation?.startsWith("utf8mb4"));
+    const lhs = cond.path !== undefined ? d.jsonPath(expr, cond.path, bind) : bare ? expr : d.castText(expr);
     let inner: string;
     if (!opTakesValue(cond.op)) {
       inner = `${lhs} ${opSql(cond.op)}`;

@@ -651,7 +651,7 @@
           "labels": ["id"]
         },
         "mysql": {
-          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (CAST(t1.`email` AS CHAR) = ?) order by t0.`id` asc limit ? offset ?",
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (t1.`email` = ?) order by t0.`id` asc limit ? offset ?",
           "values": ["ada@example.com"],
           "labels": ["id"]
         },
@@ -758,7 +758,7 @@
           "labels": ["id"]
         },
         "mysql": {
-          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (LOWER(CAST(t1.`full_name` AS CHAR)) LIKE LOWER(?)) order by t0.`id` asc limit ? offset ?",
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 inner join `ashurbanipal`.`users` t1 on t1.`id` = t0.`user_id` where (LOWER(t1.`full_name`) LIKE LOWER(?)) order by t0.`id` asc limit ? offset ?",
           "values": ["%ada%"],
           "labels": ["id"]
         },
@@ -784,7 +784,7 @@
           "labels": ["id"]
         },
         "mysql": {
-          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 left join `ashurbanipal`.`order_extra` t1 on t1.`order_id` = t0.`id` where (CAST(t1.`gift_message` AS CHAR) IS NULL) AND (t0.`discount_pct` IS NOT NULL) order by t0.`id` asc limit ? offset ?",
+          "sql": "CAST(t0.`id` AS CHAR) as c0 from `ashurbanipal`.`orders` t0 left join `ashurbanipal`.`order_extra` t1 on t1.`order_id` = t0.`id` where (t1.`gift_message` IS NULL) AND (t0.`discount_pct` IS NOT NULL) order by t0.`id` asc limit ? offset ?",
           "values": [],
           "labels": ["id"]
         },

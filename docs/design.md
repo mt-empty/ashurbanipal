@@ -342,8 +342,9 @@ binding.
   `IN`/`BETWEEN` mean what they say; the server checks each such value's
   form first, because some engines would otherwise coerce a bad one
   silently. Every other type compares its text cast, which keeps one
-  filter working across uuid, JSON, enums and the rest. There is no
-  nesting.
+  filter working across uuid, JSON, enums and the rest; MySQL/MariaDB
+  `utf8mb4` text columns are the exception and compare bare, so their
+  collation decides case. There is no nesting.
 - **Siblings are checked on request.** `/siblings` health-checks the other
   instances in parallel when it is called, with no background polling or
   server-side cache (§9 has when to revisit). The frontend polls it only

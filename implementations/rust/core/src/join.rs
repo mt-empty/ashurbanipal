@@ -298,6 +298,16 @@ pub struct ColMeta {
     pub comment: Option<String>,
 }
 
+impl ColMeta {
+    fn is_utf8mb4_text(&self) -> bool {
+        matches!(self.class, ColumnClass::Text)
+            && self
+                .collation
+                .as_deref()
+                .is_some_and(|c| c.starts_with("utf8mb4"))
+    }
+}
+
 impl From<ColMeta> for ColumnInfo {
     fn from(c: ColMeta) -> Self {
         ColumnInfo {
@@ -801,6 +811,10 @@ pub struct Dialect {
     /// `$n` placeholders (Postgres) instead of `?`.
     pub numbered: bool,
     pub ilike: IlikeStyle,
+    /// A `utf8mb4` text-class column compares as stored, so its own collation
+    /// decides case; any other charset keeps the cast, since a value it cannot
+    /// store would be a database error (`spec/protocol.md` §5.4.2).
+    pub text_bare: bool,
     pub json_path: JsonPathFn,
 }
 
@@ -895,6 +909,7 @@ fn filter_sql(terms: &[FilterTerm], d: &Dialect) -> (String, Vec<String>) {
         let lhs = match (t.path, typed) {
             (Some(path), _) => (d.json_path)(&t.expr, path, &mut bind),
             (None, Some(_)) => t.expr.clone(),
+            (None, None) if d.text_bare && t.col.is_utf8mb4_text() => t.expr.clone(),
             (None, None) => (d.cast_text)(&t.expr),
         };
         let mut placeholder = |value: &str| {
@@ -1187,6 +1202,7 @@ mod tests {
             cast_param: |p, t| format!("{p}::{t}"),
             numbered: true,
             ilike: IlikeStyle::Native,
+            text_bare: false,
             json_path: |_, _, _| unreachable!(),
         };
         let table = TableMeta {

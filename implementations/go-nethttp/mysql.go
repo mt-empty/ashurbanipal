@@ -72,6 +72,7 @@ var mysqlJoinDialect = joinDialect{
 	castParam: func(p, target string) string { return "CAST(" + p + " AS " + target + ")" },
 	numbered:  false,
 	ilike:     ilikeLoweredLike,
+	textBare:  true,
 	jsonPath:  mysqlJSONPath,
 }
 

@@ -104,7 +104,7 @@ db, err := sql.Open("mysql", "user:pass@tcp(localhost:3306)/app")
 source := ashurbanipal.NewMySQLSource(db, cfg.Limits.WithDefaults().QueryTimeoutSecs)
 ```
 
-Column comments and common-value stats are empty on MySQL and SQLite.
+Column comments are empty on SQLite, and common-value stats are empty on MySQL and SQLite.
 
 ## More than one database
 

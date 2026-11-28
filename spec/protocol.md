@@ -465,8 +465,14 @@ Evaluation rules:
     column is cast to text in the query itself (Postgres:
     `column::text OP $n`), so one filter works uniformly across `uuid`,
     `jsonb`, enums, etc., and compares as strings.
+    On MySQL/MariaDB a `text`-class column (`char`, `varchar`, `*text`)
+    whose character set is `utf8mb4` is compared bare instead, for every op, so the column's collation decides
+    case, accents and trailing-space padding: comparison ops, `IN`,
+    `BETWEEN` and `LIKE` fold case on a `_ci` column but not on a `_bin`
+    one. `ILIKE` folds case on both.
   - `IS NULL`/`IS NOT NULL` test the column the same way: a typed
-    column itself, any other column through its text cast. (A Postgres
+    column or a bare-compared MySQL/MariaDB `text` column itself, any other
+    column through its text cast. (A Postgres
     composite whose fields are all NULL is itself NULL, yet has text.)
 - A condition with a `path` compares the value found at that path inside
   its column, which MUST be of class `json` (§5.11.2); any other class →
@@ -483,9 +489,9 @@ Evaluation rules:
     all give NULL. `IS NULL` matches each of them.
   - The value is always compared as text, never typed: a string as its
     unescaped text, a number as the engine renders it, a boolean as
-    `true` or `false`, an object or array as its JSON text. Comparison
-    ops and `IN` are case-sensitive; `LIKE` and `ILIKE` behave as they
-    do on a class `text` column. Where
+    `true` or `false`, an object or array as its JSON text. For a path
+    value, comparison ops and `IN` are case-sensitive on every engine;
+    `LIKE` and `ILIKE` behave as they do on a class `text` column. Where
     engines render the same number or object differently, the
     differences are recorded in `docs/adapter-decisions.md`.
   - An engine that cannot evaluate a path (SQLite built without JSON

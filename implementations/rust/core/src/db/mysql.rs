@@ -72,6 +72,7 @@ const DIALECT: Dialect = Dialect {
     cast_param,
     numbered: false,
     ilike: IlikeStyle::LoweredLike,
+    text_bare: true,
     json_path,
 };
 
@@ -1534,6 +1535,107 @@ mod tests {
             source.query_join(None, &clash, join_opts()).await,
             Err(DbError::BadJoin(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn text_filters_follow_the_column_collation() {
+        for var in ["MYSQL_TEST_URL", "MARIADB_TEST_URL"] {
+            let url = std::env::var(var).unwrap_or_else(|_| panic!("{var} must be set"));
+            assert_text_filters_follow_the_column_collation(var, url).await;
+        }
+    }
+
+    async fn assert_text_filters_follow_the_column_collation(server: &str, url: String) {
+        use crate::filter::{Condition, FilterOp, FilterValue};
+
+        let db = seeded_db_at(url).await;
+        sqlx::query(sqlx::AssertSqlSafe(
+            "create table ci_probe (id int primary key, \
+             bin_v varchar(20) collate utf8mb4_bin, \
+             ci_v varchar(20) collate utf8mb4_general_ci, \
+             latin_v varchar(20) character set latin1 collate latin1_bin)"
+                .to_string(),
+        ))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(
+            "insert into ci_probe values (1, 'alice', 'alice', 'alice')".to_string(),
+        ))
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let source = MySqlSource::new(db.pool.clone());
+        let condition = |column: &str, op: FilterOp, value: FilterValue| Condition {
+            logic: None,
+            not: false,
+            column: column.into(),
+            op,
+            value: Some(value),
+            join: None,
+            path: None,
+        };
+        // The binary column is case-sensitive and the _ci column folds case;
+        // ILIKE folds case on both.
+        let cases = [
+            (FilterOp::Eq, FilterValue::from("ALICE"), [0, 1]),
+            (
+                FilterOp::In,
+                FilterValue::List(vec!["ALICE".to_string()]),
+                [0, 1],
+            ),
+            (
+                FilterOp::Between,
+                FilterValue::List(vec!["ALICE".to_string(), "ALICE".to_string()]),
+                [0, 1],
+            ),
+            (FilterOp::Like, FilterValue::from("AL%"), [0, 1]),
+            (FilterOp::Ilike, FilterValue::from("AL%"), [1, 1]),
+        ];
+        for (op, value, want) in cases {
+            for (column, want) in [("bin_v", want[0]), ("ci_v", want[1])] {
+                let data = source
+                    .query_table(
+                        None,
+                        "ci_probe",
+                        QueryOpts {
+                            limit: 10,
+                            offset: 0,
+                            sort: None,
+                            descending: false,
+                            timeout_secs: 5,
+                            filter: Some(vec![condition(column, op, value.clone())]),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(data.rows.len(), want, "{server}: {column} {op:?} {value:?}");
+            }
+        }
+        // A latin1 column keeps the cast: a value it cannot store matches
+        // nothing instead of raising an illegal-mix-of-collations error.
+        for (value, want) in [("名", 0), ("ALICE", 1)] {
+            let data = source
+                .query_table(
+                    None,
+                    "ci_probe",
+                    QueryOpts {
+                        limit: 10,
+                        offset: 0,
+                        sort: None,
+                        descending: false,
+                        timeout_secs: 5,
+                        filter: Some(vec![condition(
+                            "latin_v",
+                            FilterOp::Eq,
+                            FilterValue::from(value),
+                        )]),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(data.rows.len(), want, "{server}: latin_v = {value}");
+        }
     }
 
     #[test]
