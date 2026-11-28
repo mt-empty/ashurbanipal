@@ -30,6 +30,10 @@ run = "uv run pytest -q"
 dir = "implementations/flask-python"
 depends = ["flask:install"]
 
+["flask:dist-check"]
+description = "uv build (wheel from sdist, as the publish job does), then import the wheel in a clean venv"
+run = "sh tools/check-flask-dist.sh"
+
 ["flask:demo"]
 description = "host demo app at http://localhost:4000/__ashurbanipal (ASHURBANIPAL_BACKEND selects postgres|sqlite|mysql)"
 run = "uv run python demo/app.py"
