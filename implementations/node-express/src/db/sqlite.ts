@@ -25,6 +25,7 @@ import {
   type UniqueKey,
 } from "../join.js";
 import {
+  applyKeys,
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
@@ -36,6 +37,8 @@ import {
   groupReferencedBy,
   type QueryOpts,
   type ReferencedByEntry,
+  requireExact,
+  rowToJson,
   type SchemaListing,
   type Structure,
   schemaListing,
@@ -239,13 +242,7 @@ async function tableMeta(db: Database, table: string): Promise<TableMeta> {
     };
     const compare = sqliteTypedCompare(col.class);
     if (compare) col.compare = compare;
-    if (pkColumns.has(ct.name)) {
-      col.key = "pk";
-      if (fkColumns.has(ct.name)) col.references = fkColumns.get(ct.name);
-    } else if (fkColumns.has(ct.name)) {
-      col.key = "fk";
-      col.references = fkColumns.get(ct.name);
-    }
+    applyKeys(col, pkColumns, fkColumns);
     return col;
   });
   return { name: table, columns, orderKeys: tieBreakKeys(columns, await uniqueKeys(db, table)) };
@@ -341,23 +338,14 @@ export class SqliteSource implements DbSource {
   async queryTable(schema: string | undefined, table: string, opts: QueryOpts, timeoutMs: number): Promise<TableData> {
     checkSchema(schema);
     const tables = await allowedTables(this.db, timeoutMs);
-    const realTable = findExact(tables, table);
-    if (!realTable) {
-      throw new NotAllowedError(`table "${table}"`, "table");
-    }
+    const realTable = requireExact(tables, table, "table");
 
     // The join route's lookup, so both routes report the same columns; its
     // names are the live catalog's, so they also serve as the allow-list.
     const meta = await bounded(this.db, timeoutMs, () => tableMeta(this.db, realTable));
     const columns: ColumnInfo[] = meta.columns.map(columnInfo);
     const columnNames = columns.map((c) => c.name);
-    let sort: string | undefined;
-    if (opts.sort !== undefined) {
-      sort = findExact(columnNames, opts.sort);
-      if (!sort) {
-        throw new NotAllowedError(`column "${opts.sort}"`, "column");
-      }
-    }
+    const sort = opts.sort === undefined ? undefined : requireExact(columnNames, opts.sort, "column");
 
     const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
     const quotedTable = quoteIdent(realTable);
@@ -373,13 +361,7 @@ export class SqliteSource implements DbSource {
     const params = [...filterValues, opts.limit, opts.offset];
 
     const rows = await bounded(this.db, timeoutMs, () => dbAll<Record<string, unknown>>(this.db, sql, params));
-    const outRows: Record<string, string | null>[] = rows.map((row) => {
-      const out: Record<string, string | null> = {};
-      for (const col of columns) {
-        out[col.name] = cellToJson(row[col.name]);
-      }
-      return out;
-    });
+    const outRows = rows.map((row: Record<string, unknown>) => rowToJson(row, columnNames));
 
     return {
       columns,
@@ -399,14 +381,9 @@ export class SqliteSource implements DbSource {
   ): Promise<CommonValueEntry[]> {
     checkSchema(schema);
     const tables = await allowedTables(this.db, timeoutMs);
-    const realTable = findExact(tables, table);
-    if (!realTable) {
-      throw new NotAllowedError(`table "${table}"`, "table");
-    }
+    const realTable = requireExact(tables, table, "table");
     const columnNames = await allowedColumns(this.db, realTable, timeoutMs);
-    if (!findExact(columnNames, column)) {
-      throw new NotAllowedError(`column "${column}"`, "column");
-    }
+    requireExact(columnNames, column, "column");
     // No pg_stats equivalent to read; an empty list is the documented "no
     // statistics available" answer (spec/protocol.md §5.5), not a live
     // GROUP BY scan.
@@ -415,10 +392,7 @@ export class SqliteSource implements DbSource {
 
   async referencedBy(schema: string | undefined, table: string, timeoutMs: number): Promise<ReferencedByEntry[]> {
     checkSchema(schema);
-    const tables = await allowedTables(this.db, timeoutMs);
-    if (!findExact(tables, table)) {
-      throw new NotAllowedError(`table "${table}"`, "table");
-    }
+    requireExact(await allowedTables(this.db, timeoutMs), table, "table");
 
     // No reverse-FK index and no information_schema: walk every table's
     // pragma_foreign_key_list (the schema is parsed in memory on open).
@@ -466,10 +440,7 @@ export class SqliteSource implements DbSource {
 
   async structure(schema: string | undefined, table: string, timeoutMs: number): Promise<Structure> {
     checkSchema(schema);
-    const tables = await allowedTables(this.db, timeoutMs);
-    if (!findExact(tables, table)) {
-      throw new NotAllowedError(`table "${table}"`, "table");
-    }
+    requireExact(await allowedTables(this.db, timeoutMs), table, "table");
     const out = emptyStructure();
 
     // key = 1 drops trailing rowid/auxiliary entries. An expression key part

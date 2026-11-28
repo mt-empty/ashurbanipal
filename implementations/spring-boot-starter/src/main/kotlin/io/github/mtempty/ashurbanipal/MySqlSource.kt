@@ -3,10 +3,8 @@ package io.github.mtempty.ashurbanipal
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.jdbc.datasource.DataSourceUtils
 import org.springframework.transaction.support.TransactionTemplate
-import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
-import java.sql.Types
 import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
 
@@ -21,18 +19,6 @@ internal fun timedSelect(variant: Variant, timeoutSecs: Int, body: String): Stri
 
 /** Backtick-escape live-catalog identifiers for MySQL (`spec/protocol.md` §5). */
 private fun quoteIdentMysql(ident: String): String = "`" + ident.replace("`", "``") + "`"
-
-private fun bindParams(ps: PreparedStatement, params: List<Any?>) {
-    params.forEachIndexed { i, param ->
-        when (param) {
-            is Long -> ps.setLong(i + 1, param)
-            is Int -> ps.setInt(i + 1, param)
-            is String -> ps.setString(i + 1, param)
-            null -> ps.setNull(i + 1, Types.NULL)
-            else -> ps.setObject(i + 1, param)
-        }
-    }
-}
 
 /** Connector/J rejects MariaDB's wrapper in executeQuery; use execute instead (`spec/protocol.md` §6). */
 private fun <T> query(
@@ -188,7 +174,7 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
         val resolved = requested
             ?: defaultSchema(variant)
             ?: throw NotAllowedException("no schema requested and this connection has no default database", NotAllowedKind.SCHEMA)
-        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
+        return requireExact(schemas, resolved, NotAllowedKind.SCHEMA)
     }
 
     private fun allowedTables(variant: Variant, schema: String): List<String> =
@@ -218,7 +204,7 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
         ) { rs -> rs.getString(1) }
 
     private fun requireTable(variant: Variant, schema: String, table: String): String =
-        allowedTables(variant, schema).find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
+        requireExact(allowedTables(variant, schema), table, NotAllowedKind.TABLE)
 
     /**
      * Reads `key_column_usage` alone: MariaDB hides `table_constraints` from a SELECT-only role. A primary key is
@@ -349,7 +335,7 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
                 columnClass = if (isJson) ColumnClass.JSON else mysqlColumnClass(c.type, c.columnType),
                 compare = if (isJson) null else mysqlTypedCompare(c.type),
                 collation = c.collation?.takeIf { it.isNotEmpty() },
-                key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
+                key = columnKey(c.name, pkColumns, fkColumns),
                 references = fkColumns[c.name],
                 comment = c.comment?.takeIf { it.isNotEmpty() },
             )
@@ -431,7 +417,7 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
-            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
+            requireExact(columnNames, requested, NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { tableWhereClause(it, meta, MYSQL_DIALECT) } ?: WhereClause("", emptyList())
@@ -472,21 +458,12 @@ class MySqlSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : D
         TableData(columns, rows, totalApprox)
     }
 
-    private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
-        val map = LinkedHashMap<String, String?>(columns.size)
-        for ((i, col) in columns.withIndex()) {
-            map[col.name] = readCell(rs, i + 1)
-        }
-        return map
-    }
-
     /** MySQL has no portable common-value statistics (`spec/protocol.md` §5.5). */
     override fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> = inReadOnlyTransaction {
         val variant = variant()
         val realSchema = resolveSchema(variant, schema)
         val realTable = requireTable(variant, realSchema, table)
-        allowedColumns(variant, realSchema, realTable).find { it == column }
-            ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
+        requireExact(allowedColumns(variant, realSchema, realTable), column, NotAllowedKind.COLUMN)
         emptyList()
     }
 

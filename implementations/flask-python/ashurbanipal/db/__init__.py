@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import abc
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Container
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -25,6 +25,13 @@ def one_row(cur: _Fetches) -> tuple[Any, ...]:
         # A DbError, so a row gone mid-request (a dropped table) still gets a protocol error response.
         raise DatabaseError("expected one row, got none")
     return row
+
+
+# Bounds catalog queries (`spec/protocol.md` §6).
+CATALOG_TIMEOUT_SECS = 5
+
+# Stands in for a value the driver can't decode as text (`spec/protocol.md` §5.4.3).
+UNDECODABLE = "<undecodable>"
 
 
 class KeyKind(StrEnum):
@@ -217,6 +224,24 @@ def no_default_schema() -> NotAllowed:
         "no schema given, and this connection has no default schema",
         kind=NotAllowedKind.SCHEMA,
     )
+
+
+def pick_schema(schemas: list[str], requested: str | None, default_schema: Callable[[], str | None]) -> str:
+    """The requested schema, or the connection's default when none is requested,
+    checked against the allow-list (`spec/protocol.md` §5)."""
+    resolved = requested if requested is not None else default_schema()
+    if resolved is None:
+        raise no_default_schema()
+    if resolved not in schemas:
+        raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
+    return resolved
+
+
+def column_key(name: str, pk_columns: Container[str], fk_columns: dict[str, ColumnRef]) -> KeyKind | None:
+    """A column that is both PK and FK reports `pk`."""
+    if name in pk_columns:
+        return KeyKind.PK
+    return KeyKind.FK if name in fk_columns else None
 
 
 class FilterParseError(DbError):

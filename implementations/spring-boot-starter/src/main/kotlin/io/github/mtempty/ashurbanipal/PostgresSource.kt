@@ -6,7 +6,6 @@ import org.springframework.jdbc.core.RowCallbackHandler
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
-import java.sql.ResultSet
 import java.sql.SQLException
 import javax.sql.DataSource
 
@@ -110,7 +109,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         val resolved = requested
             ?: defaultSchema()
             ?: throw NotAllowedException("no schema requested and this connection has no default schema", NotAllowedKind.SCHEMA)
-        return schemas.find { it == resolved } ?: throw NotAllowedException("not allowed: schema $resolved", NotAllowedKind.SCHEMA)
+        return requireExact(schemas, resolved, NotAllowedKind.SCHEMA)
     }
 
     override fun listTables(schema: String?): List<TableInfo> = inReadOnlyTransaction {
@@ -177,11 +176,6 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
             schema,
             table,
         ).filterNotNull()
-
-    private fun requireTable(schema: String, table: String): String {
-        readableTableOid(schema, table)
-        return table
-    }
 
     /**
      * Reads `pg_constraint`, which has no privilege filter, so a role that doesn't own the table still
@@ -276,7 +270,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 columnClass = pgColumnClass(c.type, c.udtSchema, c.udtName, c.isEnum),
                 compare = pgTypedCompare(c.type),
                 collation = c.collation,
-                key = if (pkColumns.contains(c.name)) "pk" else if (fkColumns.containsKey(c.name)) "fk" else null,
+                key = columnKey(c.name, pkColumns, fkColumns),
                 references = fkColumns[c.name],
                 comment = c.comment,
             )
@@ -356,15 +350,14 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
     private fun queryTableInTransaction(schema: String?, table: String, opts: QueryOpts): TableData {
         val realSchema = resolveSchema(schema)
         val oid = readableTableOid(realSchema, table)
-        val realTable = table
         // The join route's lookup, so both routes report the same columns; its
         // names are the live catalog's, so they also serve as the allow-list.
-        val meta = tableMeta(realSchema, realTable, oid)
+        val meta = tableMeta(realSchema, table, oid)
         val columns = meta.columns.map { it.columnInfo() }
         val columnNames = columns.map { it.name }
 
         val sort = opts.sort?.let { requested ->
-            columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
+            requireExact(columnNames, requested, NotAllowedKind.COLUMN)
         }
 
         val whereClause = opts.filter?.let { tableWhereClause(it, meta, PG_DIALECT) }
@@ -372,7 +365,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
 
         val selectList = columns.joinToString(", ") { "${quoteIdent(it.name)}::text" }
         val orderClause = tableOrderClause(meta, sort, opts.descending, ::quoteIdent)
-        val sql = "select $selectList from ${quoteIdent(realSchema)}.${quoteIdent(realTable)}" +
+        val sql = "select $selectList from ${quoteIdent(realSchema)}.${quoteIdent(table)}" +
             "${whereClause.sql}$orderClause limit ? offset ?"
 
         val bindArgs = mutableListOf<Any>()
@@ -383,7 +376,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
         val rows = try {
             jdbcTemplate.query(sql, RowMapper { rs, _ -> rowToJson(rs, columns) }, *bindArgs.toTypedArray())
         } catch (e: DataAccessException) {
-            throw mapSelectError(e, realTable, opts.sort, whereClause.values.isNotEmpty())
+            throw mapSelectError(e, table, opts.sort, whereClause.values.isNotEmpty())
         }
 
         val totalApprox = jdbcTemplate.queryForObject(
@@ -392,18 +385,10 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 "where n.nspname = ? and c.relname = ?",
             Long::class.java,
             realSchema,
-            realTable,
+            table,
         ) ?: -1L
 
         return TableData(columns, rows, totalApprox)
-    }
-
-    private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
-        val map = LinkedHashMap<String, String?>(columns.size)
-        for ((i, col) in columns.withIndex()) {
-            map[col.name] = readCell(rs, i + 1)
-        }
-        return map
     }
 
     override fun commonValues(schema: String?, table: String, column: String): List<CommonValueEntry> =
@@ -411,9 +396,8 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
 
     private fun commonValuesInTransaction(schema: String?, table: String, column: String): List<CommonValueEntry> {
         val realSchema = resolveSchema(schema)
-        val realTable = requireTable(realSchema, table)
-        val realColumn = allowedColumns(realSchema, realTable).find { it == column }
-            ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
+        readableTableOid(realSchema, table)
+        val realColumn = requireExact(allowedColumns(realSchema, table), column, NotAllowedKind.COLUMN)
 
         // most_common_vals is anyarray; ::text::text[] reads it uniformly.
         // NULL (no ANALYZE stats yet) unnests to zero rows, not an error.
@@ -425,7 +409,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 "order by t.freq desc",
             RowMapper { rs, _ -> rs.getString(1) to rs.getFloat(2) },
             realSchema,
-            realTable,
+            table,
             realColumn,
         )
 
@@ -434,7 +418,7 @@ class PostgresSource(dataSource: DataSource, queryTimeoutSecs: Int) : DbSource {
                 "where table_schema = ? and table_name = ? and column_name = ?",
             RowMapper { rs, _ -> rs.getString(1) },
             realSchema,
-            realTable,
+            table,
             realColumn,
         ).firstOrNull()
 

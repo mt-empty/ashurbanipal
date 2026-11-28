@@ -2,23 +2,19 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
-use sqlx::mysql::MySqlRow;
-use sqlx::{MySql, MySqlPool, Row, Transaction};
+use sqlx::{MySql, MySqlPool, Transaction};
 
 use super::{
-    group_referenced_by, no_default_schema, ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck,
-    ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident,
-    IndexInfo, KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure,
-    TableData, TableInfo,
+    column_key, filter_value_error, group_referenced_by, no_default_schema, row_to_json,
+    ColumnInfo, ColumnPair, ColumnRef, ConstraintCheck, ConstraintFk, ConstraintPk,
+    ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo, NotAllowedKind,
+    QueryOpts, ReferencedBy, SchemaListing, Structure, TableData, TableInfo, CATALOG_TIMEOUT_SECS,
 };
 use crate::filter::ValueForm;
 use crate::join::{
     self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
     IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, TypedCompare, UniqueKey,
 };
-
-/// Bounds catalog queries (`spec/protocol.md` §6).
-const CATALOG_TIMEOUT_SECS: u32 = 5;
 
 /// Selects fork-specific query timeout syntax (`spec/protocol.md` §6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -319,13 +315,7 @@ impl MySqlSource {
                     let class = column_class(&data_type, &column_type);
                     (column_type, class, typed_compare(&data_type))
                 };
-                let (key, references) = if pk_columns.contains(&name) {
-                    (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-                } else if let Some(r) = fk_columns.get(&name) {
-                    (Some(KeyKind::Fk), Some(r.clone()))
-                } else {
-                    (None, None)
-                };
+                let (key, references) = column_key(&name, pk_columns.contains(&name), &fk_columns);
                 ColMeta {
                     class,
                     compare,
@@ -463,37 +453,18 @@ impl MySqlSource {
 /// (`spec/protocol.md` §2), and a bad value in a filtered query (a cast out of
 /// range) to a filter error.
 fn map_select_denied(e: sqlx::Error, table: &str, filtered: bool) -> DbError {
-    match &e {
-        sqlx::Error::Database(db)
-            if db
-                .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
-                .is_some_and(|m| m.number() == 1142) =>
+    if let sqlx::Error::Database(db) = &e {
+        if db
+            .try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()
+            .is_some_and(|m| m.number() == 1142)
         {
-            DbError::not_allowed(NotAllowedKind::NotReadable, format!("table {table:?}"))
+            return DbError::not_allowed(NotAllowedKind::NotReadable, format!("table {table:?}"));
         }
-        sqlx::Error::Database(db)
-            if filtered && db.code().is_some_and(|c| super::is_bad_value_sqlstate(&c)) =>
-        {
-            DbError::FilterParse(format!("value invalid for this backend: {}", db.message()))
+        if let Some(err) = filter_value_error(db.as_ref(), filtered) {
+            return err;
         }
-        _ => DbError::from(e),
     }
-}
-
-fn row_to_json<'a>(
-    row: &MySqlRow,
-    names: impl ExactSizeIterator<Item = &'a str>,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(names.len());
-    for (i, name) in names.enumerate() {
-        let value = match row.try_get::<Option<String>, _>(i) {
-            Ok(Some(text)) => serde_json::Value::String(text),
-            Ok(None) => serde_json::Value::Null,
-            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
-        };
-        map.insert(name.to_string(), value);
-    }
-    map
+    DbError::from(e)
 }
 
 impl DbSource for MySqlSource {
@@ -1050,6 +1021,7 @@ async fn unique_keys_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::KeyKind;
     use std::str::FromStr;
     use std::sync::atomic::{AtomicU64, Ordering};
 

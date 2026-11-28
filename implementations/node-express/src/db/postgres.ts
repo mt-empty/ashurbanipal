@@ -25,6 +25,7 @@ import {
   unknownJoinTable,
 } from "../join.js";
 import {
+  applyKeys,
   type ColumnInfo,
   type ColumnRef,
   type CommonValueEntry,
@@ -32,10 +33,11 @@ import {
   cellToJson,
   type DbSource,
   emptyStructure,
-  findExact,
   groupReferencedBy,
   type QueryOpts,
   type ReferencedByEntry,
+  requireExact,
+  rowToJson,
   type SchemaListing,
   type Structure,
   schemaListing,
@@ -186,11 +188,7 @@ export class PostgresSource implements DbSource {
       }
       resolved = defaultSchema;
     }
-    const real = findExact(schemas, resolved);
-    if (!real) {
-      throw new NotAllowedError(`schema "${resolved}"`, "schema");
-    }
-    return real;
+    return requireExact(schemas, resolved, "schema");
   }
 
   // Resolves table to its OID iff it's a readable base table in schema —
@@ -365,13 +363,7 @@ export class PostgresSource implements DbSource {
       const compare = pgTypedCompare(r.data_type);
       if (compare) col.compare = compare;
       if (r.collation) col.collation = r.collation;
-      if (pkColumns.has(r.column_name)) {
-        col.key = "pk";
-        if (fkColumns.has(r.column_name)) col.references = fkColumns.get(r.column_name);
-      } else if (fkColumns.has(r.column_name)) {
-        col.key = "fk";
-        col.references = fkColumns.get(r.column_name);
-      }
+      applyKeys(col, pkColumns, fkColumns);
       if (r.comment !== null) col.comment = r.comment;
       return col;
     });
@@ -439,21 +431,14 @@ export class PostgresSource implements DbSource {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       const oid = await this.readableTableOid(client, realSchema, table);
-      const realTable = table;
 
       // The join route's lookup, so both routes report the same columns; its
       // names are the live catalog's, so they also serve as the allow-list.
-      const meta = await this.tableMeta(client, realSchema, realTable, oid);
+      const meta = await this.tableMeta(client, realSchema, table, oid);
       const columns: ColumnInfo[] = meta.columns.map(columnInfo);
       const columnNames = columns.map((c) => c.name);
 
-      let sort: string | undefined;
-      if (opts.sort !== undefined) {
-        sort = findExact(columnNames, opts.sort);
-        if (!sort) {
-          throw new NotAllowedError(`column "${opts.sort}"`, "column");
-        }
-      }
+      const sort = opts.sort === undefined ? undefined : requireExact(columnNames, opts.sort, "column");
 
       const { where: whereClause, values: filterValues } = tableWhereClause(opts.filter, meta, JOIN_DIALECT);
 
@@ -467,29 +452,23 @@ export class PostgresSource implements DbSource {
       const orderClause = tableOrderClause(meta, sort, opts.descending, quoteIdent);
 
       // Identifiers spliced here are schema-validated (realSchema via
-      // resolveSchema, realTable/columns via allowedTables/allowedColumns,
-      // sort via the findExact check above, filter columns via
+      // resolveSchema, table via readableTableOid's exact relname match,
+      // columns via tableMeta, sort via the check above, filter columns via
       // tableWhereClause's own allow-list check); every value is a bound
       // $N parameter.
-      const query = `select ${selectList} from ${quoteIdent(realSchema)}.${quoteIdent(realTable)}${whereClause}${orderClause} limit $1 offset $2`;
+      const query = `select ${selectList} from ${quoteIdent(realSchema)}.${quoteIdent(table)}${whereClause}${orderClause} limit $1 offset $2`;
       const args: unknown[] = [opts.limit, opts.offset, ...filterValues];
 
       const { rows: dataRows } = await client.query(query, args).catch((err: unknown) => {
-        throw mapSelectDenied(err, realTable, opts.sort, filterValues.length > 0);
+        throw mapSelectDenied(err, table, opts.sort, filterValues.length > 0);
       });
-      const outRows: Record<string, string | null>[] = dataRows.map((row: Record<string, unknown>) => {
-        const out: Record<string, string | null> = {};
-        for (const col of columns) {
-          out[col.name] = cellToJson(row[col.name]);
-        }
-        return out;
-      });
+      const outRows = dataRows.map((row: Record<string, unknown>) => rowToJson(row, columnNames));
 
       const { rows: countRows } = await client.query<{ reltuples: string }>(
         `select reltuples::bigint::text as reltuples from pg_class c
          join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = $1 and c.relname = $2`,
-        [realSchema, realTable],
+        [realSchema, table],
       );
       const totalApprox = countRows.length > 0 ? Number(countRows[0].reltuples) : -1;
 
@@ -506,12 +485,8 @@ export class PostgresSource implements DbSource {
     return this.withTimeout(timeoutMs, async (client) => {
       const realSchema = await this.resolveSchema(client, schema);
       await this.readableTableOid(client, realSchema, table);
-      const realTable = table;
-      const columnNames = await this.allowedColumns(client, realSchema, realTable);
-      const realColumn = findExact(columnNames, column);
-      if (!realColumn) {
-        throw new NotAllowedError(`column "${column}"`, "column");
-      }
+      const columnNames = await this.allowedColumns(client, realSchema, table);
+      const realColumn = requireExact(columnNames, column, "column");
 
       // most_common_vals is anyarray; ::text::text[] reads it uniformly.
       // NULL (no ANALYZE stats yet) unnests to zero rows, not an error.
@@ -521,13 +496,13 @@ export class PostgresSource implements DbSource {
               lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
          where schemaname = $1 and tablename = $2 and attname = $3
          order by t.freq desc`,
-        [realSchema, realTable, realColumn],
+        [realSchema, table, realColumn],
       );
 
       const { rows: typeRows } = await client.query<{ data_type: string }>(
         `select data_type from information_schema.columns
          where table_schema = $1 and table_name = $2 and column_name = $3`,
-        [realSchema, realTable, realColumn],
+        [realSchema, table, realColumn],
       );
       const isBoolean = typeRows.length > 0 && typeRows[0].data_type === "boolean";
 

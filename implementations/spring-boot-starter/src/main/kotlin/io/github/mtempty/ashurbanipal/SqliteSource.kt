@@ -15,18 +15,6 @@ private fun checkSchema(schema: String?) {
     }
 }
 
-private fun bindParams(ps: java.sql.PreparedStatement, params: List<Any?>) {
-    params.forEachIndexed { i, param ->
-        when (param) {
-            is Long -> ps.setLong(i + 1, param)
-            is Int -> ps.setInt(i + 1, param)
-            is String -> ps.setString(i + 1, param)
-            null -> ps.setNull(i + 1, java.sql.Types.NULL)
-            else -> ps.setObject(i + 1, param)
-        }
-    }
-}
-
 private fun <T> query(conn: Connection, sql: String, params: List<Any?> = emptyList(), mapper: (ResultSet) -> T): List<T> {
     conn.prepareStatement(sql).use { ps ->
         bindParams(ps, params)
@@ -127,7 +115,7 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
         query(conn, "select cid, name from pragma_table_info(?) order by cid", listOf(table)) { rs -> rs.getString(2) }
 
     private fun requireTableOn(conn: Connection, table: String): String =
-        allowedTablesOn(conn).find { it == table } ?: throw NotAllowedException("not allowed: table $table", NotAllowedKind.TABLE)
+        requireExact(allowedTablesOn(conn), table, NotAllowedKind.TABLE)
 
     private fun tableMeta(conn: Connection, table: String): TableMeta {
         val (pk, fkColumns) = keyMetadataOn(conn, table)
@@ -141,7 +129,7 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
                 type = declared.ifEmpty { "unknown" },
                 columnClass = columnClass,
                 compare = sqliteTypedCompare(columnClass),
-                key = if (pk.contains(col)) "pk" else if (fkColumns.containsKey(col)) "fk" else null,
+                key = columnKey(col, pk, fkColumns),
                 references = fkColumns[col],
             )
         }
@@ -265,7 +253,7 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
             val columnNames = columns.map { it.name }
 
             val sort = opts.sort?.let { requested ->
-                columnNames.find { it == requested } ?: throw NotAllowedException("not allowed: column $requested", NotAllowedKind.COLUMN)
+                requireExact(columnNames, requested, NotAllowedKind.COLUMN)
             }
 
             val whereClause = opts.filter?.let { tableWhereClause(it, meta, SQLITE_DIALECT) } ?: WhereClause("", emptyList())
@@ -289,14 +277,6 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
         }
     }
 
-    private fun rowToJson(rs: ResultSet, columns: List<ColumnInfo>): LinkedHashMap<String, String?> {
-        val map = LinkedHashMap<String, String?>(columns.size)
-        for ((i, col) in columns.withIndex()) {
-            map[col.name] = readCell(rs, i + 1)
-        }
-        return map
-    }
-
     /**
      * No `pg_stats` analog exists on SQLite. An unconditional empty list is
      * the protocol's own "no statistics available" answer
@@ -307,8 +287,7 @@ class SqliteSource(private val dataSource: DataSource, queryTimeoutSecs: Int) : 
         checkSchema(schema)
         bounded(queryTimeoutSecs) { conn ->
             val realTable = requireTableOn(conn, table)
-            allowedColumnsOn(conn, realTable).find { it == column }
-                ?: throw NotAllowedException("not allowed: column $column", NotAllowedKind.COLUMN)
+            requireExact(allowedColumnsOn(conn, realTable), column, NotAllowedKind.COLUMN)
         }
         return emptyList()
     }

@@ -23,7 +23,7 @@ from ashurbanipal.db import (
     SchemaListing,
     wrap_driver_errors,
 )
-from ashurbanipal.db.sqlite import SqliteSource, _execute_filtered, partial_index_predicate
+from ashurbanipal.db.sqlite import SqliteSource, _bound, _execute_filtered, partial_index_predicate
 from ashurbanipal.routes import _column_to_dict
 
 
@@ -364,8 +364,6 @@ def test_slow_query_is_aborted_by_the_progress_handler_not_left_to_run(seeded_pa
     """
     source = SqliteSource(seeded_path)
     conn = source._connect()
-    source._bounded(conn, timeout_secs=1)
-    start = time.monotonic()
 
     @wrap_driver_errors(sqlite3.Error)
     def run_slow():
@@ -375,11 +373,11 @@ def test_slow_query_is_aborted_by_the_progress_handler_not_left_to_run(seeded_pa
             ") select count(*) from slow"
         ).fetchone()
 
-    with pytest.raises(QueryTimeout):
+    start = time.monotonic()
+    with _bound(conn, timeout_secs=1), pytest.raises(QueryTimeout):
         run_slow()
     elapsed = time.monotonic() - start
     assert elapsed < 5, f"expected the progress handler to abort near the 1s deadline, took {elapsed}s"
-    source._clear_bound(conn)
 
     # The connection must still be usable afterward — proves the handler
     # was cleared, not left armed with a stale deadline.

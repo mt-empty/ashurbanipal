@@ -1,22 +1,18 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
 use super::{
-    group_referenced_by, quote_ident, ColumnInfo, ColumnPair, ColumnRef, ConstraintFk,
-    ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident, IndexInfo,
-    KeyKind, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData,
-    TableInfo,
+    column_key, group_referenced_by, quote_ident, row_to_json, ColumnInfo, ColumnPair, ColumnRef,
+    ConstraintFk, ConstraintPk, ConstraintUnique, Constraints, DbError, DbSource, Engine, Ident,
+    IndexInfo, NotAllowedKind, QueryOpts, ReferencedBy, SchemaListing, Structure, TableData,
+    TableInfo, CATALOG_TIMEOUT_SECS,
 };
 use crate::join::{
     self, group_unique_keys, table_order_clause, tie_break_keys, ColMeta, ColumnClass, Dialect,
     IlikeStyle, JoinData, JoinOpts, JoinSpec, KeyPart, TableMeta, TypedCompare, UniqueKey,
 };
-
-/// Catalog/metadata queries need a fixed bounded timeout.
-const CATALOG_TIMEOUT_SECS: u32 = 5;
 
 /// SQLite's only schema for a single database file.
 const ONLY_SCHEMA: &str = "main";
@@ -294,13 +290,7 @@ async fn table_meta(
     let columns: Vec<ColMeta> = columns
         .into_iter()
         .map(|(_, name, declared)| {
-            let (key, references) = if pk_columns.contains(&name) {
-                (Some(KeyKind::Pk), fk_columns.get(&name).cloned())
-            } else if let Some(r) = fk_columns.get(&name) {
-                (Some(KeyKind::Fk), Some(r.clone()))
-            } else {
-                (None, None)
-            };
+            let (key, references) = column_key(&name, pk_columns.contains(&name), &fk_columns);
             let class = column_class(&declared);
             ColMeta {
                 compare: typed_compare(&class),
@@ -324,22 +314,6 @@ async fn table_meta(
         order_keys: tie_break_keys(&columns, &unique_keys),
         columns,
     })
-}
-
-fn row_to_json<'a>(
-    row: &SqliteRow,
-    names: impl ExactSizeIterator<Item = &'a str>,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut map = serde_json::Map::with_capacity(names.len());
-    for (i, name) in names.enumerate() {
-        let value = match row.try_get::<Option<String>, _>(i) {
-            Ok(Some(text)) => serde_json::Value::String(text),
-            Ok(None) => serde_json::Value::Null,
-            Err(_) => serde_json::Value::String("<undecodable>".to_string()),
-        };
-        map.insert(name.to_string(), value);
-    }
-    map
 }
 
 impl DbSource for SqliteSource {
@@ -749,6 +723,7 @@ async fn unique_keys_on(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::KeyKind;
 
     async fn seeded_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

@@ -157,26 +157,17 @@ func (c *MySQLSource) pinnedTx(ctx context.Context) (*sql.Tx, error) {
 	return c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 }
 
+// selectStrings runs a one-text-column catalog select under both the client
+// deadline and the server-side statement limit.
+func (c *MySQLSource) selectStrings(ctx context.Context, tx queryer, variant mysqlVariant, body string, args ...any) ([]string, error) {
+	return queryStrings(ctx, tx, c.timeout, timedSelect(variant, c.timeoutSec, body), args...)
+}
+
 func (c *MySQLSource) allowedSchemasInTx(ctx context.Context, tx queryer, variant mysqlVariant) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
+	return c.selectStrings(ctx, tx, variant,
 		`schema_name from information_schema.schemata
 		 where schema_name not in ('mysql', 'information_schema', 'performance_schema', 'sys')
-		 order by cast(schema_name as binary)`))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
+		 order by cast(schema_name as binary)`)
 }
 
 // defaultSchemaInTx is nil when the connection names no database.
@@ -203,68 +194,21 @@ func (c *MySQLSource) resolveSchemaInTx(ctx context.Context, tx queryer, variant
 // resolveSchemaAmong is resolveSchemaInTx against a schema list already
 // fetched in this transaction.
 func (c *MySQLSource) resolveSchemaAmong(ctx context.Context, tx queryer, variant mysqlVariant, schemas []string, requested *string) (string, error) {
-	var resolved string
-	if requested != nil {
-		resolved = *requested
-	} else {
-		def, err := c.defaultSchemaInTx(ctx, tx, variant)
-		if err != nil {
-			return "", err
-		}
-		if def == nil {
-			return "", errNoDefaultSchema()
-		}
-		resolved = *def
-	}
-	real, ok := findExact(schemas, resolved)
-	if !ok {
-		return "", &NotAllowedError{Kind: NotAllowedSchema, What: fmt.Sprintf("schema %q", resolved)}
-	}
-	return real, nil
+	return pickSchema(schemas, requested, func() (*string, error) { return c.defaultSchemaInTx(ctx, tx, variant) })
 }
 
 func (c *MySQLSource) allowedTablesInTx(ctx context.Context, tx queryer, variant mysqlVariant, schema string) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
+	return c.selectStrings(ctx, tx, variant,
 		`table_name from information_schema.tables
 		 where table_schema = ? and table_type = 'BASE TABLE'
-		 order by cast(table_name as binary)`), schema)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
+		 order by cast(table_name as binary)`, schema)
 }
 
 func (c *MySQLSource) allowedColumnsInTx(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec,
+	return c.selectStrings(ctx, tx, variant,
 		`column_name from information_schema.columns
 		 where table_schema = ? and table_name = ?
-		 order by ordinal_position`), schema, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
+		 order by ordinal_position`, schema, table)
 }
 
 type mysqlFKCandidate struct {
@@ -347,21 +291,14 @@ func (c *MySQLSource) mariadbJSONColumns(ctx context.Context, tx queryer, varian
 	if variant != variantMariaDB {
 		return out, nil
 	}
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := tx.QueryContext(ctx, timedSelect(variant, c.timeoutSec, mariadbJSONColumnsSQL), schema, table)
+	names, err := c.selectStrings(ctx, tx, variant, mariadbJSONColumnsSQL, schema, table)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
+	for _, name := range names {
 		out[name] = true
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (c *MySQLSource) tableMeta(ctx context.Context, tx queryer, variant mysqlVariant, schema, table string) (tableMeta, error) {
@@ -521,7 +458,7 @@ func (c *MySQLSource) QueryJoin(ctx context.Context, schema *string, spec JoinSp
 		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table, len(values) > 0)
 	}
 	defer rows.Close()
-	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
+	out, hasMore, err := scanJoinPage(rows, plan.labels, opts.Limit)
 	if err != nil {
 		return JoinData{}, mapSelectDeniedMySQL(err, spec.Table, len(values) > 0)
 	}
@@ -692,9 +629,9 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	if err != nil {
 		return TableData{}, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return TableData{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	realTable, err := requireExact(tables, table, NotAllowedTable)
+	if err != nil {
+		return TableData{}, err
 	}
 
 	// The join route's lookup, so both routes report the same columns; its
@@ -707,9 +644,9 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	columnNames := meta.columnNames()
 	var sort *string
 	if opts.Sort != nil {
-		found, ok := findExact(columnNames, *opts.Sort)
-		if !ok {
-			return TableData{}, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", *opts.Sort)}
+		found, err := requireExact(columnNames, *opts.Sort, NotAllowedColumn)
+		if err != nil {
+			return TableData{}, err
 		}
 		sort = &found
 	}
@@ -727,7 +664,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	for i, col := range columns {
 		selectParts[i] = fmt.Sprintf("CAST(%s AS CHAR)", quoteIdentMySQL(col.Name))
 	}
-	selectList := joinComma(selectParts)
+	selectList := strings.Join(selectParts, ", ")
 
 	// Table-qualified, same reason as postgres.go/sqlite.go: an
 	// unqualified `order by` would resolve to the CAST-output column in
@@ -737,7 +674,7 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 
 	// Identifiers spliced here are schema-validated (realSchema via
 	// resolveSchemaInTx, realTable/columns via allowedTablesInTx/
-	// allowedColumnsInTx, sort via the findExact check above, filter
+	// allowedColumnsInTx, sort via the requireExact check above, filter
 	// columns via tableWhereClause's own allow-list check); every
 	// value is a bound ? parameter.
 	sqlBody := fmt.Sprintf("%s from %s.%s%s%s limit ? offset ?",
@@ -758,27 +695,9 @@ func (c *MySQLSource) QueryTable(ctx context.Context, schema *string, table stri
 	}
 	defer rows.Close()
 
-	var out []map[string]*string
-	for rows.Next() {
-		cells := make([]interface{}, len(columns))
-		values := make([]cellValue, len(columns))
-		for i := range values {
-			cells[i] = &values[i]
-		}
-		if err := rows.Scan(cells...); err != nil {
-			return TableData{}, err
-		}
-		row := make(map[string]*string, len(columns))
-		for i, col := range columns {
-			row[col.Name] = values[i].asJSON()
-		}
-		out = append(out, row)
-	}
-	if err := rows.Err(); err != nil {
+	out, err := scanLabeledRows(rows, columnNames)
+	if err != nil {
 		return TableData{}, mapSelectDeniedMySQL(err, realTable, len(filterValues) > 0)
-	}
-	if out == nil {
-		out = []map[string]*string{}
 	}
 
 	var totalApprox sql.NullInt64
@@ -817,16 +736,16 @@ func (c *MySQLSource) CommonValues(ctx context.Context, schema *string, table, c
 	if err != nil {
 		return nil, err
 	}
-	realTable, ok := findExact(tables, table)
-	if !ok {
-		return nil, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	realTable, err := requireExact(tables, table, NotAllowedTable)
+	if err != nil {
+		return nil, err
 	}
 	columns, err := c.allowedColumnsInTx(ctx, tx, variant, realSchema, realTable)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := findExact(columns, column); !ok {
-		return nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
+	if _, err := requireExact(columns, column, NotAllowedColumn); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -933,8 +852,8 @@ func (c *MySQLSource) Structure(ctx context.Context, schema *string, table strin
 	if err != nil {
 		return Structure{}, err
 	}
-	if _, ok := findExact(allowed, table); !ok {
-		return Structure{}, &NotAllowedError{Kind: NotAllowedTable, What: fmt.Sprintf("table %q", table)}
+	if _, err := requireExact(allowed, table, NotAllowedTable); err != nil {
+		return Structure{}, err
 	}
 
 	qctx, cancel := c.bounded(ctx)

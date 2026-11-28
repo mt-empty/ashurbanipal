@@ -124,28 +124,13 @@ func (c *PostgresSource) bounded(ctx context.Context) (context.Context, context.
 }
 
 func (c *PostgresSource) allowedSchemas(ctx context.Context, db queryer) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := db.QueryContext(ctx,
+	return queryStrings(ctx, db, c.timeout,
 		`select nspname from pg_namespace
 		 where nspname not in ('pg_catalog', 'information_schema')
 		   and nspname not like 'pg_toast%'
 		   and nspname not like 'pg_temp\_%' escape '\'
 		   and has_schema_privilege(nspname, 'USAGE')
 		 order by nspname`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
 }
 
 // defaultSchema is nil when no schema on the session's search_path exists.
@@ -173,24 +158,7 @@ func (c *PostgresSource) resolveSchema(ctx context.Context, db queryer, requeste
 // resolveSchemaAmong is resolveSchema against a schema list already fetched
 // in this transaction.
 func (c *PostgresSource) resolveSchemaAmong(ctx context.Context, db queryer, schemas []string, requested *string) (string, error) {
-	var resolved string
-	if requested != nil {
-		resolved = *requested
-	} else {
-		def, err := c.defaultSchema(ctx, db)
-		if err != nil {
-			return "", err
-		}
-		if def == nil {
-			return "", errNoDefaultSchema()
-		}
-		resolved = *def
-	}
-	real, ok := findExact(schemas, resolved)
-	if !ok {
-		return "", &NotAllowedError{Kind: NotAllowedSchema, What: fmt.Sprintf("schema %q", resolved)}
-	}
-	return real, nil
+	return pickSchema(schemas, requested, func() (*string, error) { return c.defaultSchema(ctx, db) })
 }
 
 // readableTableOID resolves table to its OID iff it's a readable base
@@ -226,25 +194,10 @@ func (c *PostgresSource) readableTableOID(ctx context.Context, db queryer, schem
 }
 
 func (c *PostgresSource) allowedColumns(ctx context.Context, db queryer, schema, table string) ([]string, error) {
-	ctx, cancel := c.bounded(ctx)
-	defer cancel()
-	rows, err := db.QueryContext(ctx,
+	return queryStrings(ctx, db, c.timeout,
 		`select column_name from information_schema.columns
 		 where table_schema = $1 and table_name = $2
 		 order by ordinal_position`, schema, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		out = append(out, name)
-	}
-	return out, rows.Err()
 }
 
 // pgKeyMetadataSQL reads pg_constraint, which has no privilege filter, so a
@@ -475,7 +428,7 @@ func (c *PostgresSource) QueryJoin(ctx context.Context, schema *string, spec Joi
 		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort, len(values) > 0)
 	}
 	defer rows.Close()
-	out, hasMore, err := scanJoinRows(rows, plan.labels, opts.Limit)
+	out, hasMore, err := scanJoinPage(rows, plan.labels, opts.Limit)
 	if err != nil {
 		return JoinData{}, mapSelectDenied(err, spec.Table, opts.Sort, len(values) > 0)
 	}
@@ -647,11 +600,10 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	if err != nil {
 		return TableData{}, err
 	}
-	realTable := table
 
 	// The join route's lookup, so both routes report the same columns; its
 	// names are the live catalog's, so they also serve as the allow-list.
-	meta, err := c.tableMeta(ctx, tx, realSchema, realTable, oid)
+	meta, err := c.tableMeta(ctx, tx, realSchema, table, oid)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -660,9 +612,9 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 
 	var sort *string
 	if opts.Sort != nil {
-		found, ok := findExact(columnNames, *opts.Sort)
-		if !ok {
-			return TableData{}, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", *opts.Sort)}
+		found, err := requireExact(columnNames, *opts.Sort, NotAllowedColumn)
+		if err != nil {
+			return TableData{}, err
 		}
 		sort = &found
 	}
@@ -680,7 +632,7 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	for i, col := range columns {
 		selectParts[i] = quoteIdent(col.Name) + "::text"
 	}
-	selectList := joinComma(selectParts)
+	selectList := strings.Join(selectParts, ", ")
 
 	// Table-qualified (by relation name, not schema — a FROM item's
 	// correlation name is its own relation name regardless of whether
@@ -690,12 +642,12 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	orderClause := tableOrderClause(meta, sort, opts.Descending, quoteIdent)
 
 	// Identifiers spliced here are schema-validated (realSchema via
-	// resolveSchema, realTable/columns via allowedTables/allowedColumns,
-	// sort via the findExact check above, filter columns via
+	// resolveSchema, table via readableTableOID's exact relname match,
+	// columns via tableMeta, sort via the requireExact check above, filter columns via
 	// tableWhereClause's own allow-list check); every value is a bound $N
 	// parameter.
 	query := fmt.Sprintf("select %s from %s.%s%s%s limit $1 offset $2",
-		selectList, quoteIdent(realSchema), quoteIdent(realTable), whereClause, orderClause)
+		selectList, quoteIdent(realSchema), quoteIdent(table), whereClause, orderClause)
 
 	args := make([]interface{}, 0, 2+len(filterValues))
 	args = append(args, opts.Limit, opts.Offset)
@@ -707,39 +659,21 @@ func (c *PostgresSource) QueryTable(ctx context.Context, schema *string, table s
 	defer queryCancel()
 	rows, err := tx.QueryContext(queryCtx, query, args...)
 	if err != nil {
-		return TableData{}, mapSelectDenied(err, realTable, sort, len(filterValues) > 0)
+		return TableData{}, mapSelectDenied(err, table, sort, len(filterValues) > 0)
 	}
 	defer rows.Close()
 
-	var out []map[string]*string
-	for rows.Next() {
-		cells := make([]interface{}, len(columns))
-		values := make([]cellValue, len(columns))
-		for i := range values {
-			cells[i] = &values[i]
-		}
-		if err := rows.Scan(cells...); err != nil {
-			return TableData{}, mapSelectDenied(err, realTable, sort, len(filterValues) > 0)
-		}
-		row := make(map[string]*string, len(columns))
-		for i, col := range columns {
-			row[col.Name] = values[i].asJSON()
-		}
-		out = append(out, row)
-	}
 	// A bad filter value can surface while rows stream, not only at the query.
-	if err := rows.Err(); err != nil {
-		return TableData{}, mapSelectDenied(err, realTable, sort, len(filterValues) > 0)
-	}
-	if out == nil {
-		out = []map[string]*string{}
+	out, err := scanLabeledRows(rows, columnNames)
+	if err != nil {
+		return TableData{}, mapSelectDenied(err, table, sort, len(filterValues) > 0)
 	}
 
 	var totalApprox int64
 	err = tx.QueryRowContext(queryCtx,
 		`select reltuples::bigint from pg_class c
 		 join pg_namespace n on n.oid = c.relnamespace
-		 where n.nspname = $1 and c.relname = $2`, realSchema, realTable).Scan(&totalApprox)
+		 where n.nspname = $1 and c.relname = $2`, realSchema, table).Scan(&totalApprox)
 	if err != nil {
 		return TableData{}, err
 	}
@@ -766,14 +700,13 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	if _, err := c.readableTableOID(ctx, tx, realSchema, table); err != nil {
 		return nil, err
 	}
-	realTable := table
-	columnNames, err := c.allowedColumns(ctx, tx, realSchema, realTable)
+	columnNames, err := c.allowedColumns(ctx, tx, realSchema, table)
 	if err != nil {
 		return nil, err
 	}
-	realColumn, ok := findExact(columnNames, column)
-	if !ok {
-		return nil, &NotAllowedError{Kind: NotAllowedColumn, What: fmt.Sprintf("column %q", column)}
+	realColumn, err := requireExact(columnNames, column, NotAllowedColumn)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := c.bounded(ctx)
@@ -786,7 +719,7 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 		 from pg_stats,
 		      lateral unnest(most_common_vals::text::text[], most_common_freqs) as t(val, freq)
 		 where schemaname = $1 and tablename = $2 and attname = $3
-		 order by t.freq desc`, realSchema, realTable, realColumn)
+		 order by t.freq desc`, realSchema, table, realColumn)
 	if err != nil {
 		return nil, err
 	}
@@ -809,7 +742,7 @@ func (c *PostgresSource) CommonValues(ctx context.Context, schema *string, table
 	err = tx.QueryRowContext(ctx,
 		`select data_type from information_schema.columns
 		 where table_schema = $1 and table_name = $2 and column_name = $3`,
-		realSchema, realTable, realColumn).Scan(&dataType)
+		realSchema, table, realColumn).Scan(&dataType)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}

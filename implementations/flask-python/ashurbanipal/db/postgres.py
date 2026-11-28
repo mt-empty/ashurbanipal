@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
+
 import psycopg
 from psycopg.abc import Buffer
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -38,6 +41,8 @@ from ..join import (
 )
 from . import (
     BAD_VALUE_SQLSTATES,
+    CATALOG_TIMEOUT_SECS,
+    UNDECODABLE,
     ColumnPair,
     ColumnRef,
     ConstraintCheck,
@@ -48,7 +53,6 @@ from . import (
     Engine,
     FilterParseError,
     IndexInfo,
-    KeyKind,
     NotAllowed,
     NotAllowedKind,
     QueryOpts,
@@ -58,15 +62,13 @@ from . import (
     TableData,
     TableInfo,
     Unsortable,
+    column_key,
     group_referenced_by,
-    no_default_schema,
     one_row,
+    pick_schema,
     quote_ident,
     wrap_driver_errors,
 )
-
-# Bounds catalog queries (`spec/protocol.md` §6).
-CATALOG_TIMEOUT_SECS = 5
 
 
 class _LenientTextLoader(TextLoader):
@@ -76,7 +78,7 @@ class _LenientTextLoader(TextLoader):
         try:
             return super().load(data)
         except UnicodeDecodeError:
-            return "<undecodable>"
+            return UNDECODABLE
 
 
 def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, list[str]]:
@@ -87,6 +89,29 @@ def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, lis
         for i, s in enumerate(path)
     ]
     return f"({expr}{''.join(parts)})", [str(s) for s in path]
+
+
+@contextlib.contextmanager
+def _select_errors(table: str, sort: str | None, filtered: bool) -> Iterator[None]:
+    """Maps the select's privilege, unsortable-sort and bad-filter-value errors to
+    their 400s; any other error propagates."""
+    try:
+        yield
+    except psycopg.errors.InsufficientPrivilege as exc:
+        # The allow-list already rejects tables the role can't SELECT; this is the residual edge.
+        raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+    except psycopg.errors.UndefinedFunction as exc:
+        # With a sort, an undefined function is the sort column's type
+        # having no ordering operator (json, xml, geometric types).
+        if sort is None:
+            raise
+        raise Unsortable(sort) from exc
+    except psycopg.DataError as exc:
+        # psycopg's str dumper rejects a NUL byte client-side, with no SQLSTATE
+        # (docs/adapter-decisions.md §5.4.2).
+        if not filtered or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
+            raise
+        raise FilterParseError(f"value invalid for this backend: {exc}") from exc
 
 
 def _quote_ident(ident: str) -> str:
@@ -166,6 +191,17 @@ class PgSource(DbSource):
         conn.read_only = True
         return conn
 
+    @contextlib.contextmanager
+    def _cursor(self, timeout_secs: float, *, lenient_text: bool = False) -> Iterator[psycopg.Cursor]:
+        """One transaction whose statements are bounded by `timeout_secs` (`spec/protocol.md` §6)."""
+        with self._connect() as conn:
+            if lenient_text:
+                # psycopg snapshots adapters when the cursor is created.
+                conn.adapters.register_loader("text", _LenientTextLoader)
+            with conn.cursor() as cur:
+                cur.execute(f"SET LOCAL statement_timeout = '{int(timeout_secs)}s'")
+                yield cur
+
     def _list_schemas(self, cur: psycopg.Cursor) -> list[str]:
         cur.execute(
             "select nspname from pg_namespace "
@@ -188,12 +224,7 @@ class PgSource(DbSource):
 
     def _resolve_schema_among(self, cur: psycopg.Cursor, schemas: list[str], requested: str | None) -> str:
         """`_resolve_schema` against a schema list already fetched in this transaction."""
-        resolved = requested if requested is not None else self._default_schema(cur)
-        if resolved is None:
-            raise no_default_schema()
-        if resolved not in schemas:
-            raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
-        return resolved
+        return pick_schema(schemas, requested, lambda: self._default_schema(cur))
 
     def _readable_table_oid(self, cur: psycopg.Cursor, schema: str, table: str) -> int:
         # Resolves table to its OID iff it's a readable base table in
@@ -268,14 +299,12 @@ class PgSource(DbSource):
 
     @wrap_driver_errors(psycopg.Error)
     def list_schemas(self) -> SchemaListing:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+        with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             return SchemaListing(self._list_schemas(cur), self._default_schema(cur))
 
     @wrap_driver_errors(psycopg.Error)
     def list_tables(self, schema: str | None) -> list[TableInfo]:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+        with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved = self._resolve_schema(cur, schema)
             cur.execute(
                 "select c.relname::text, obj_description(c.oid, 'pg_class') "
@@ -290,8 +319,7 @@ class PgSource(DbSource):
 
     @wrap_driver_errors(psycopg.Error)
     def table_counts(self, schema: str | None) -> list[tuple[str, int]]:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+        with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved = self._resolve_schema(cur, schema)
             cur.execute(
                 "select c.relname::text, c.reltuples::bigint "
@@ -306,74 +334,49 @@ class PgSource(DbSource):
 
     @wrap_driver_errors(psycopg.Error)
     def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData:
-        with self._connect() as conn:
-            # psycopg snapshots adapters when the cursor is created.
-            conn.adapters.register_loader("text", _LenientTextLoader)
-            with conn.cursor() as cur:
-                cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
+        with self._cursor(opts.timeout_secs, lenient_text=True) as cur:
+            resolved_schema = self._resolve_schema(cur, schema)
+            oid = self._readable_table_oid(cur, resolved_schema, table)
 
-                resolved_schema = self._resolve_schema(cur, schema)
-                oid = self._readable_table_oid(cur, resolved_schema, table)
+            # The join route's lookup, so both routes report the same columns; its
+            # names are the live catalog's, so they also serve as the allow-list.
+            meta = self._table_meta(cur, resolved_schema, table, oid)
+            columns = [c.column_info() for c in meta.columns]
+            column_names = [c.name for c in columns]
+            sort = None
+            if opts.sort is not None:
+                if opts.sort not in column_names:
+                    raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
+                sort = opts.sort
 
-                # The join route's lookup, so both routes report the same columns; its
-                # names are the live catalog's, so they also serve as the allow-list.
-                meta = self._table_meta(cur, resolved_schema, table, oid)
-                columns = [c.column_info() for c in meta.columns]
-                column_names = [c.name for c in columns]
-                sort = None
-                if opts.sort is not None:
-                    if opts.sort not in column_names:
-                        raise NotAllowed(f"column {opts.sort!r}", kind=NotAllowedKind.COLUMN)
-                    sort = opts.sort
+            where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
 
-                where_clause, filter_values = table_where_clause(opts.filter or [], meta, _JOIN_DIALECT)
+            select_list = ", ".join(f"{_quote_ident(c.name)}::text" for c in columns)
+            order_clause = table_order_clause(meta, sort, opts.descending, _quote_ident)
+            query = (
+                f"select {select_list} from {_quote_ident(resolved_schema)}.{_quote_ident(table)}"
+                f"{where_clause}{order_clause} limit %s offset %s"
+            )
+            with _select_errors(table, sort, bool(filter_values)):
+                cur.execute(query, (*filter_values, opts.limit, opts.offset))
+            pg_rows = cur.fetchall()
+            rows = [
+                {
+                    col.name: (None if value is None else str(value))
+                    for col, value in zip(columns, row, strict=True)
+                }
+                for row in pg_rows
+            ]
 
-                select_list = ", ".join(f"{_quote_ident(c.name)}::text" for c in columns)
-                order_clause = table_order_clause(meta, sort, opts.descending, _quote_ident)
-                query = (
-                    f"select {select_list} from {_quote_ident(resolved_schema)}.{_quote_ident(table)}"
-                    f"{where_clause}{order_clause} limit %s offset %s"
-                )
-                try:
-                    cur.execute(query, (*filter_values, opts.limit, opts.offset))
-                except psycopg.errors.InsufficientPrivilege as exc:
-                    # The allow-list already rejects tables the role can't
-                    # SELECT, so a permission denied here is a residual edge;
-                    # report it as NotAllowed(NOT_READABLE) (400), not a
-                    # driver 500.
-                    raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
-                except psycopg.errors.UndefinedFunction as exc:
-                    # With a sort, an undefined function is the sort column's type
-                    # having no ordering operator (json, xml, geometric types).
-                    if sort is None:
-                        raise
-                    raise Unsortable(sort) from exc
-                except psycopg.DataError as exc:
-                    # psycopg's str dumper rejects a NUL byte client-side (no
-                    # SQLSTATE, unlike other drivers' server-side rejection);
-                    # mapped to FilterParseError, also 400, never a raw 500
-                    # (docs/adapter-decisions.md §5.4.2).
-                    if not filter_values or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
-                        raise
-                    raise FilterParseError(f"value invalid for this backend: {exc}") from exc
-                pg_rows = cur.fetchall()
-                rows = [
-                    {
-                        col.name: (None if value is None else str(value))
-                        for col, value in zip(columns, row, strict=True)
-                    }
-                    for row in pg_rows
-                ]
+            cur.execute(
+                "select reltuples::bigint from pg_class c "
+                "join pg_namespace n on n.oid = c.relnamespace "
+                "where n.nspname = %s and c.relname = %s",
+                (resolved_schema, table),
+            )
+            total_approx = one_row(cur)[0]
 
-                cur.execute(
-                    "select reltuples::bigint from pg_class c "
-                    "join pg_namespace n on n.oid = c.relnamespace "
-                    "where n.nspname = %s and c.relname = %s",
-                    (resolved_schema, table),
-                )
-                total_approx = one_row(cur)[0]
-
-                return TableData(columns=columns, rows=rows, total_approx=total_approx)
+            return TableData(columns=columns, rows=rows, total_approx=total_approx)
 
     def _table_meta(self, cur: psycopg.Cursor, schema: str, table: str, oid: int) -> TableMeta:
         """Column metadata of a table already cleared by `_readable_table_oid`, which supplies `oid`."""
@@ -409,7 +412,7 @@ class PgSource(DbSource):
                 type_name=full_type,
                 column_class=column_class(data_type, udt_schema, udt_name, is_enum),
                 compare=typed_compare(data_type),
-                key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                key=column_key(name, pk_columns, fk_columns),
                 references=fk_columns.get(name),
                 collation=collation,
                 comment=comment,
@@ -447,50 +450,34 @@ class PgSource(DbSource):
 
     @wrap_driver_errors(psycopg.Error)
     def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:
-        with self._connect() as conn:
-            conn.adapters.register_loader("text", _LenientTextLoader)
-            with conn.cursor() as cur:
-                cur.execute(f"SET LOCAL statement_timeout = '{int(opts.timeout_secs)}s'")
-                listed = self._list_schemas(cur)
-                resolved_schema = self._resolve_schema_among(cur, listed, schema)
-                refs = spec.table_refs()
-                schemas = table_schemas(refs, resolved_schema, listed)
-                metas: dict[tuple[str, str], TableMeta] = {}
-                tables = []
-                for key in zip(schemas, (name for _, name in refs), strict=True):
-                    if key not in metas:
-                        try:
-                            oid = self._readable_table_oid(cur, *key)
-                            metas[key] = self._table_meta(cur, *key, oid)
-                        except NotAllowed as e:
-                            raise unknown_join_table(e, key[1]) from None
-                    tables.append(metas[key])
-                plan = plan_join(spec, tables, opts)
+        with self._cursor(opts.timeout_secs, lenient_text=True) as cur:
+            listed = self._list_schemas(cur)
+            resolved_schema = self._resolve_schema_among(cur, listed, schema)
+            refs = spec.table_refs()
+            schemas = table_schemas(refs, resolved_schema, listed)
+            metas: dict[tuple[str, str], TableMeta] = {}
+            tables = []
+            for key in zip(schemas, (name for _, name in refs), strict=True):
+                if key not in metas:
+                    try:
+                        oid = self._readable_table_oid(cur, *key)
+                        metas[key] = self._table_meta(cur, *key, oid)
+                    except NotAllowed as e:
+                        raise unknown_join_table(e, key[1]) from None
+                tables.append(metas[key])
+            plan = plan_join(spec, tables, opts)
 
-                # The statement is built from catalog names and generated
-                # aliases only; every value is a bound parameter.
-                body, values = build_select(plan, _JOIN_DIALECT)
-                try:
-                    cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
-                except psycopg.errors.InsufficientPrivilege as exc:
-                    raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
-                except psycopg.errors.UndefinedFunction as exc:
-                    if opts.sort is None:
-                        raise
-                    raise Unsortable(opts.sort) from exc
-                except psycopg.DataError as exc:
-                    if not values or exc.sqlstate not in (None, *BAD_VALUE_SQLSTATES):
-                        raise
-                    raise FilterParseError(f"value invalid for this backend: {exc}") from exc
-                rows, has_more = plan.rows_from(
-                    cur.fetchall(), opts.limit, lambda v: None if v is None else str(v)
-                )
-                return JoinData(columns=plan.column_infos(resolved_schema), rows=rows, has_more=has_more)
+            # The statement is built from catalog names and generated
+            # aliases only; every value is a bound parameter.
+            body, values = build_select(plan, _JOIN_DIALECT)
+            with _select_errors(spec.table, opts.sort, bool(values)):
+                cur.execute(f"select {body}", (*values, opts.limit + 1, opts.offset))
+            rows, has_more = plan.rows_from(cur.fetchall(), opts.limit, lambda v: None if v is None else str(v))
+            return JoinData(columns=plan.column_infos(resolved_schema), rows=rows, has_more=has_more)
 
     @wrap_driver_errors(psycopg.Error)
     def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+        with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved_schema = self._resolve_schema(cur, schema)
             self._readable_table_oid(cur, resolved_schema, table)
             columns = self._allowed_columns(cur, resolved_schema, table)
@@ -526,8 +513,7 @@ class PgSource(DbSource):
 
     @wrap_driver_errors(psycopg.Error)
     def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+        with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved_schema = self._resolve_schema(cur, schema)
             target_oid = self._readable_table_oid(cur, resolved_schema, table)
 
@@ -580,8 +566,7 @@ class PgSource(DbSource):
 
     @wrap_driver_errors(psycopg.Error)
     def structure(self, schema: str | None, table: str) -> Structure:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL statement_timeout = '{CATALOG_TIMEOUT_SECS}s'")
+        with self._cursor(CATALOG_TIMEOUT_SECS) as cur:
             resolved_schema = self._resolve_schema(cur, schema)
             oid = self._readable_table_oid(cur, resolved_schema, table)
             out = Structure()

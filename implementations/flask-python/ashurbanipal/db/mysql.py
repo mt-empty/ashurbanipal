@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -36,6 +38,8 @@ from ..join import (
     typed_class,
 )
 from . import (
+    CATALOG_TIMEOUT_SECS,
+    UNDECODABLE,
     BadJoin,
     ColumnPair,
     ColumnRef,
@@ -47,7 +51,6 @@ from . import (
     Engine,
     FilterParseError,
     IndexInfo,
-    KeyKind,
     NotAllowed,
     NotAllowedKind,
     QueryOpts,
@@ -56,13 +59,12 @@ from . import (
     Structure,
     TableData,
     TableInfo,
+    column_key,
     group_referenced_by,
-    no_default_schema,
     one_row,
+    pick_schema,
     wrap_driver_errors,
 )
-
-CATALOG_TIMEOUT_SECS = 5
 
 _MYSQL = "mysql"
 _MARIADB = "mariadb"
@@ -112,7 +114,7 @@ def _decode_cell(value: bytes | None, encoding: str) -> str | None:
     try:
         return value.decode(encoding)
     except UnicodeDecodeError:
-        return "<undecodable>"
+        return UNDECODABLE
 
 
 def _json_path(expr: str, path: tuple[PathStep, ...], ph: str) -> tuple[str, list[str]]:
@@ -142,11 +144,18 @@ _JOIN_DIALECT = Dialect(
 _BAD_VALUE_ERRNOS = frozenset({1264, 1292, 1367, 1441, 1690})
 
 
-def _raise_if_bad_value(exc: pymysql.Error, filtered: bool) -> None:
-    """A bad value in a filtered query (a cast out of range) is the filter's
-    (`spec/protocol.md` §5.4.2)."""
-    if filtered and exc.args and exc.args[0] in _BAD_VALUE_ERRNOS:
-        raise FilterParseError(f"value invalid for this backend: {exc.args[-1]}") from exc
+@contextlib.contextmanager
+def _select_errors(table: str, filtered: bool) -> Iterator[None]:
+    """MySQL has no SELECT privilege gate, so a residual 1142 is NotAllowed; a bad
+    value in a filtered query (a cast out of range) is the filter's (`spec/protocol.md` §5.4.2)."""
+    try:
+        yield
+    except pymysql.Error as exc:
+        if exc.args and exc.args[0] == 1142:
+            raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
+        if filtered and exc.args and exc.args[0] in _BAD_VALUE_ERRNOS:
+            raise FilterParseError(f"value invalid for this backend: {exc.args[-1]}") from exc
+        raise
 
 
 def typed_compare(data_type: str) -> TypedCompare | None:
@@ -200,6 +209,16 @@ class MySqlSource(DbSource):
             raise
         return conn
 
+    @contextlib.contextmanager
+    def _operation(self) -> Iterator[pymysql.connections.Connection]:
+        """One connection and read-only transaction per operation, committed on success."""
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
     def _variant_of(self, conn: pymysql.connections.Connection) -> str:
         """Cache whether SELECT VERSION() contains MariaDB (`spec/protocol.md` §6)."""
         if self._variant is not None:
@@ -237,12 +256,7 @@ class MySqlSource(DbSource):
         self, cur: Cursor, variant: str, schemas: list[str], requested: str | None, timeout_secs: int
     ) -> str:
         """`_resolve_schema` against a schema list already fetched in this transaction."""
-        resolved = requested if requested is not None else self._default_schema(cur, variant, timeout_secs)
-        if resolved is None:
-            raise no_default_schema()
-        if resolved not in schemas:
-            raise NotAllowed(f"schema {resolved!r}", kind=NotAllowedKind.SCHEMA)
-        return resolved
+        return pick_schema(schemas, requested, lambda: self._default_schema(cur, variant, timeout_secs))
 
     def _allowed_tables(self, cur: Cursor, variant: str, schema: str, timeout_secs: int) -> list[str]:
         cur.execute(
@@ -317,23 +331,18 @@ class MySqlSource(DbSource):
 
     @wrap_driver_errors(pymysql.Error)
     def list_schemas(self) -> SchemaListing:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 listing = SchemaListing(
                     self._list_schemas(cur, variant, CATALOG_TIMEOUT_SECS),
                     self._default_schema(cur, variant, CATALOG_TIMEOUT_SECS),
                 )
-            conn.commit()
             return listing
-        finally:
-            conn.close()
 
     @wrap_driver_errors(pymysql.Error)
     def list_tables(self, schema: str | None) -> list[TableInfo]:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
@@ -349,16 +358,12 @@ class MySqlSource(DbSource):
                     (resolved,),
                 )
                 rows = cur.fetchall()
-            conn.commit()
             # Empty comments are omitted (`spec/protocol.md` §5.2).
             return [TableInfo(name=name, comment=(comment or None)) for name, comment in rows]
-        finally:
-            conn.close()
 
     @wrap_driver_errors(pymysql.Error)
     def table_counts(self, schema: str | None) -> list[tuple[str, int]]:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
@@ -374,16 +379,12 @@ class MySqlSource(DbSource):
                     (resolved,),
                 )
                 rows = cur.fetchall()
-            conn.commit()
             # NULL means no estimate yet: emit -1 (`spec/protocol.md` §5.3).
             return [(name, count if count is not None else -1) for name, count in rows]
-        finally:
-            conn.close()
 
     @wrap_driver_errors(pymysql.Error)
     def query_table(self, schema: str | None, table: str, opts: QueryOpts) -> TableData:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             timeout = opts.timeout_secs
             with conn.cursor() as cur:
@@ -415,15 +416,9 @@ class MySqlSource(DbSource):
                 )
                 conn.use_unicode = False
                 try:
-                    cur.execute(sql, (*filter_values, opts.limit, opts.offset))
-                    mysql_rows = cur.fetchall()
-                except pymysql.Error as exc:
-                    # MySQL has no SELECT privilege gate; map residual 1142
-                    # to NotAllowed(NOT_READABLE).
-                    if exc.args and exc.args[0] == 1142:
-                        raise NotAllowed(f"table {table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
-                    _raise_if_bad_value(exc, bool(filter_values))
-                    raise
+                    with _select_errors(table, bool(filter_values)):
+                        cur.execute(sql, (*filter_values, opts.limit, opts.offset))
+                        mysql_rows = cur.fetchall()
                 finally:
                     conn.use_unicode = True
                 rows = [
@@ -442,10 +437,7 @@ class MySqlSource(DbSource):
                 )
                 (count,) = one_row(cur)
                 total_approx = count if count is not None else -1
-            conn.commit()
             return TableData(columns=columns, rows=rows, total_approx=total_approx)
-        finally:
-            conn.close()
 
     def _mariadb_json_columns(
         self, cur: Cursor, variant: str, schema: str, table: str, timeout_secs: int
@@ -479,7 +471,7 @@ class MySqlSource(DbSource):
                 column_class=JSON if name in json_columns else column_class(data_type, column_type),
                 compare=None if name in json_columns else typed_compare(data_type),
                 collation=collation or None,
-                key=(KeyKind.PK if name in pk_columns else (KeyKind.FK if name in fk_columns else None)),
+                key=column_key(name, pk_columns, fk_columns),
                 references=fk_columns.get(name),
                 comment=(comment or None),
             )
@@ -510,8 +502,7 @@ class MySqlSource(DbSource):
 
     @wrap_driver_errors(pymysql.Error)
     def query_join(self, schema: str | None, spec: JoinSpec, opts: JoinOpts) -> JoinData:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             timeout = opts.timeout_secs
             with conn.cursor() as cur:
@@ -535,25 +526,17 @@ class MySqlSource(DbSource):
                 body, values = build_select(plan, _JOIN_DIALECT)
                 conn.use_unicode = False
                 try:
-                    cur.execute(_timed_select(variant, timeout, body), (*values, opts.limit + 1, opts.offset))
-                    mysql_rows = cur.fetchall()
-                except pymysql.Error as exc:
-                    if exc.args and exc.args[0] == 1142:
-                        raise NotAllowed(f"table {spec.table!r}", kind=NotAllowedKind.NOT_READABLE) from exc
-                    _raise_if_bad_value(exc, bool(values))
-                    raise
+                    with _select_errors(spec.table, bool(values)):
+                        cur.execute(_timed_select(variant, timeout, body), (*values, opts.limit + 1, opts.offset))
+                        mysql_rows = cur.fetchall()
                 finally:
                     conn.use_unicode = True
                 rows, has_more = plan.rows_from(mysql_rows, opts.limit, lambda v: _decode_cell(v, conn.encoding))
-            conn.commit()
             return JoinData(columns=plan.column_infos(resolved_schema), rows=rows, has_more=has_more)
-        finally:
-            conn.close()
 
     @wrap_driver_errors(pymysql.Error)
     def common_values(self, schema: str | None, table: str, column: str) -> list[tuple[str, float]]:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved_schema = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
@@ -563,16 +546,12 @@ class MySqlSource(DbSource):
                 columns = self._allowed_columns(cur, variant, resolved_schema, table, CATALOG_TIMEOUT_SECS)
                 if column not in columns:
                     raise NotAllowed(f"column {column!r}", kind=NotAllowedKind.COLUMN)
-            conn.commit()
             # MySQL has no portable common-value statistics (`spec/protocol.md` §5.5).
             return []
-        finally:
-            conn.close()
 
     @wrap_driver_errors(pymysql.Error)
     def referenced_by(self, schema: str | None, table: str) -> list[ReferencedBy]:
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved_schema = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
@@ -601,9 +580,6 @@ class MySqlSource(DbSource):
                     (resolved_schema, table, resolved_schema),
                 )
                 rows = cur.fetchall()
-            conn.commit()
-        finally:
-            conn.close()
 
         # Keep the referrer set inside the same allow-list every other
         # route on this backend serves from.
@@ -623,8 +599,7 @@ class MySqlSource(DbSource):
     @wrap_driver_errors(pymysql.Error)
     def structure(self, schema: str | None, table: str) -> Structure:
         out = Structure()
-        conn = self._connect()
-        try:
+        with self._operation() as conn:
             variant = self._variant_of(conn)
             with conn.cursor() as cur:
                 resolved_schema = self._resolve_schema(cur, variant, schema, CATALOG_TIMEOUT_SECS)
@@ -753,7 +728,4 @@ class MySqlSource(DbSource):
                         (resolved_schema, table),
                     )
                     out.constraints.check = [ConstraintCheck(name=n, expression=c) for n, c in cur.fetchall()]
-            conn.commit()
-        finally:
-            conn.close()
         return out

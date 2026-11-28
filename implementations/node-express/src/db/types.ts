@@ -1,5 +1,6 @@
+import { NotAllowedError } from "../errors.js";
 import type { Condition } from "../filter.js";
-import type { JoinData, JoinOpts, JoinSpec } from "../join.js";
+import type { ColMeta, JoinData, JoinOpts, JoinSpec } from "../join.js";
 
 export type KeyKind = "pk" | "fk";
 
@@ -153,6 +154,21 @@ export function findExact(haystack: string[], needle: string): string | undefine
   return haystack.find((s) => s === needle);
 }
 
+/** The catalog's spelling of an allow-listed name; anything else is NotAllowed (`spec/protocol.md` §5.2). */
+export function requireExact(allowed: string[], name: string, kind: "schema" | "table" | "column"): string {
+  const real = findExact(allowed, name);
+  if (real === undefined) throw new NotAllowedError(`${kind} "${name}"`, kind);
+  return real;
+}
+
+/** Sets a column's key and references; a PK column keeps its FK reference. */
+export function applyKeys(col: ColMeta, pkColumns: Set<string>, fkColumns: Map<string, ColumnRef>): void {
+  const references = fkColumns.get(col.name);
+  if (pkColumns.has(col.name)) col.key = "pk";
+  else if (references) col.key = "fk";
+  if (references) col.references = references;
+}
+
 /**
  * A source's browsable schemas plus the one an absent `schema` param resolves
  * to: null when the connection has no default schema, or its default is not
@@ -197,4 +213,11 @@ export function cellToJson(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (Buffer.isBuffer(value)) return value.toString("utf8");
   return "<undecodable>";
+}
+
+/** One result row keyed by column name, each cell through cellToJson. */
+export function rowToJson(row: Record<string, unknown>, names: string[]): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const name of names) out[name] = cellToJson(row[name]);
+  return out;
 }
