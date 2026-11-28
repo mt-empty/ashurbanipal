@@ -102,15 +102,6 @@ jobs:
         working-directory: implementations/flask-python
         run: uv run mypy
 
-      # Re-hash after generation: catches a build pipeline silently
-      # mangling the copy at implementations/flask-python/ashurbanipal/frontend/dbviewer.html
-      # (PORTING.md's vendoring contract, hardening checklist item 3) —
-      # embed.py itself already raises at import time on a mismatch, so
-      # importing it is the check.
-      - name: Verify vendored frontend checksum
-        working-directory: implementations/flask-python
-        run: uv run python -c "import ashurbanipal.embed"
-
       # test_filter_fixtures.py, test_config.py, test_killswitch.py and
       # test_sqlite.py need no external service; test_postgres_integration.py
       # needs DATABASE_URL (set above) and the conformance seed applied;
@@ -119,5 +110,7 @@ jobs:
         working-directory: implementations/flask-python
         run: uv run pytest -q
 
+      # Importing the built wheel re-verifies the frontend copy's sha256
+      # (PORTING.md's vendoring contract, hardening checklist item 3).
       - name: Build + import the wheel
         run: tools/check-flask-dist.sh

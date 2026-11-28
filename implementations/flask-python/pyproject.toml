@@ -63,9 +63,8 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM", "RUF", "PTH"]
 requires = ["hatchling<1.34"]
 build-backend = "hatchling.build"
 
-# The gitignored frontend copy must reach the sdist too: `uv build` builds
-# the wheel from the sdist, so a wheel-only entry ships a wheel without it.
-# tools/check-flask-dist.sh guards this.
+# Global, not per-target: `uv build` makes the wheel from the sdist, and the
+# sdist carries .gitignore, so both targets must force in the ignored page.
 [tool.hatch.build]
 artifacts = ["ashurbanipal/frontend/dbviewer.html"]
 
