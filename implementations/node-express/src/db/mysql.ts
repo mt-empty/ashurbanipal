@@ -74,6 +74,7 @@ export const JOIN_DIALECT: JoinDialect = {
   castParam: (p, target) => `CAST(${p} AS ${target})`,
   numbered: false,
   ilike: "lowered-like",
+  textBare: true,
   // Only JSON_EXTRACT takes a bound path; the CASE maps a JSON null to SQL
   // NULL, with CONVERT for MariaDB's collation check. Left uncast so the
   // utf8mb4_bin text compares case-sensitively.

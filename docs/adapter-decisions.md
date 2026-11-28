@@ -99,8 +99,10 @@ kind of defense-in-depth as MySQL/MariaDB's.
 
 ## §5.4.2 — filter operator mapping (`ILIKE`)
 
-Protocol property: `ILIKE` is case-insensitive `LIKE`, distinct from
-case-sensitive `LIKE`, for every implementation.
+Protocol property: `ILIKE` is case-insensitive `LIKE` for every
+implementation. Plain `LIKE` behaves as a `text` column does on that
+engine: case-sensitive on Postgres, ASCII case-insensitive on SQLite, and
+collation-dependent on MySQL/MariaDB.
 
 | Backend  | Mechanism | Notes |
 |----------|-----------|-------|
@@ -128,9 +130,16 @@ either behavior.
 Protocol property: a `number`, `float`, `temporal` or `time` column
 compares in its own type for every op but `LIKE`/`ILIKE`, after the value
 passes the §5.4.2 form check (skipped on SQLite); every other column
-compares its text cast, and so does `IS [NOT] NULL` on such a column:
-a Postgres composite whose fields are all NULL (`ROW(NULL, NULL)`) is
-itself NULL, yet renders as `(,)`, so the grid shows it as a value.
+compares its text cast, except a MySQL/MariaDB `utf8mb4` `text`-class
+column, which compares bare for every op so its collation decides case
+(`CAST(col AS CHAR)` would ignore case on `_bin` columns). Any other
+character set (`latin1`, `ascii`, `utf8mb3`) keeps the cast: compared bare,
+a value holding a character the column cannot store fails with error 1267,
+where the cast matches nothing (probed on MySQL 8.4 and MariaDB 11.8). Such
+a column therefore ignores case even when its collation is `_bin`
+(accepted gap). `IS [NOT] NULL` follows the same rule. The cast matters there on Postgres: a composite whose fields are all
+NULL (`ROW(NULL, NULL)`) is itself NULL, yet renders as `(,)`, so the grid
+shows it as a value.
 The column is left as it is and the bound value is converted. Each port
 picks the conversion from a fixed table keyed on the catalog type, never
 from request text.

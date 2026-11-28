@@ -373,6 +373,10 @@ type colMeta struct {
 	comment    string
 }
 
+func (c colMeta) isUtf8mb4Text() bool {
+	return c.class == classText && c.collation != nil && strings.HasPrefix(*c.collation, "utf8mb4")
+}
+
 func (c colMeta) columnInfo() ColumnInfo {
 	return ColumnInfo{
 		Name: c.name, Type: c.typeName, Class: c.class.kind, EnumType: c.class.enumType, Collation: c.collationName(),
@@ -777,6 +781,10 @@ type joinDialect struct {
 	castParam func(placeholder, target string) string
 	numbered  bool // $n placeholders (Postgres) instead of ?
 	ilike     ilikeStyle
+	// textBare compares a utf8mb4 text-class column as stored, so its own
+	// collation decides case; any other charset keeps the cast, since a value
+	// it cannot store would be a database error (spec/protocol.md §5.4.2).
+	textBare bool
 	// jsonPath renders the text at a validated path inside a JSON column;
 	// bind records each value and returns its placeholder.
 	jsonPath func(expr string, path []PathStep, bind func(string) string) string
@@ -863,7 +871,7 @@ func filterSQL(terms []filterTerm, d joinDialect) (string, []string) {
 		switch {
 		case c.Path != nil:
 			lhs = d.jsonPath(t.expr, c.Path, bind)
-		case typed != nil:
+		case typed != nil, d.textBare && t.col.isUtf8mb4Text():
 			lhs = t.expr
 		default:
 			lhs = d.castText(t.expr)

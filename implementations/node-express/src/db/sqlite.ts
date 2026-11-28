@@ -190,6 +190,7 @@ export const JOIN_DIALECT: JoinDialect = {
   castParam: (p, target) => `CAST(${p} AS ${target})`,
   numbered: false,
   ilike: "like",
+  textBare: false,
   // SQLite does not enforce a declared JSON type and json_extract raises on a
   // cell that is not JSON, hence json_valid. json_extract returns 1/0 for
   // booleans and an INTEGER for a number, hence the json_type branch and the CAST.

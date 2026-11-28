@@ -81,7 +81,7 @@ source = SqliteSource(path="app.db")
 
 SQLite needs a real file. `:memory:` does not work, because each request opens a new connection and sees an empty database. To open the file read-only, pass a URI: `SqliteSource(path="file:app.db?mode=ro")`.
 
-Column comments and common-value stats are empty on MySQL and SQLite.
+Column comments are empty on SQLite, and common-value stats are empty on MySQL and SQLite.
 
 ## More than one database
 

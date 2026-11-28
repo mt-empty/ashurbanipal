@@ -272,6 +272,7 @@ const DIALECT: Dialect = Dialect {
     cast_param,
     numbered: false,
     ilike: IlikeStyle::Like,
+    text_bare: false,
     json_path,
 };
 

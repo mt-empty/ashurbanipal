@@ -7,7 +7,7 @@
       "conditions": [{"column": "status", "op": "=", "value": "completed"}],
       "expect": {
         "postgres": {"where": "(\"status\"::text = $3)", "values": ["completed"]},
-        "mysql": {"where": "(CAST(`status` AS CHAR) = ?)", "values": ["completed"]},
+        "mysql": {"where": "(`status` = ?)", "values": ["completed"]},
         "sqlite": {"where": "(CAST(\"status\" AS TEXT) = ?)", "values": ["completed"]}
       }
     },
@@ -27,7 +27,7 @@
       "conditions": [{"column": "status", "op": "=", "value": "completed"}, {"logic": "OR", "column": "status", "op": "=", "value": "pending"}],
       "expect": {
         "postgres": {"where": "(\"status\"::text = $3) OR (\"status\"::text = $4)", "values": ["completed", "pending"]},
-        "mysql": {"where": "(CAST(`status` AS CHAR) = ?) OR (CAST(`status` AS CHAR) = ?)", "values": ["completed", "pending"]},
+        "mysql": {"where": "(`status` = ?) OR (`status` = ?)", "values": ["completed", "pending"]},
         "sqlite": {"where": "(CAST(\"status\" AS TEXT) = ?) OR (CAST(\"status\" AS TEXT) = ?)", "values": ["completed", "pending"]}
       }
     },
@@ -41,7 +41,7 @@
       ],
       "expect": {
         "postgres": {"where": "(\"category\"::text = $3) AND (\"created_on\" > $4::date) OR (\"sku\"::text = $5)", "values": ["electronics", "2016-01-01", "TOYS-1001"]},
-        "mysql": {"where": "(CAST(`category` AS CHAR) = ?) AND (`created_on` > ?) OR (CAST(`sku` AS CHAR) = ?)", "values": ["electronics", "2016-01-01", "TOYS-1001"]},
+        "mysql": {"where": "(`category` = ?) AND (`created_on` > ?) OR (`sku` = ?)", "values": ["electronics", "2016-01-01", "TOYS-1001"]},
         "sqlite": {
           "where": "(CAST(\"category\" AS TEXT) = ?) AND (CAST(\"created_on\" AS TEXT) > ?) OR (CAST(\"sku\" AS TEXT) = ?)",
           "values": ["electronics", "2016-01-01", "TOYS-1001"]
@@ -54,7 +54,7 @@
       "conditions": [{"not": true, "column": "status", "op": "=", "value": "completed"}],
       "expect": {
         "postgres": {"where": "(NOT (\"status\"::text = $3))", "values": ["completed"]},
-        "mysql": {"where": "(NOT (CAST(`status` AS CHAR) = ?))", "values": ["completed"]},
+        "mysql": {"where": "(NOT (`status` = ?))", "values": ["completed"]},
         "sqlite": {"where": "(NOT (CAST(\"status\" AS TEXT) = ?))", "values": ["completed"]}
       }
     },
@@ -134,7 +134,7 @@
       "conditions": [{"column": "full_name", "op": "LIKE", "value": "%Dach%"}],
       "expect": {
         "postgres": {"where": "(\"full_name\"::text LIKE $3)", "values": ["%Dach%"]},
-        "mysql": {"where": "(CAST(`full_name` AS CHAR) LIKE ?)", "values": ["%Dach%"]},
+        "mysql": {"where": "(`full_name` LIKE ?)", "values": ["%Dach%"]},
         "sqlite": {"where": "(CAST(\"full_name\" AS TEXT) LIKE ?)", "values": ["%Dach%"]}
       }
     },
@@ -144,7 +144,7 @@
       "conditions": [{"column": "full_name", "op": "ILIKE", "value": "%dach%"}],
       "expect": {
         "postgres": {"where": "(\"full_name\"::text ILIKE $3)", "values": ["%dach%"]},
-        "mysql": {"where": "(LOWER(CAST(`full_name` AS CHAR)) LIKE LOWER(?))", "values": ["%dach%"]},
+        "mysql": {"where": "(LOWER(`full_name`) LIKE LOWER(?))", "values": ["%dach%"]},
         "sqlite": {"where": "(CAST(\"full_name\" AS TEXT) LIKE ?)", "values": ["%dach%"]}
       }
     },
@@ -171,7 +171,7 @@
       "conditions": [{"column": "status", "op": "=", "value": "'; DROP TABLE users; --"}],
       "expect": {
         "postgres": {"where": "(\"status\"::text = $3)", "values": ["'; DROP TABLE users; --"]},
-        "mysql": {"where": "(CAST(`status` AS CHAR) = ?)", "values": ["'; DROP TABLE users; --"]},
+        "mysql": {"where": "(`status` = ?)", "values": ["'; DROP TABLE users; --"]},
         "sqlite": {"where": "(CAST(\"status\" AS TEXT) = ?)", "values": ["'; DROP TABLE users; --"]}
       }
     },
@@ -181,7 +181,7 @@
       "conditions": [{"column": "email", "op": "=", "value": ""}],
       "expect": {
         "postgres": {"where": "(\"email\"::text = $3)", "values": [""]},
-        "mysql": {"where": "(CAST(`email` AS CHAR) = ?)", "values": [""]},
+        "mysql": {"where": "(`email` = ?)", "values": [""]},
         "sqlite": {"where": "(CAST(\"email\" AS TEXT) = ?)", "values": [""]}
       }
     },
@@ -297,7 +297,7 @@
       "conditions": [{"column": "sku", "op": "IN", "value": ["a", "b"]}],
       "expect": {
         "postgres": {"where": "(\"sku\"::text IN ($3, $4))", "values": ["a", "b"]},
-        "mysql": {"where": "(CAST(`sku` AS CHAR) IN (?, ?))", "values": ["a", "b"]},
+        "mysql": {"where": "(`sku` IN (?, ?))", "values": ["a", "b"]},
         "sqlite": {"where": "(CAST(\"sku\" AS TEXT) IN (?, ?))", "values": ["a", "b"]}
       }
     },
@@ -307,7 +307,7 @@
       "conditions": [{"not": true, "column": "status", "op": "IN", "value": ["pending"]}],
       "expect": {
         "postgres": {"where": "(NOT (\"status\"::text IN ($3)))", "values": ["pending"]},
-        "mysql": {"where": "(NOT (CAST(`status` AS CHAR) IN (?)))", "values": ["pending"]},
+        "mysql": {"where": "(NOT (`status` IN (?)))", "values": ["pending"]},
         "sqlite": {"where": "(NOT (CAST(\"status\" AS TEXT) IN (?)))", "values": ["pending"]}
       }
     },
@@ -317,7 +317,7 @@
       "conditions": [{"column": "price", "op": "BETWEEN", "value": ["10", "20.5"]}, {"logic": "AND", "column": "sku", "op": "=", "value": "x"}],
       "expect": {
         "postgres": {"where": "(\"price\" BETWEEN $3::numeric AND $4::numeric) AND (\"sku\"::text = $5)", "values": ["10", "20.5", "x"]},
-        "mysql": {"where": "(`price` BETWEEN CAST(? AS DECIMAL(65,30)) AND CAST(? AS DECIMAL(65,30))) AND (CAST(`sku` AS CHAR) = ?)", "values": ["10", "20.5", "x"]},
+        "mysql": {"where": "(`price` BETWEEN CAST(? AS DECIMAL(65,30)) AND CAST(? AS DECIMAL(65,30))) AND (`sku` = ?)", "values": ["10", "20.5", "x"]},
         "sqlite": {"where": "(\"price\" BETWEEN ? AND ?) AND (CAST(\"sku\" AS TEXT) = ?)", "values": ["10", "20.5", "x"]}
       }
     },

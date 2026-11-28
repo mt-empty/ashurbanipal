@@ -138,6 +138,7 @@ _JOIN_DIALECT = Dialect(
     cast_param=lambda ph, target: f"CAST({ph} AS {target})",
     placeholder="%s",
     ilike="lowered-like",
+    text_bare=True,
     json_path=_json_path,
 )
 

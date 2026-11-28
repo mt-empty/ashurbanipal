@@ -1103,7 +1103,9 @@ components:
             parameter. A number, float, temporal or time column compares
             in its own type (except LIKE / ILIKE), after the value is
             checked against that class's form; every other column
-            compares as text (spec/protocol.md §5.4.2).
+            compares as text, except that a MySQL/MariaDB utf8mb4 text
+            column compares bare, so its collation decides case
+            (spec/protocol.md §5.4.2).
       # Listed after `properties` so the op enum above stays the first one
       # tools/check-frontend-api-reference.sh finds. No maxItems on IN's
       # 1000-item cap: a generator would build a URL that the HTTP layer
