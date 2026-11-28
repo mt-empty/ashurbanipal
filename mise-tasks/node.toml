@@ -30,6 +30,12 @@ run = "pnpm test"
 dir = "implementations/node-express"
 depends = ["node:install"]
 
+["node:test-props-deep"]
+description = "fast-check properties in test/ at 20000 runs each (FC_RUNS overrides); on demand, not in check or CI"
+run = "FC_RUNS=${FC_RUNS:-20000} pnpm exec vitest run --testTimeout=0 property"
+dir = "implementations/node-express"
+depends = ["node:install"]
+
 ["node:demo"]
 description = "host demo app at http://localhost:4000/__ashurbanipal (DB_BACKEND selects postgres|sqlite|mysql)"
 run = "pnpm run demo"

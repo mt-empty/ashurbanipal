@@ -144,6 +144,8 @@ mise run frontend:test-e2e-spec tests/<name>.spec.ts   # rebuild + sync, then on
 mise run frontend:test-e2e-quick         # rebuild + sync, then the whole suite on Chromium + Firefox
 mise run frontend:test-e2e               # full three-browser suite against axum's vendored dbviewer.html
 mise run frontend:test-e2e-coverage      # Chromium e2e run with line/branch/function coverage per frontend/src file (HTML report)
+mise run frontend:test-props-deep        # fast-check properties at 20000 cases each; FC_SEED/FC_PATH replay a failure; not in CI
+mise run node:test-props-deep            # same, for node-express's filter/join validation properties
 mise run frontend:perf                   # start-up timing experiment under simulated network/server delay (tools/e2e-tests/perf/README.md); not in CI
 ```
 
