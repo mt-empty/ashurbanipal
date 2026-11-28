@@ -8376,9 +8376,15 @@ function updatePager(data) {
 }
 
 // src/bootstrap/controller.ts
-function setTableBusy(busy) {
-  if (busy) tableEl.setAttribute("aria-busy", "true");
-  else tableEl.removeAttribute("aria-busy");
+var busyHolds = 0;
+function holdBusy() {
+  if (busyHolds++ === 0) tableEl.setAttribute("aria-busy", "true");
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--busyHolds === 0) tableEl.removeAttribute("aria-busy");
+  };
 }
 var inFlightFetches = 0;
 var NEXT_PAGE_TTL_MS = 3e4;
@@ -8452,18 +8458,18 @@ async function fetchViewData(req, auto) {
   }
   if (inFlightFetches++ === 0) {
     setFetching(true);
-    setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
+  const releaseBusy = holdBusy();
   if (table !== null) setTableChipLoading(table, true);
   try {
     return await api(await dataPath(view, params));
   } finally {
     if (table !== null) setTableChipLoading(table, false);
+    releaseBusy();
     if (--inFlightFetches === 0) {
       clearTimeout(slowTimer);
       setSlow(false);
-      setTableBusy(false);
       setFetching(false);
     }
   }
@@ -8581,9 +8587,12 @@ async function runLoad({
     syncGridLock();
     restoreTableFocus(focusCapture);
   };
-  setTableBusy(true);
-  await viewTransition(renderTable);
-  setTableBusy(false);
+  const releaseBusy = holdBusy();
+  try {
+    await viewTransition(renderTable);
+  } finally {
+    releaseBusy();
+  }
   if (superseded()) return;
   updatePager(data);
   markTiming("rows-rendered", reason);

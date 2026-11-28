@@ -53,17 +53,24 @@ import { captureTableFocus, restoreTableFocus, tableEl } from "./table-focus.js"
 // would re-form a cycle through the modules it imports below) — they call
 // loadData via reload.ts, which main.ts wires to the export here.
 
-// aria-busy is held by two independent things — an in-flight fetch and an
-// in-progress view transition — so it is set and cleared through one place.
-function setTableBusy(busy: boolean): void {
-  if (busy) tableEl.setAttribute("aria-busy", "true");
-  else tableEl.removeAttribute("aria-busy");
+// aria-busy is held by two independent things — in-flight fetches and an in-progress
+// view transition — so each takes a hold, and the table is busy while any hold is live.
+// Releasing in a `finally` keeps a failed fetch or a throwing render from leaving it set.
+let busyHolds = 0;
+function holdBusy(): () => void {
+  if (busyHolds++ === 0) tableEl.setAttribute("aria-busy", "true");
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--busyHolds === 0) tableEl.removeAttribute("aria-busy");
+  };
 }
 
 // Reference-counted, not a plain boolean: fetchViewData() can be in
 // flight more than once (switching views again before the previous fetch
 // resolves), and a plain true/false pair would let the first fetch to
-// finish clear aria-busy/#status while another is still running.
+// finish clear the load bar and #status while another is still running.
 let inFlightFetches = 0;
 
 // Someone paging is likely to page on, so the page after the one shown is asked
@@ -166,18 +173,18 @@ async function fetchViewData(req: ViewRequest, auto: boolean): Promise<ViewData>
   }
   if (inFlightFetches++ === 0) {
     setFetching(true);
-    setTableBusy(true);
     slowTimer = setTimeout(() => setSlow(true, !auto), LOADING_DELAY_MS);
   }
+  const releaseBusy = holdBusy();
   if (table !== null) setTableChipLoading(table, true);
   try {
     return await api<ViewData>(await dataPath(view, params));
   } finally {
     if (table !== null) setTableChipLoading(table, false);
+    releaseBusy();
     if (--inFlightFetches === 0) {
       clearTimeout(slowTimer);
       setSlow(false);
-      setTableBusy(false);
       setFetching(false);
     }
   }
@@ -331,9 +338,12 @@ async function runLoad({
   // updated. Holding aria-busy across the callback closes that window;
   // waitForIdle's own animation-poll only proves a transition isn't
   // *currently* running, not that one has already happened.
-  setTableBusy(true);
-  await viewTransition(renderTable);
-  setTableBusy(false);
+  const releaseBusy = holdBusy();
+  try {
+    await viewTransition(renderTable);
+  } finally {
+    releaseBusy();
+  }
   // The await above yields; a table switch during the transition supersedes
   // this load, and its pager/#status must not overwrite the newer one's.
   if (superseded()) return;
