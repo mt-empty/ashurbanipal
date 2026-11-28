@@ -53,10 +53,18 @@ for (const c of cases) {
 // parser must accept back unchanged — the quoting shapes most likely to
 // silently diverge (spec/filter-dsl.md §6).
 test("quoteFilterValue output round-trips through the parser unchanged", () => {
-  const values = ["it's fine", "AND", "", "NOT", "% smith%", "plain"];
+  const values = ["it's fine", "AND", "", "NOT", "% smith%", "plain", "NULL", "null"];
   for (const v of values) {
     const parsed = parseFilterDsl(`col = ${quoteFilterValue(v)}`);
     assert.equal(parsed[0].value, v);
+  }
+});
+
+// The filter box's value suggestions quote both BETWEEN bounds with quoteFilterValue.
+test("quoteFilterValue output round-trips as a BETWEEN bound, NULL included", () => {
+  for (const v of ["NULL", "null", "it's", "AND", "", "plain"]) {
+    const parsed = parseFilterDsl(`col BETWEEN ${quoteFilterValue(v)} AND ${quoteFilterValue(v)}`);
+    assert.deepEqual(parsed[0].value, [v, v]);
   }
 });
 

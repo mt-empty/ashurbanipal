@@ -382,14 +382,15 @@ export function tryParseFilterDsl(input: string, aliases?: readonly string[]): F
 // without reshaping.
 const quoted = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
+// NULL is quoted too: a list item or a BETWEEN bound refuses it bare, and quoted it means the same string everywhere.
 export function quoteFilterValue(value: string): string {
-  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value)) return value;
+  if (value !== "" && !/[\s']/.test(value) && !RESERVED_WORD_RE.test(value) && !/^NULL$/i.test(value)) return value;
   return quoted(value);
 }
 
-// An IN list item also stops at , ( and ), and a bare NULL is rejected there.
+// An IN list item also stops at , ( and ).
 export function quoteListItem(value: string): string {
-  return /[,()]/.test(value) || /^NULL$/i.test(value) ? quoted(value) : quoteFilterValue(value);
+  return /[,()]/.test(value) ? quoted(value) : quoteFilterValue(value);
 }
 
 // value is omitted for a valueless predicate (IS NULL). quoteFilterValue

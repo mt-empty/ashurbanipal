@@ -345,7 +345,8 @@ They build text through `quoteFilterValue()`, `filterClause()`,
 `eqClause()`, `filterClauses()`, `pathText()` and `pathEqClause()` in
 `frontend/src/lib/filter-dsl.ts`,
 which implement §2's quoting notes — bare when safe, single-quoted with
-`''`-escaping otherwise, exact-match `AND`/`OR`/`NOT` forced to quote.
+`''`-escaping otherwise, exact-match `AND`/`OR`/`NOT` forced to quote, and
+`NULL` too, since a list item or a `BETWEEN` bound refuses it bare.
 They emit only `column = value` and, for a null cell, `column IS NULL`;
 the JSON tree's leaves emit the same with a path (`column->key->0 = value`),
 and `pathText()` returns nothing for a key §2 can't write.
