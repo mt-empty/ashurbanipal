@@ -1678,7 +1678,14 @@ function parseFilterDsl(input2, aliases) {
     if (name === "") throw err("a quoted name can't be empty", start);
     return name;
   };
-  const parseNamePart = () => peek() === '"' ? parseQuotedName() : parseName();
+  const parseNamePart = () => {
+    if (peek() === '"') return parseQuotedName();
+    const start = pos;
+    const name = parseName();
+    if (/^NOT$/i.test(name))
+      throw err(`bare ${name} is always a keyword; quote it to use it as a column: "${name}"`, start);
+    return name;
+  };
   const parseColumnName = () => {
     const start = pos;
     const first = parseNamePart();

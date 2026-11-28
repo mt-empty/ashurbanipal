@@ -825,6 +825,22 @@
       ]
     },
     {
+      "name": "V56",
+      "input": "o.\"not\" = 1",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect": [
+        {
+          "column": "not",
+          "op": "=",
+          "value": "1",
+          "join": 0
+        }
+      ]
+    },
+    {
       "name": "R1",
       "input": "",
       "expect_error": {
@@ -1183,6 +1199,24 @@
       "input": "\"a\".b = 1",
       "expect_error": {
         "position": 0
+      }
+    },
+    {
+      "name": "R56",
+      "input": "NOT NOT != 0",
+      "expect_error": {
+        "position": 4
+      }
+    },
+    {
+      "name": "R57",
+      "input": "o.not = 1",
+      "aliases": [
+        "o",
+        "u"
+      ],
+      "expect_error": {
+        "position": 2
       }
     },
     {

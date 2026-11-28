@@ -142,7 +142,15 @@ export function parseFilterDsl(input: string, aliases?: readonly string[]): Filt
     if (name === "") throw err("a quoted name can't be empty", start);
     return name;
   };
-  const parseNamePart = (): string => (peek() === '"' ? parseQuotedName() : parseName());
+  // A bare NOT is the condition prefix wherever a column could start, so it is never a column.
+  const parseNamePart = (): string => {
+    if (peek() === '"') return parseQuotedName();
+    const start = pos;
+    const name = parseName();
+    if (/^NOT$/i.test(name))
+      throw err(`bare ${name} is always a keyword; quote it to use it as a column: "${name}"`, start);
+    return name;
+  };
   const parseColumnName = (): ColumnRef => {
     const start = pos;
     const first = parseNamePart();

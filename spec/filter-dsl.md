@@ -110,7 +110,10 @@ Notes:
 - **`NOT` only appears where a `condition` can start** — the very
   beginning of the filter, or immediately after `AND`/`OR`. It's
   zero-or-one (`[ "NOT" , ws ]`), not recursive: `NOT NOT status = active`
-  is a parse error, not a double negation that cancels out. There's no
+  is a parse error, not a double negation that cancels out. For the same
+  reason a bare `NOT` is never a column name, after a qualifier too
+  (`NOT NOT != 0` and `o.not = 1` are parse errors); a column named `not`
+  is written `"not"`. There's no
   mid-predicate `NOT` (`status NOT = active`, `email NOT LIKE 'x'`) — the
   prefix form covers every predicate kind uniformly. The exceptions are
   `NOT IN` and `NOT BETWEEN`, written the SQL way; each means exactly the
@@ -268,6 +271,7 @@ fixtures, not this table.)
 | V53 | `"unit-price"->k = 1` | a quoted column with a path: `(unit-price, ["k"], =, "1")` |
 | V54 | `"o"."unit price" = 1` with aliases `[o, u]` | quoted alias and column: `(join 0, unit price, =, "1")` |
 | V55 | `"unit price" = 1` with aliases `[o, u]` | a quoted name with no `.` is a column of position 0 |
+| V56 | `o."not" = 1` with aliases `[o, u]` | a quoted `not` after a qualifier: `(join 0, not, =, "1")` |
 
 ### Rejected (parse errors)
 
@@ -328,6 +332,8 @@ fixtures, not this table.)
 | R53 | `"open = 1` | unterminated quoted name |
 | R54 | `"a" .b = 1` | no whitespace before the `.` |
 | R55 | `"a".b = 1` | a qualified column outside a join view, quoted or not |
+| R56 | `NOT NOT != 0` | a bare `NOT` is never a column, so this is `NOT NOT`, not a negated column `NOT` |
+| R57 | `o.not = 1` with aliases `[o, u]` | a bare `not` after a qualifier |
 
 ### Adversarial (must parse *or* reject safely — never reach SQL text)
 
