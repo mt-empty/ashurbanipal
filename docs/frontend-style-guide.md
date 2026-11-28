@@ -176,6 +176,11 @@ misplaced import shows up as a wrong-looking path.
   parser is the current example — gets a `node --test` unit in
   `frontend/test/` (`mise run frontend:test-unit`), driven by the same
   `spec/fixtures/` table the conformance runner uses where one exists.
+  Its fast-check properties go in `<module>.property.test.ts`, with shared
+  generators in `frontend/test/arbitraries/` and the run config in
+  `frontend/test/support/property.ts`. A failure prints a seed and path:
+  `FC_SEED=… FC_PATH=…` replays it, and `mise run frontend:test-props-deep`
+  runs every property at 20000 cases.
   Anything that touches the DOM or observable behaviour stays in the
   Playwright suite (`docs/e2e-testing-guidelines.md`). Do not add a
   `window.*` test hook to reach otherwise-sealed module scope — extract the

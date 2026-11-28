@@ -20,6 +20,7 @@
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "esbuild": "^0.28.2",
+    "fast-check": "^4.11.0",
     "typescript": "^7.0.2"
   }
 }

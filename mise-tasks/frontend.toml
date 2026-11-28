@@ -48,6 +48,12 @@ run = "pnpm run test"
 dir = "frontend"
 depends = ["frontend:install"]
 
+["frontend:test-props-deep"]
+description = "fast-check properties in frontend/test/ at 20000 runs each (FC_RUNS overrides); on demand, not in check or CI"
+run = "FC_RUNS=${FC_RUNS:-20000} node --test 'test/**/*.property.test.ts'"
+dir = "frontend"
+depends = ["frontend:install"]
+
 ["frontend:lint"]
 description = "biome check over frontend/src/ (format + recommended lint; see frontend/biome.json)"
 run = "pnpm run lint"
