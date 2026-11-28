@@ -35,6 +35,8 @@ export function scanJson(text: string): Doc | null {
     let escaped = false;
     i++;
     while (i < text.length && text[i] !== '"') {
+      // JSON forbids a raw U+0000–U+001F inside a string; JSON.parse refuses it too.
+      if (text[i] < " ") throw new ScanError();
       if (text[i] === "\\") escaped = true;
       i += text[i] === "\\" ? 2 : 1;
     }

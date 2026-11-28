@@ -11,7 +11,20 @@ const doc = (text: string): Doc => {
 test("scanJson accepts JSON and refuses anything else", () => {
   for (const ok of ['{"a": 1}', "[]", '"s"', "-1.5e3", " true ", "null", '{"k\\"q": "\\u00fc"}'])
     assert.ok(scanJson(ok), ok);
-  for (const bad of ["", "{", '{"a" 1}', "[1,]", "tru", "01", '"open', "1 2", "not json"])
+  for (const bad of [
+    "",
+    "{",
+    '{"a" 1}',
+    "[1,]",
+    "tru",
+    "01",
+    '"open',
+    "1 2",
+    "not json",
+    '"a\tb"',
+    '{"k\n": 1}',
+    '"\u0001"',
+  ])
     assert.equal(scanJson(bad), null, bad);
 });
 
